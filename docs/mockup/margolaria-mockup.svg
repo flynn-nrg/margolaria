@@ -1,0 +1,529 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000">
+<defs>
+<radialGradient id="copper" cx="38%" cy="32%" r="75%">
+  <stop offset="0" stop-color="#ffe2c4"/><stop offset="0.12" stop-color="#f0a46e"/>
+  <stop offset="0.45" stop-color="#b8673a"/><stop offset="0.8" stop-color="#5a2a14"/>
+  <stop offset="1" stop-color="#2a120a"/></radialGradient>
+<radialGradient id="rough" cx="40%" cy="35%" r="75%">
+  <stop offset="0" stop-color="#cfcfcf"/><stop offset="0.6" stop-color="#6d6d6d"/><stop offset="1" stop-color="#2e2e2e"/></radialGradient>
+<linearGradient id="albedo" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#d7905d"/><stop offset="0.5" stop-color="#a65a30"/><stop offset="1" stop-color="#d48b57"/></linearGradient>
+<linearGradient id="normal" x1="0" y1="0" x2="1" y2="0">
+  <stop offset="0" stop-color="#7f7ff5"/><stop offset="0.5" stop-color="#8a86ff"/><stop offset="1" stop-color="#7b8af0"/></linearGradient>
+<linearGradient id="uv" x1="0" y1="1" x2="1" y2="0">
+  <stop offset="0" stop-color="#000"/><stop offset="1" stop-color="#e0e030"/></linearGradient>
+<linearGradient id="vpbg" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#3a3d44"/><stop offset="0.62" stop-color="#26272b"/><stop offset="1" stop-color="#151517"/></linearGradient>
+<radialGradient id="shadow" cx="50%" cy="50%" r="50%">
+  <stop offset="0" stop-color="#000" stop-opacity="0.6"/><stop offset="1" stop-color="#000" stop-opacity="0"/></radialGradient>
+<radialGradient id="spec" cx="50%" cy="50%" r="50%">
+  <stop offset="0" stop-color="#fff" stop-opacity="0.85"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+  <circle cx="1" cy="1" r="1" fill="#2c2c30"/></pattern>
+<pattern id="brushed" width="64" height="3" patternUnits="userSpaceOnUse">
+  <rect width="64" height="1" fill="#ffffff" opacity="0.06"/></pattern>
+<filter id="noiseF" x="0" y="0" width="100%" height="100%">
+  <feTurbulence type="fractalNoise" baseFrequency="0.08 0.6" numOctaves="3" seed="4"/>
+  <feColorMatrix type="saturate" values="0"/></filter>
+<filter id="drop" x="-10%" y="-10%" width="130%" height="140%">
+  <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000" flood-opacity="0.45"/></filter>
+<clipPath id="vpclip"><rect x="1151" y="53" width="449" height="347"/></clipPath>
+<clipPath id="graphclip"><rect x="231" y="85" width="918" height="634"/></clipPath>
+</defs>
+<rect x="0" y="0" width="1600" height="1000" rx="12" fill="#1c1c1e" />
+<rect x="0" y="0" width="1600" height="52" rx="12" fill="#2b2b2e" />
+<rect x="0" y="30" width="1600" height="22" rx="0" fill="#2b2b2e" />
+<line x1="0" y1="52" x2="1600" y2="52" stroke="#3a3a3e" stroke-width="1" />
+<circle cx="22" cy="26" r="6.5" fill="#ff5f57"/>
+<circle cx="42" cy="26" r="6.5" fill="#febc2e"/>
+<circle cx="62" cy="26" r="6.5" fill="#28c840"/>
+<rect x="92" y="17" width="20" height="16" rx="3" fill="none" stroke="#9a9aa0" stroke-width="1.4" />
+<line x1="99" y1="17" x2="99" y2="33" stroke="#9a9aa0" stroke-width="1.4" />
+<text x="130" y="24" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" fill="#e8e8ea" font-weight="bold" text-anchor="start" >copper_set.mtlx</text>
+<text x="130" y="41" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >Edited · MaterialX 1.39</text>
+<rect x="620" y="13" width="246" height="26" rx="6" fill="#3a3a3e" />
+<rect x="622" y="15" width="80" height="22" rx="5" fill="#5a5a60" />
+<text x="662" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="middle" >Graph</text>
+<text x="744" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="middle" >Split</text>
+<text x="826" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="middle" >Text</text>
+<rect x="930" y="13" width="96" height="26" rx="6" fill="#3a3a3e" />
+<circle cx="944" cy="26" r="4.5" fill="#4cc38a"/>
+<text x="956" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >Valid</text>
+<rect x="1036" y="13" width="186" height="26" rx="6" fill="#3a3a3e" />
+<text x="1048" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >Preview: Storm · Metal</text>
+<text x="1208" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▾</text>
+<rect x="1232" y="13" width="110" height="26" rx="6" fill="#3a3a3e" />
+<text x="1244" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >Target: MSL</text>
+<text x="1328" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▾</text>
+<rect x="1352" y="13" width="92" height="26" rx="6" fill="#3a3a3e" />
+<text x="1364" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >Export</text>
+<text x="1430" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▾</text>
+<rect x="1456" y="13" width="32" height="26" rx="6" fill="#3a3a3e" />
+<text x="1472" y="31" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="17" fill="#e8e8ea" font-weight="normal" text-anchor="middle" >+</text>
+<rect x="1498" y="13" width="32" height="26" rx="6" fill="#3a3a3e" />
+<rect x="1506" y="19" width="16" height="14" rx="2" fill="none" stroke="#9a9aa0" stroke-width="1.4" />
+<line x1="1517" y1="19" x2="1517" y2="33" stroke="#9a9aa0" stroke-width="1.4" />
+<rect x="1540" y="13" width="44" height="26" rx="6" fill="#3a3a3e" />
+<text x="1562" y="30" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >⌘K</text>
+<rect x="0" y="53" width="230" height="919" rx="0" fill="#232326" />
+<line x1="230" y1="53" x2="230" y2="972" stroke="#3a3a3e" stroke-width="1" />
+<rect x="12" y="64" width="206" height="26" rx="6" fill="#2e2e32" />
+<rect x="14" y="66" width="100" height="22" rx="5" fill="#4a4a50" />
+<text x="64" y="81" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="middle" >Document</text>
+<text x="166" y="81" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Library</text>
+<text x="16" y="116" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">MATERIALS</text>
+<rect x="8" y="124" width="214" height="22" rx="5" fill="#2f5fb3" />
+<rect x="20" y="129" width="10" height="10" rx="2" fill="#c58af9" />
+<text x="38" y="138" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >M_BrushedCopper</text>
+<text x="214" y="138" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#c9d8ff" font-weight="normal" text-anchor="end" >open_pbr</text>
+<rect x="20" y="153" width="10" height="10" rx="2" fill="#c58af9" />
+<text x="38" y="162" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >M_Rubber</text>
+<text x="214" y="162" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >std_surface</text>
+<rect x="20" y="177" width="10" height="10" rx="2" fill="#c58af9" />
+<text x="38" y="186" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >M_FrostedGlass</text>
+<text x="214" y="186" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >open_pbr</text>
+<circle cx="142.60000000000002" cy="182" r="4" fill="#f0b429"/>
+<text x="16" y="218" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">NODE GRAPHS</text>
+<rect x="20" y="231" width="10" height="10" rx="2" fill="#5f6b80" />
+<text x="38" y="240" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >NG_copper</text>
+<rect x="20" y="255" width="10" height="10" rx="2" fill="#5f6b80" />
+<text x="38" y="264" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >NG_scratches</text>
+<text x="16" y="296" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">LOOKS &amp; ASSIGNMENTS</text>
+<rect x="20" y="309" width="10" height="10" rx="2" fill="#4f7f6b" />
+<text x="38" y="318" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >look_default</text>
+<text x="214" y="318" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >3 assigns</text>
+<rect x="20" y="333" width="10" height="10" rx="2" fill="#4f7f6b" />
+<text x="38" y="342" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >look_aged</text>
+<text x="214" y="342" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >3 assigns</text>
+<text x="16" y="374" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">CUSTOM DEFINITIONS</text>
+<rect x="20" y="387" width="10" height="10" rx="2" fill="#8a6f3a" />
+<text x="38" y="396" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >ND_brushed_metal</text>
+<text x="214" y="396" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >nodedef</text>
+<line x1="12" y1="418" x2="218" y2="418" stroke="#3a3a3e" stroke-width="1" />
+<text x="16" y="436" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">NODE LIBRARY</text>
+<rect x="12" y="452" width="206" height="26" rx="6" fill="#2e2e32" />
+<text x="26" y="469" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="#9a9aa0" font-weight="normal" text-anchor="start" >⌕</text>
+<text x="42" y="469" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#6a6a70" font-weight="normal" text-anchor="start" >Search nodes…</text>
+<text x="206" y="469" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >Tab</text>
+<text x="18" y="498" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▾</text>
+<text x="32" y="498" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="bold" text-anchor="start" >PBR / Surface</text>
+<text x="214" y="498" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >9</text>
+<rect x="36" y="511" width="10" height="10" rx="2" fill="#8a3346" />
+<text x="54" y="520" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >open_pbr_surface</text>
+<rect x="36" y="532" width="10" height="10" rx="2" fill="#8a3346" />
+<text x="54" y="541" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >standard_surface</text>
+<rect x="36" y="553" width="10" height="10" rx="2" fill="#8a3346" />
+<text x="54" y="562" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >UsdPreviewSurface</text>
+<rect x="36" y="574" width="10" height="10" rx="2" fill="#8a3346" />
+<text x="54" y="583" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >gltf_pbr</text>
+<rect x="36" y="595" width="10" height="10" rx="2" fill="#8a3346" />
+<text x="54" y="604" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >surface_unlit</text>
+<text x="18" y="629" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="629" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Texture</text>
+<text x="214" y="629" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >14</text>
+<text x="18" y="651" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="651" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Procedural</text>
+<text x="214" y="651" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >23</text>
+<text x="18" y="673" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="673" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Geometry</text>
+<text x="214" y="673" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >12</text>
+<text x="18" y="695" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="695" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Math</text>
+<text x="214" y="695" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >48</text>
+<text x="18" y="717" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="717" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Adjustment</text>
+<text x="214" y="717" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >19</text>
+<text x="18" y="739" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="739" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Compositing</text>
+<text x="214" y="739" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >21</text>
+<text x="18" y="761" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="761" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Conditional</text>
+<text x="214" y="761" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >9</text>
+<text x="18" y="783" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="783" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Channel</text>
+<text x="214" y="783" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >11</text>
+<text x="18" y="805" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >▸</text>
+<text x="32" y="805" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#d6d6da" font-weight="normal" text-anchor="start" >Organization</text>
+<text x="214" y="805" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="end" >4</text>
+<rect x="231" y="53" width="918" height="666" rx="0" fill="#18181a" />
+<rect x="231" y="85" width="918" height="634" rx="0" fill="url(#dots)" />
+<rect x="231" y="53" width="918" height="32" rx="0" fill="#202023" />
+<line x1="231" y1="85" x2="1149" y2="85" stroke="#3a3a3e" stroke-width="1" />
+<text x="246" y="74" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="16" fill="#9a9aa0" font-weight="normal" text-anchor="start" >‹</text>
+<text x="266" y="73" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="start" >copper_set.mtlx</text>
+<text x="366" y="73" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#6a6a70" font-weight="normal" text-anchor="start" >›</text>
+<text x="380" y="73" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="start" >M_BrushedCopper</text>
+<text x="492" y="73" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#6a6a70" font-weight="normal" text-anchor="start" >›</text>
+<text x="506" y="73" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >NG_copper</text>
+<rect x="830" y="60" width="96" height="20" rx="5" fill="#2e2e32" />
+<text x="878" y="74" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Auto-layout</text>
+<rect x="934" y="60" width="96" height="20" rx="5" fill="#2e2e32" />
+<text x="982" y="74" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Frame (F)</text>
+<rect x="1038" y="60" width="96" height="20" rx="5" fill="#2e2e32" />
+<text x="1086" y="74" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Previews: On</text>
+<g clip-path="url(#graphclip)">
+<rect x="258" y="432" width="470" height="196" rx="8" fill="#4f4a86" fill-opacity="0.12" stroke="#6d66b8" stroke-opacity="0.5"/>
+<text x="270" y="451" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#b5b0f0" font-weight="bold" text-anchor="start" >Brushed anisotropy</text>
+<text x="716" y="451" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#7d78c0" font-weight="normal" text-anchor="end" >backdrop</text>
+<g filter="url(#drop)">
+<rect x="262" y="128" width="128" height="114" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M262,152 v-17 a7,7 0 0 1 7,-7 h114 a7,7 0 0 1 7,7 v17 z" fill="#2f6b5a"/>
+<text x="271" y="144" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >texcoord</text>
+<rect x="270" y="156" width="112" height="56" rx="4" fill="url(#uv)" />
+<text x="376" y="233.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="390" cy="229.0" r="5" fill="#6cc788" stroke="#1c1c1e" stroke-width="1.5"/>
+<g filter="url(#drop)">
+<rect x="418" y="112" width="150" height="110" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M418,136 v-17 a7,7 0 0 1 7,-7 h136 a7,7 0 0 1 7,7 v17 z" fill="#3d4f66"/>
+<text x="427" y="128" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >place2d</text>
+<text x="554" y="153.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="568" cy="149.0" r="5" fill="#6cc788" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="418" cy="169.0" r="5" fill="#6cc788" stroke="#6cc788" stroke-width="1.8"/>
+<text x="431" y="173.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >texcoord</text>
+<circle cx="418" cy="189.0" r="5" fill="#2c2c30" stroke="#6cc788" stroke-width="1.8"/>
+<text x="431" y="193.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >scale</text>
+<text x="559" y="193.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >4, 1</text>
+<circle cx="418" cy="209.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="431" y="213.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >rotate</text>
+<text x="559" y="213.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.0</text>
+<g filter="url(#drop)">
+<rect x="598" y="100" width="160" height="154" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M598,124 v-17 a7,7 0 0 1 7,-7 h146 a7,7 0 0 1 7,7 v17 z" fill="#7a5a22"/>
+<text x="607" y="116" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >base_color_tex</text>
+<text x="750" y="116" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#d9d9e0" font-weight="normal" text-anchor="end" fill-opacity="0.7">image</text>
+<rect x="606" y="128" width="144" height="56" rx="4" fill="url(#albedo)" />
+<text x="744" y="205.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="758" cy="201.0" r="5" fill="#f2b84b" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="598" cy="221.0" r="5" fill="#2c2c30" stroke="#7d7d85" stroke-width="1.8"/>
+<text x="611" y="225.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >file</text>
+<text x="749" y="225.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >albedo.exr</text>
+<circle cx="598" cy="241.0" r="5" fill="#6cc788" stroke="#6cc788" stroke-width="1.8"/>
+<text x="611" y="245.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >texcoord</text>
+<g filter="url(#drop)">
+<rect x="598" y="282" width="160" height="154" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M598,306 v-17 a7,7 0 0 1 7,-7 h146 a7,7 0 0 1 7,7 v17 z" fill="#7a5a22"/>
+<text x="607" y="298" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >normal_tex</text>
+<text x="750" y="298" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#d9d9e0" font-weight="normal" text-anchor="end" fill-opacity="0.7">image</text>
+<rect x="606" y="310" width="144" height="56" rx="4" fill="url(#normal)" />
+<text x="744" y="387.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="758" cy="383.0" r="5" fill="#5aa9f0" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="598" cy="403.0" r="5" fill="#2c2c30" stroke="#7d7d85" stroke-width="1.8"/>
+<text x="611" y="407.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >file</text>
+<text x="749" y="407.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >normal.png</text>
+<circle cx="598" cy="423.0" r="5" fill="#6cc788" stroke="#6cc788" stroke-width="1.8"/>
+<text x="611" y="427.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >texcoord</text>
+<g filter="url(#drop)">
+<rect x="270" y="476" width="120" height="70" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M270,500 v-17 a7,7 0 0 1 7,-7 h106 a7,7 0 0 1 7,7 v17 z" fill="#2f6b5a"/>
+<text x="279" y="492" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >position</text>
+<text x="376" y="517.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="390" cy="513.0" r="5" fill="#5aa9f0" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="270" cy="533.0" r="5" fill="#2c2c30" stroke="#7d7d85" stroke-width="1.8"/>
+<text x="283" y="537.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >space</text>
+<text x="381" y="537.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >object</text>
+<g filter="url(#drop)">
+<rect x="418" y="466" width="150" height="174" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M418,490 v-17 a7,7 0 0 1 7,-7 h136 a7,7 0 0 1 7,7 v17 z" fill="#4f4a86"/>
+<text x="427" y="482" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >noise3d</text>
+<rect x="426" y="494" width="134" height="56" rx="4" filter="url(#noiseF)"/>
+<text x="554" y="571.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="568" cy="567.0" r="5" fill="#a7a7b0" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="418" cy="587.0" r="5" fill="#5aa9f0" stroke="#5aa9f0" stroke-width="1.8"/>
+<text x="431" y="591.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >position</text>
+<circle cx="418" cy="607.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="431" y="611.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >amplitude</text>
+<text x="559" y="611.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.25</text>
+<circle cx="418" cy="627.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="431" y="631.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >pivot</text>
+<text x="559" y="631.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.5</text>
+<g filter="url(#drop)">
+<rect x="598" y="486" width="120" height="90" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M598,510 v-17 a7,7 0 0 1 7,-7 h106 a7,7 0 0 1 7,7 v17 z" fill="#3d4f66"/>
+<text x="607" y="502" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >add</text>
+<text x="704" y="527.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="718" cy="523.0" r="5" fill="#a7a7b0" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="598" cy="543.0" r="5" fill="#a7a7b0" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="611" y="547.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >in1</text>
+<circle cx="598" cy="563.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="611" y="567.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >in2</text>
+<text x="709" y="567.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.3</text>
+<g filter="url(#drop)">
+<rect x="790" y="120" width="180" height="234" rx="7" fill="#2c2c30" stroke="#3d8bfd" stroke-width="2.2" />
+</g>
+<path d="M790,144 v-17 a7,7 0 0 1 7,-7 h166 a7,7 0 0 1 7,7 v17 z" fill="#8a3346"/>
+<text x="799" y="136" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >SR_copper</text>
+<text x="962" y="136" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#d9d9e0" font-weight="normal" text-anchor="end" fill-opacity="0.7">open_pbr_surface</text>
+<rect x="798" y="148" width="164" height="56" rx="4" fill="#1a1a1c" />
+<circle cx="880.0" cy="176" r="25" fill="url(#copper)"/>
+<text x="956" y="225.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="970" cy="221.0" r="5" fill="#e0607e" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="790" cy="241.0" r="5" fill="#f2b84b" stroke="#f2b84b" stroke-width="1.8"/>
+<text x="803" y="245.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >base_color</text>
+<circle cx="790" cy="261.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="803" y="265.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >base_metalness</text>
+<text x="961" y="265.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >1.0</text>
+<circle cx="790" cy="281.0" r="5" fill="#a7a7b0" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="803" y="285.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >specular_roughness</text>
+<circle cx="790" cy="301.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="803" y="305.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >specular_anisotropy</text>
+<text x="961" y="305.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.8</text>
+<circle cx="790" cy="321.0" r="5" fill="#2c2c30" stroke="#a7a7b0" stroke-width="1.8"/>
+<text x="803" y="325.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >coat_weight</text>
+<text x="961" y="325.0" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.0</text>
+<circle cx="790" cy="341.0" r="5" fill="#5aa9f0" stroke="#5aa9f0" stroke-width="1.8"/>
+<text x="803" y="345.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >geometry_normal</text>
+<text x="880" y="366" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="middle" >+ 38 more inputs</text>
+<g filter="url(#drop)">
+<rect x="1000" y="210" width="136" height="90" rx="7" fill="#2c2c30" stroke="#45454b" stroke-width="1" />
+</g>
+<path d="M1000,234 v-17 a7,7 0 0 1 7,-7 h122 a7,7 0 0 1 7,7 v17 z" fill="#5d3f87"/>
+<text x="1009" y="226" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >M_BrushedCopper</text>
+<text x="1122" y="251.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="end" >out</text>
+<circle cx="1136" cy="247.0" r="5" fill="#c58af9" stroke="#1c1c1e" stroke-width="1.5"/>
+<circle cx="1000" cy="267.0" r="5" fill="#e0607e" stroke="#e0607e" stroke-width="1.8"/>
+<text x="1013" y="271.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >surfaceshader</text>
+<circle cx="1000" cy="287.0" r="5" fill="#2c2c30" stroke="#d08bd0" stroke-width="1.8"/>
+<text x="1013" y="291.0" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" >displacement</text>
+<path d="M390,229.0 C430,229.0 378,169.0 418,169.0" fill="none" stroke="#6cc788" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M568,149.0 C608,149.0 558,241.0 598,241.0" fill="none" stroke="#6cc788" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M568,149.0 C608,149.0 558,423.0 598,423.0" fill="none" stroke="#6cc788" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M390,513.0 C430,513.0 378,587.0 418,587.0" fill="none" stroke="#5aa9f0" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M568,567.0 C608,567.0 558,543.0 598,543.0" fill="none" stroke="#a7a7b0" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M758,201.0 C798,201.0 750,241.0 790,241.0" fill="none" stroke="#f2b84b" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M718,523.0 C758,523.0 750,281.0 790,281.0" fill="none" stroke="#a7a7b0" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M758,383.0 C798,383.0 750,341.0 790,341.0" fill="none" stroke="#5aa9f0" stroke-width="2.2" stroke-opacity="0.9"/>
+<path d="M970,221.0 C1010,221.0 960,267.0 1000,267.0" fill="none" stroke="#e0607e" stroke-width="2.2" stroke-opacity="0.9"/>
+<g filter="url(#drop)">
+<rect x="752" y="412" width="256" height="236" rx="9" fill="#2a2a2e" stroke="#4a4a50" stroke-width="1" />
+</g>
+<rect x="762" y="422" width="236" height="28" rx="6" fill="#1e1e21" stroke="#3d8bfd" stroke-width="1.5" />
+<text x="774" y="441" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="#9a9aa0" font-weight="normal" text-anchor="start" >⌕</text>
+<text x="792" y="441" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="#e8e8ea" font-weight="normal" text-anchor="start" >fractal</text>
+<line x1="841" y1="429" x2="841" y2="445" stroke="#3d8bfd" stroke-width="1.5"/>
+<rect x="758" y="462" width="244" height="30" rx="5" fill="#2f5fb3" />
+<text x="770" y="475" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >fractal3d</text>
+<text x="770" y="488" font-family="Menlo, monospace" font-size="10" fill="#c9d8ff" font-weight="normal" text-anchor="start" >float · vector3 → float</text>
+<text x="992" y="480" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#c9d8ff" font-weight="normal" text-anchor="end" >Procedural</text>
+<text x="770" y="507" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >fractal2d</text>
+<text x="770" y="520" font-family="Menlo, monospace" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="start" >float · vector2 → float</text>
+<text x="992" y="512" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >Procedural</text>
+<text x="770" y="539" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >fractal3d</text>
+<text x="770" y="552" font-family="Menlo, monospace" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="start" >→ color3</text>
+<text x="992" y="544" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >Procedural</text>
+<text x="770" y="571" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >fractal3d</text>
+<text x="770" y="584" font-family="Menlo, monospace" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="start" >→ vector3</text>
+<text x="992" y="576" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >Procedural</text>
+<text x="770" y="603" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="normal" text-anchor="start" >ND_brushed_metal</text>
+<text x="770" y="616" font-family="Menlo, monospace" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="start" >nodedef · copper_set</text>
+<text x="992" y="608" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="end" >Custom</text>
+<text x="880" y="637" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="middle" >↩ insert  ·  ⌥↩ insert &amp; connect</text>
+</g>
+<rect x="1028" y="640" width="110" height="68" rx="5" fill="#202023" stroke="#3a3a3e" stroke-width="1" fill-opacity="0.92"/>
+<rect x="1036" y="652" width="10" height="6" rx="1" fill="#2f6b5a" />
+<rect x="1050" y="650" width="12" height="8" rx="1" fill="#3d4f66" />
+<rect x="1066" y="648" width="14" height="12" rx="1" fill="#7a5a22" />
+<rect x="1066" y="664" width="14" height="12" rx="1" fill="#7a5a22" />
+<rect x="1086" y="650" width="16" height="18" rx="1" fill="#8a3346" />
+<rect x="1106" y="656" width="12" height="8" rx="1" fill="#5d3f87" />
+<rect x="1036" y="684" width="10" height="6" rx="1" fill="#2f6b5a" />
+<rect x="1050" y="682" width="12" height="10" rx="1" fill="#4f4a86" />
+<rect x="1066" y="686" width="10" height="6" rx="1" fill="#3d4f66" />
+<rect x="1032" y="645" width="92" height="58" rx="2" fill="none" stroke="#3d8bfd" stroke-width="1" />
+<rect x="244" y="690" width="64" height="20" rx="5" fill="#202023" stroke="#3a3a3e" stroke-width="1" />
+<text x="276" y="704" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >100%</text>
+<line x1="231" y1="719" x2="1149" y2="719" stroke="#3a3a3e" stroke-width="1" />
+<rect x="231" y="720" width="918" height="252" rx="0" fill="#202023" />
+<rect x="238" y="726" width="39" height="22" rx="5" fill="#3a3a3e" />
+<text x="257.5" y="741" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="middle" >XML</text>
+<text x="352.0" y="741" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Generated Shader</text>
+<text x="467.5" y="741" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Issues  2</text>
+<text x="551.5" y="741" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Console</text>
+<text x="1138" y="741" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >Two-way sync · edits re-parse on pause</text>
+<line x1="231" y1="754" x2="1149" y2="754" stroke="#3a3a3e" stroke-width="1" />
+<text x="260" y="774" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >41</text>
+<text x="274" y="774" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;nodegraph</text>
+<text x="340.2" y="774" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="379.91999999999996" y="774" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"NG_copper"</text>
+<text x="452.73999999999995" y="774" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve">&gt;</text>
+<text x="260" y="795" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >42</text>
+<text x="290" y="795" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;texcoord</text>
+<text x="349.58" y="795" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="389.29999999999995" y="795" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"tc"</text>
+<text x="415.78" y="795" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="455.5" y="795" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"vector2"</text>
+<text x="515.08" y="795" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve"> /&gt;</text>
+<text x="260" y="816" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >43</text>
+<text x="290" y="816" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;place2d</text>
+<text x="342.96" y="816" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="382.67999999999995" y="816" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"pl"</text>
+<text x="409.15999999999997" y="816" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="448.88" y="816" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"vector2"</text>
+<text x="508.46" y="816" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve">&gt;</text>
+<text x="260" y="837" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >44</text>
+<text x="306" y="837" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;input</text>
+<text x="345.72" y="837" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="385.44000000000005" y="837" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"scale"</text>
+<text x="431.7800000000001" y="837" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="471.5000000000001" y="837" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"vector2"</text>
+<text x="531.0800000000002" y="837" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> value=</text>
+<text x="577.4200000000002" y="837" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"4, 1"</text>
+<text x="617.1400000000002" y="837" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve"> /&gt;</text>
+<text x="260" y="858" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >45</text>
+<text x="290" y="858" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;/place2d</text>
+<text x="349.58" y="858" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve">&gt;</text>
+<rect x="232" y="866" width="610" height="19" rx="0" fill="#2a3550" />
+<text x="260" y="879" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >46</text>
+<text x="290" y="879" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;open_pbr_surface</text>
+<text x="402.54" y="879" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="442.26" y="879" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"SR_copper"</text>
+<text x="515.08" y="879" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="554.8000000000001" y="879" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"surfaceshader"</text>
+<text x="654.1" y="879" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve">&gt;</text>
+<rect x="232" y="887" width="610" height="19" rx="0" fill="#2a3550" />
+<text x="260" y="900" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >47</text>
+<text x="306" y="900" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;input</text>
+<text x="345.72" y="900" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="385.44000000000005" y="900" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"base_color"</text>
+<text x="464.88000000000005" y="900" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="504.6" y="900" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"color3"</text>
+<text x="557.5600000000001" y="900" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> nodename=</text>
+<text x="623.7600000000001" y="900" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"base_color_tex"</text>
+<text x="729.6800000000001" y="900" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve"> /&gt;</text>
+<rect x="232" y="908" width="610" height="19" rx="0" fill="#2a3550" />
+<text x="260" y="921" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >48</text>
+<text x="306" y="921" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;input</text>
+<text x="345.72" y="921" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="385.44000000000005" y="921" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"base_metalness"</text>
+<text x="491.36000000000007" y="921" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="531.08" y="921" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"float"</text>
+<text x="577.4200000000001" y="921" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> value=</text>
+<text x="623.7600000000001" y="921" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"1.0"</text>
+<text x="656.8600000000001" y="921" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve"> /&gt;</text>
+<rect x="232" y="929" width="610" height="19" rx="0" fill="#2a3550" />
+<text x="260" y="942" font-family="Menlo, monospace" font-size="11" fill="#6a6a70" font-weight="normal" text-anchor="end" >49</text>
+<text x="306" y="942" font-family="Menlo, monospace" font-size="11" fill="#f28b82" font-weight="normal" text-anchor="start" xml:space="preserve">&lt;input</text>
+<text x="345.72" y="942" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> name=</text>
+<text x="385.44000000000005" y="942" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"specular_roughness"</text>
+<text x="517.84" y="942" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> type=</text>
+<text x="557.5600000000001" y="942" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"float"</text>
+<text x="603.9000000000001" y="942" font-family="Menlo, monospace" font-size="11" fill="#9ecbff" font-weight="normal" text-anchor="start" xml:space="preserve"> nodename=</text>
+<text x="670.1000000000001" y="942" font-family="Menlo, monospace" font-size="11" fill="#a8e6a3" font-weight="normal" text-anchor="start" xml:space="preserve">"add"</text>
+<text x="703.2000000000002" y="942" font-family="Menlo, monospace" font-size="11" fill="#cfcfd4" font-weight="normal" text-anchor="start" xml:space="preserve"> /&gt;</text>
+<line x1="850" y1="755" x2="850" y2="972" stroke="#3a3a3e" stroke-width="1" />
+<text x="864" y="776" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="bold" text-anchor="start" letter-spacing="0.8">ISSUES</text>
+<circle cx="870" cy="796" r="4" fill="#f0b429"/>
+<text x="882" y="800" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#e8e8ea" font-weight="bold" text-anchor="start" >M_FrostedGlass</text>
+<text x="882" y="816" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >transmission_color has no colorspace;</text>
+<text x="882" y="836" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >assuming lin_rec709</text>
+<circle cx="870" cy="852" r="4" fill="#f0b429"/>
+<text x="882" y="856" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#e8e8ea" font-weight="bold" text-anchor="start" >normal_tex</text>
+<text x="882" y="872" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >file 'normal.png' is sRGB-encoded;</text>
+<text x="882" y="892" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >expected raw for vector3 data</text>
+<circle cx="870" cy="908" r="4" fill="#4cc38a"/>
+<text x="882" y="912" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#e8e8ea" font-weight="bold" text-anchor="start" >copper_set.mtlx</text>
+<text x="882" y="928" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >upgraded from v1.38 → v1.39 on load</text>
+<line x1="1150" y1="53" x2="1150" y2="972" stroke="#3a3a3e" stroke-width="1" />
+<rect x="1151" y="53" width="449" height="347" rx="0" fill="url(#vpbg)" />
+<g clip-path="url(#vpclip)">
+<ellipse cx="1375" cy="340" rx="120" ry="20" fill="url(#shadow)"/>
+<circle cx="1375" cy="228" r="112" fill="url(#copper)"/>
+<circle cx="1375" cy="228" r="112" fill="url(#brushed)"/>
+<ellipse cx="1335" cy="178" rx="34" ry="12" fill="url(#spec)" transform="rotate(-30 1335 178)"/>
+</g>
+<rect x="1162" y="62" width="230" height="24" rx="6" fill="#000000" fill-opacity="0.45"/>
+<rect x="1164" y="64" width="54" height="20" rx="5" fill="#ffffff" fill-opacity="0.18"/>
+<text x="1191" y="78" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#e8e8ea" font-weight="normal" text-anchor="middle" >Sphere</text>
+<text x="1247" y="78" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Shaderball</text>
+<text x="1303" y="78" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Plane</text>
+<text x="1359" y="78" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Mesh…</text>
+<rect x="1460" y="62" width="128" height="24" rx="6" fill="#000000" fill-opacity="0.45"/>
+<text x="1472" y="78" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >☀ studio_small_03</text>
+<rect x="1162" y="366" width="250" height="24" rx="6" fill="#000000" fill-opacity="0.45"/>
+<text x="1174" y="382" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >Previewing  M_BrushedCopper  ·  2.1 ms</text>
+<rect x="1500" y="366" width="88" height="24" rx="6" fill="#000000" fill-opacity="0.45"/>
+<text x="1544" y="382" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >ACES 2.0 ▾</text>
+<line x1="1150" y1="400" x2="1600" y2="400" stroke="#3a3a3e" stroke-width="1" />
+<rect x="1151" y="401" width="449" height="571" rx="0" fill="#232326" />
+<rect x="1166" y="414" width="28" height="28" rx="6" fill="#8a3346" />
+<text x="1180" y="433" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="13" fill="#e8e8ea" font-weight="bold" text-anchor="middle" >S</text>
+<text x="1204" y="426" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="14" fill="#e8e8ea" font-weight="bold" text-anchor="start" >SR_copper</text>
+<text x="1204" y="441" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#9a9aa0" font-weight="normal" text-anchor="start" >open_pbr_surface · ND_open_pbr_surface_surfaceshader</text>
+<rect x="1530" y="418" width="56" height="20" rx="5" fill="#3a3a3e" />
+<text x="1558" y="432" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="middle" >Docs</text>
+<line x1="1162" y1="460" x2="1588" y2="460" stroke="#303034" stroke-width="1" />
+<text x="1166" y="476" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▾ Base</text>
+<text x="1180" y="502" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Weight</text>
+<rect x="1330" y="492" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="492" width="190.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1520.0" cy="498" r="7" fill="#e8e8ea"/>
+<text x="1586" y="502" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >1.000</text>
+<text x="1180" y="526" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Color</text>
+<rect x="1330" y="513" width="258" height="18" rx="5" fill="#2f2f33" stroke="#f2b84b" stroke-width="1" />
+<circle cx="1341" cy="522" r="4" fill="#f2b84b"/>
+<text x="1352" y="526" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#d6d6da" font-weight="normal" text-anchor="start" >← base_color_tex.out</text>
+<text x="1580" y="526" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >⤳</text>
+<text x="1180" y="550" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Metalness</text>
+<rect x="1330" y="540" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="540" width="190.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1520.0" cy="546" r="7" fill="#e8e8ea"/>
+<text x="1586" y="550" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >1.000</text>
+<text x="1180" y="574" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Diffuse Roughness</text>
+<rect x="1330" y="564" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="564" width="0.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1330.0" cy="570" r="7" fill="#e8e8ea"/>
+<text x="1586" y="574" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.000</text>
+<line x1="1162" y1="592" x2="1588" y2="592" stroke="#303034" stroke-width="1" />
+<text x="1166" y="608" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▾ Specular</text>
+<text x="1180" y="634" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Weight</text>
+<rect x="1330" y="624" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="624" width="190.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1520.0" cy="630" r="7" fill="#e8e8ea"/>
+<text x="1586" y="634" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >1.000</text>
+<text x="1180" y="658" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Color</text>
+<rect x="1330" y="646" width="56" height="16" rx="3" fill="#f4a48a" stroke="#55555b" stroke-width="1" />
+<text x="1396" y="658" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="10" fill="#6a6a70" font-weight="normal" text-anchor="start" >lin_rec709</text>
+<text x="1586" y="658" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.95 0.64 0.54</text>
+<text x="1180" y="682" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Roughness</text>
+<rect x="1330" y="669" width="258" height="18" rx="5" fill="#2f2f33" stroke="#a7a7b0" stroke-width="1" />
+<circle cx="1341" cy="678" r="4" fill="#a7a7b0"/>
+<text x="1352" y="682" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#d6d6da" font-weight="normal" text-anchor="start" >← add.out</text>
+<text x="1580" y="682" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >⤳</text>
+<text x="1180" y="706" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >Anisotropy</text>
+<rect x="1330" y="696" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="696" width="152.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1482.0" cy="702" r="7" fill="#e8e8ea"/>
+<text x="1586" y="706" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >0.800</text>
+<text x="1180" y="730" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#cfcfd4" font-weight="normal" text-anchor="start" >IOR</text>
+<rect x="1330" y="720" width="190" height="12" rx="6" fill="#2f2f33" />
+<rect x="1330" y="720" width="57.0" height="12" rx="6" fill="#3d8bfd" fill-opacity="0.75"/>
+<circle cx="1387.0" cy="726" r="7" fill="#e8e8ea"/>
+<text x="1586" y="730" font-family="Menlo, monospace" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >1.500</text>
+<line x1="1162" y1="748" x2="1588" y2="748" stroke="#303034" stroke-width="1" />
+<text x="1166" y="764" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Transmission</text>
+<line x1="1162" y1="773" x2="1588" y2="773" stroke="#303034" stroke-width="1" />
+<text x="1166" y="789" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Subsurface</text>
+<line x1="1162" y1="798" x2="1588" y2="798" stroke="#303034" stroke-width="1" />
+<text x="1166" y="814" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Coat</text>
+<line x1="1162" y1="823" x2="1588" y2="823" stroke="#303034" stroke-width="1" />
+<text x="1166" y="839" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Fuzz</text>
+<line x1="1162" y1="848" x2="1588" y2="848" stroke="#303034" stroke-width="1" />
+<text x="1166" y="864" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Thin Film</text>
+<line x1="1162" y1="873" x2="1588" y2="873" stroke="#303034" stroke-width="1" />
+<text x="1166" y="889" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Emission</text>
+<line x1="1162" y1="898" x2="1588" y2="898" stroke="#303034" stroke-width="1" />
+<text x="1166" y="914" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="12" fill="#e8e8ea" font-weight="bold" text-anchor="start" >▸ Geometry</text>
+<rect x="1162" y="936" width="426" height="26" rx="6" fill="#2a3550" />
+<text x="1176" y="953" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#a9c1f5" font-weight="normal" text-anchor="start" >⌥-drag any input onto the graph edge to promote it to the material interface</text>
+<line x1="0" y1="972" x2="1600" y2="972" stroke="#3a3a3e" stroke-width="1" />
+<rect x="0" y="973" width="1600" height="27" rx="0" fill="#2b2b2e" />
+<path d="M0,973 H1600 V988 a12,12 0 0 1 -12,12 H12 a12,12 0 0 1 -12,-12 z" fill="#2b2b2e"/>
+<text x="14" y="991" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="start" >MaterialX 1.39.4  ·  OpenUSD 26.08  ·  OCIO: ACES 2.0 studio config  ·  working space ACEScg</text>
+<text x="1586" y="991" font-family="Helvetica Neue, Helvetica, Arial, sans-serif" font-size="11" fill="#9a9aa0" font-weight="normal" text-anchor="end" >17 nodes · 9 connections · 1 selected</text>
+</svg>
