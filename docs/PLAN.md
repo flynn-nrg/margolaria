@@ -14,8 +14,23 @@ Status: planning (session 1, 2026-10-11). No code yet.
 - Feel like a real Mac app: SwiftUI/AppKit, Metal rendering, document-based, undo, Quick Look later.
 - Don't reinvent the wheel. MaterialX, OpenUSD, OpenColorIO and OpenImageIO are used through their existing C/C++ libraries (via Swift–C++ interop) or through Apple frameworks where they already exist.
 - Round-trip safely. Opening and saving a document must not lose attributes, comments-as-data, `colorspace`, `channels`, custom nodedefs or unknown elements.
+- **Built for power users.** The intended user is a **technical artist (TD)**: someone who knows MaterialX, USD and shading, reads `.mtlx` and shader code, and works with pipelines. The tool should make them faster, not shield them from the technology (see §1.1).
+- **Learn Swift while building it.** This is the author's first Swift project; their background is C, C++, Go and Objective-C. Every line of Swift will be read and reviewed, and sometimes changed by hand. So the code is deliberately **over-commented**, as a teaching aid (see §6).
+- **Ship a properly signed app.** From the first runnable build, the app is signed with the author's Apple Developer certificate, uses the Hardened Runtime, and can be notarized for distribution outside the App Store (see §7).
 
-**Non-goals (for now):** texture painting, mesh editing, a full scene/layout tool, Windows/Linux.
+**Non-goals (for now):** texture painting, mesh editing, a full scene/layout tool, Windows/Linux, and a simplified "beginner mode".
+
+### 1.1 Audience: the technical artist
+
+What "power user" means for design decisions:
+
+- **Show the real MaterialX concepts, without simplified names.** The UI uses the spec's terms: nodedef, nodegraph, interface input, `colorspace`, `channels`, look, `materialassign`. Node and input names are the real ones (`specular_roughness`, not "Shininess"). A friendly label can be shown *alongside* the real name, but never instead of it.
+- **Nothing hidden, everything inspectable.** Every attribute in the document can be seen and edited, including ones the UI doesn't understand yet; those get a generic attribute editor. The XML, the generated shader, validation output and the resolved nodedef are each one click away.
+- **Keyboard-first.** Every command is in the command palette (⌘K) and can be rebound. Common graph edits never require the mouse.
+- **Precision over guesswork.** Values can be typed, not only scrubbed, and accept expressions like `0.5*2`. Colours show their numbers and colour space. The preview reports render time and which shader was generated.
+- **Predictable and diffable files.** Output `.mtlx` is stable: attributes keep their order and the document is not reformatted unnecessarily, so files diff cleanly in git and survive review.
+- **Scriptable in Python.** This is what technical artists already know from Blender, Houdini, Maya and Nuke. There is an embedded Python console, a `margolaria` module for scripting the app, and the standard `MaterialX` (PyMaterialX) and `pxr` modules. A command-line companion (`margolaria validate|upgrade|bake|export`) shares the same core library as the app.
+- **Dense but tidy UI.** Show plenty of information on screen, like the mockup. Panels can be docked and collapsed, and layouts can be saved per task.
 
 ## 2. What exists today (research summary)
 
@@ -54,6 +69,7 @@ All of the following was verified on 2026-10-11.
 | Image I/O | **Apple ImageIO** first (handles EXR, PNG, JPEG, TIFF, HEIC), then **OpenImageIO** (C++) when we need `.tx`, tiled or mip-mapped files, or UDIMs | SwiftUsd's Hio already reads images for Hydra. Note: the Swift package called "OpenImageIO" (1amageek) is an unrelated pure-Swift codec library, **not** OIIO. |
 | Graph canvas | Custom view. **Spike:** SwiftUI `Canvas` vs. AppKit `NSView` + Core Animation vs. Metal | Must handle about 500 nodes at 120 fps, plus hit testing, marquee selection and wire routing |
 | Text view | AppKit `NSTextView` (TextKit 2) with XML highlighting | Two-way sync with the graph |
+| Scripting | **Embedded CPython 3.x** as a relocatable, signable `Python.framework`, for example from BeeWare's Python-Apple-support or a python.org build. PyMaterialX and USD's `pxr` are built against the **same** MaterialX and USD binaries the app uses. Our own `margolaria` module is bound with pybind11 or nanobind. | The same binaries are required so that Python and Swift operate on the *same* `mx::Document` in memory, not on copies. **Spike:** SwiftUsd does not appear to ship Python bindings, so we may have to build USD and MaterialX with Python enabled ourselves. |
 | Build | Xcode project plus SwiftPM local packages; xcframeworks for the C++ dependencies | We can use SwiftUsd's own scripts as the template for building OCIO and OIIO |
 
 Also worth watching: [wabiverse/SwiftUSD](https://github.com/wabiverse) is a community fork on top of apple/SwiftUsd, with a "HydraKit" Metal viewport that does picking and selection outlines. It may save work on the viewport. Evaluate it, but don't depend on it yet.
@@ -113,26 +129,88 @@ Margolaria.app (SwiftUI)
  ├─ PreviewService     per-node swatches: MslShaderGenerator → Metal pipeline cache → offscreen renders
  ├─ Viewport           Hydra (UsdImaging + HdStorm/HgiMetal) of a generated USD stage that references the .mtlx
  ├─ ColorService       OCIO config, colour pickers, view transforms
+ ├─ Scripting        embedded CPython; `margolaria` module exposes the same commands the UI uses (undoable)
  └─ UI                 Sidebar · GraphCanvas · Inspector · BottomPanel(XML/Shader/Issues) · Viewport
 ```
 
 Principles:
+- **Every edit is a command.** The UI and Python call the same command layer, which makes Python scripting possible without a rewrite. That's why M2's undo design already has to account for M6.
 - **mx::Document is the model.** We never keep a parallel graph representation that could drift from it. UI state lives in views, and layout lives in `xpos`/`ypos`.
 - **All C++ goes through a thin Swift layer** (`MXKit`), so the rest of the app is plain Swift.
 - **Previews run off the main thread and can be cancelled.** Compiled pipelines are cached by a hash of the generated shader.
 
-## 6. Roadmap
+## 6. Learning Swift: code and commenting conventions
+
+The code is written for a reader who knows C, C++, Go and Objective-C well and is new to Swift. That changes the usual trade-offs: comments that would be noise in a team of Swift veterans are what we want here.
+
+### 6.1 Commenting rules
+
+1. **Every file starts with a header comment.** It says what the file is for, where it fits in the architecture (§5), and which Swift concepts appear in it *for the first time*, for example "introduces: `struct` vs `class`, `guard let`".
+2. **Every type, property and function has a `///` doc comment.** These show up in Xcode's Quick Help (⌥-click), which is a good habit to learn.
+3. **Comment the language, not just the logic.** The first time a Swift construct appears in a file, explain what it does, even if it seems obvious. Where it helps, compare it to C/C++, Go or Objective-C. Constructs that always get an explanation:
+   - Optionals: `?`, `!`, `if let`, `guard let`, `??`, optional chaining. Compare to nullable pointers and Go's `val, ok`.
+   - Value types and reference types: `struct`/`enum` are copied, `class` is shared by reference. Explain copy-on-write, and compare to C++ value semantics and to ObjC objects.
+   - `enum` with associated values and `switch` pattern matching. These are tagged unions, unlike C enums.
+   - Protocols, protocol extensions, `some`/`any`. Compare to Go interfaces, ObjC protocols and C++ templates/concepts.
+   - Extensions. These are like ObjC categories.
+   - Closures, trailing-closure syntax, `$0` shorthand, and capture lists (`[weak self]`). Compare to ObjC blocks and C++ lambdas.
+   - Memory management: ARC (the same model as ObjC ARC), `weak`/`unowned`, and retain cycles.
+   - Errors: `throws`/`try`/`do-catch`. Compare to Go's `err` returns and to C++ exceptions.
+   - Concurrency: `async`/`await`, `Task`, `actor`, `@MainActor`, `Sendable`, and why Swift 6 strict concurrency complains when it does. Compare to goroutines and channels, and to GCD.
+   - SwiftUI specifics: `@State`, `@Binding`, `@Observable`, `@Environment`, and the result-builder syntax used in `var body`. Explain why `body` is a description of the UI, not the UI itself.
+   - Generics, `where` clauses and associated types.
+   - Access control (`private`, `fileprivate`, `internal`, `public`) and how modules work.
+   - **Swift–C++ interop**, everywhere it appears: what a C++ type becomes in Swift (`std::string`, `std::vector`, `shared_ptr`, foreign reference types), what ownership means across the boundary, and where `Unsafe…Pointer` shows up and why that is dangerous.
+4. **Explain the "why" for anything non-obvious.** For example: why this is a `class` and not a `struct`, why this runs on the main actor, or why this copy is cheap.
+5. **Use `// SWIFT:` for comments about the language** and normal `//` comments for comments about the domain (MaterialX, USD, Metal). This lets you grep the teaching notes, and they could be removed one day if we wanted.
+6. **Optional `// TRY:` markers** suggest small, safe changes to experiment with ("change this `struct` to a `class` and see what breaks").
+
+### 6.2 Code style that helps learning
+
+- **Prefer explicit over clever.** Write explicit type annotations where inference would hide what is going on. Avoid long chains of `map`/`filter`/`$0` until the concepts have been introduced, and explain them when they are used.
+- **Small, single-purpose commits.** Each one introduces as few new Swift concepts as possible, so every diff can be reviewed line by line.
+- **`docs/SWIFT_NOTES.md`** is a running glossary. Each new concept gets a short entry with a link to the file where it first appears, and the `// SWIFT:` comments can point to it.
+- Use the standard tools (`swift-format` with the default config, Xcode's built-in tests through Swift Testing) rather than custom tooling, so what you learn transfers to other projects.
+
+## 7. Signing and distribution
+
+Goal: from M0 on, every runnable build is signed with the author's Apple Developer certificate. A release build can be notarized and runs on another Mac without Gatekeeper warnings.
+
+### 7.1 Decisions
+
+| Topic | Decision | Why |
+|---|---|---|
+| Distribution channel | **Developer ID**, outside the Mac App Store, with notarization | Simplest path. The App Store stays possible later (see the sandbox row). |
+| Hardened Runtime | **On** for all configurations | Notarization requires it. Turning it on from day one means we never find out late that a C++ dependency breaks under it. |
+| App Sandbox | **Off at first**, revisited before any App Store submission | A `.mtlx` file refers to textures by relative or absolute paths anywhere on disk. A sandboxed app can only read them after the user grants access, through security-scoped bookmarks or folder access. That is solvable, but it is extra work we don't want in M0–M2. |
+| Signing configuration | Tracked `Config/Base.xcconfig` with an optional `#include? "Signing.local.xcconfig"`. The local file holds `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY` and is in `.gitignore`. | The Team ID isn't secret, but keeping it out of the repo means anyone can clone and build with their own team. |
+| Bundle identifier | To decide, reverse-DNS on a domain the author owns | Must be stable before the first notarized release. Changing it later resets user preferences and permissions. |
+| Embedded C++ frameworks | Dynamic xcframeworks (SwiftUsd, OCIO, OIIO) are set to **Embed & Sign**, so Xcode re-signs them with our identity. Static ones are linked into the binary. | Under the Hardened Runtime, *library validation* refuses to load dylibs signed by a different team. |
+| Bundle resources | USD `plugInfo.json` files, MaterialX `libraries/` and the OCIO config are shipped read-only inside `Contents/Resources`. **Nothing writes into the app bundle at runtime.** Shader and pipeline caches go to `~/Library/Caches/<bundle-id>/`. | Changing a signed bundle after signing breaks its signature. |
+| Embedded Python (M6) | Every `.so`/`.dylib` in the bundled Python, and the bundled site-packages, is signed by us at build time. User-installed **pure-Python** packages work. User-installed packages with **native extensions** signed by someone else would be blocked by library validation. As with Hydra delegates below, that needs `disable-library-validation`, so we decide it deliberately. | Blender and Houdini users expect `pip install`, so this trade-off will come up. |
+| Third-party Hydra delegates (M5) | Loading renderers such as Arnold or Karma at runtime needs the `com.apple.security.cs.disable-library-validation` entitlement. We postpone that and decide explicitly when we get there. | It weakens the Hardened Runtime's protection, so it should be a deliberate choice, not a default. |
+
+### 7.2 Release pipeline (scripted in `scripts/release.sh` once the app exists)
+
+1. `xcodebuild archive` with the Release configuration.
+2. `xcodebuild -exportArchive`, with `method = developer-id` in the export options.
+3. `xcrun notarytool submit --wait --keychain-profile <profile>`. The credentials are stored once with `notarytool store-credentials`, so they never appear in the repo or the script.
+4. `xcrun stapler staple` on the `.app` (or the `.dmg`).
+5. Checks: `codesign --verify --deep --strict --verbose=2`, then `spctl --assess --type execute -vv`.
+
+## 8. Roadmap
 
 | Milestone | Scope | Exit criteria |
 |---|---|---|
-| **M0: Spikes** | (a) Read and write a `.mtlx` from Swift using MaterialX through SwiftUsd. (b) Render a USD stage with a MaterialX material in Storm/Metal inside an `NSView`. (c) Generate MSL for a single node output and render a swatch. (d) Prototype a graph canvas with 500 nodes. | Each spike is a small demo target in the repo, with notes |
+| **M0: Spikes** | (a) Read and write a `.mtlx` from Swift using MaterialX through SwiftUsd. (b) Render a USD stage with a MaterialX material in Storm/Metal inside an `NSView`. (c) Generate MSL for a single node output and render a swatch. (d) Prototype a graph canvas with 500 nodes. (e) Set up the Xcode project with `Config/*.xcconfig`, Hardened Runtime and Developer ID signing. Embed SwiftUsd, then archive, notarize and staple a "hello" build. | Each spike is a small demo target in the repo, with notes. (e) passes `spctl --assess` on a second Mac or a clean user account. |
 | **M1: Viewer** | Open `.mtlx`, read-only graph with auto-layout, viewport, XML tab, Issues tab | Opens every example in MaterialX `resources/Materials/Examples` |
 | **M2: Editor** | Add, delete and connect nodes; inspector editing; undo; save with lossless round-trip | Round-trip tests on the MaterialX example corpus pass with a byte-equivalent or semantically equal diff |
 | **M3: Previews & colour** | Per-node thumbnails, solo preview, OCIO colour pickers and view transform | Swatches update in under 100 ms after an edit on a typical graph |
 | **M4: Authoring power** | Nodegraph creation, promote to interface, custom nodedef authoring, backdrops, two-way XML editing, command palette | Can build a custom nodedef from scratch and use it in another document |
 | **M5: Pipeline** | USD/USDZ export, other Hydra delegates, shader export (MSL/GLSL/OSL), image I/O through OIIO | USDZ opens correctly in Reality Composer Pro / Quick Look |
+| **M6: Python** | Embedded interpreter, Console tab as a Python REPL, `margolaria` module (document, selection, commands, undo grouping), PyMaterialX and `pxr` on the shared document, startup scripts and user commands in the command palette, a Python CLI | A script can build a material and appear in the undo history as one step; the signed and notarized build still passes `spctl` |
 
-## 7. Open questions
+## 9. Open questions
 
 1. Does SwiftUsd expose the MaterialX C++ API to Swift directly, or only link it internally for Hydra? (M0a.) This decides whether we build MaterialX ourselves.
 2. Should the canvas be SwiftUI `Canvas` or Metal? It depends on M0d performance.
@@ -140,8 +218,11 @@ Principles:
 4. Should we have our own reference path tracer later? The MaterialX roadmap mentions integrating OSL testrender, WGSL and MDL as reference renderers.
 5. Document format: plain `.mtlx` only, or also open `.usda`/`.usdz` and edit the MaterialX materials inside them?
 6. Licensing of the final app. The repo LICENSE already exists; every dependency above is Apache-2.0 or BSD-3.
+7. Are the SwiftUsd xcframeworks static or dynamic? This decides what gets embedded and re-signed (§7.1). Answered by spike M0e.
+8. Is the Mac App Store a real goal? If yes, the App Sandbox and security-scoped texture access move earlier in the roadmap.
+9. ~~How should power users script the app?~~ **Decided: Python** (§1.1, §3, M6). Still open: which Python version to pin, and whether to allow user-installed native packages (§7.1).
 
-## 8. Sources
+## 10. Sources
 
 - MaterialX Graph Editor docs: <https://github.com/AcademySoftwareFoundation/MaterialX/blob/main/documents/DeveloperGuide/GraphEditor.md>
 - MaterialX annual review, ASWF TAC, 2026-02-04 (1.39.4: hex-tiling, WGSL, NanoColor, animated materials; Slang codegen; OpenPBR Volume; reference path tracers): <https://tac.aswf.io/meetings/2026-02-04/MaterialX_TAC_Update_2026_Final.pdf>
