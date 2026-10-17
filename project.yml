@@ -28,6 +28,9 @@ options:
 packages:
   MXKit:
     path: Packages/MXKit
+  # ViewportKit is the Storm/Metal viewport (spike M0b, Packages/ViewportKit).
+  ViewportKit:
+    path: Packages/ViewportKit
 
 targets:
   Margolaria:
@@ -43,4 +46,19 @@ targets:
       - package: MXKit
         product: MXKit
     # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
+    scheme: {}
+
+  # Spike M0b: a one-window demo of the Storm viewport (docs/spikes/M0b-storm-viewport.md).
+  # The .mtlx next to the source is copied into the app's resources.
+  ViewportSpike:
+    type: application
+    platform: macOS
+    sources:
+      - path: Spikes/M0bViewport
+    configFiles:
+      Debug: Config/ViewportSpike.xcconfig
+      Release: Config/ViewportSpike.xcconfig
+    dependencies:
+      - package: ViewportKit
+        product: ViewportKit
     scheme: {}

@@ -24,6 +24,10 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Self` | "This type", inside its own declaration | — | `MaterialXFileDocument.swift` |
 | `Result<T, E>` | Stores either a success value or an error | `std::expected` | `MXLibrary.swift` |
 | Number types | `Int`, `Int32`, `Double`… never convert implicitly; use `Int(x)` | Stricter than C | `MXLibrary.swift` |
+| `===` / `!==` | Same instance? (identity, for classes) | Pointer comparison | `ViewportView.swift` |
+| Property observers `didSet` | Code that runs after every assignment to a property | A custom ObjC setter | `ViewportView.swift` (`StormMTKView.renderer`) |
+| `repeat { } while` | Loop that runs at least once | `do { } while` | `Snapshot.swift` |
+| Raw strings `#"..."#` | Backslashes and quotes are literal; `"""` makes them multi-line | C++ `R"(...)"` | `StormRendererTests.swift` |
 
 ## Functions and closures
 
@@ -35,6 +39,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Trailing closures | A closure can follow the call's parentheses; extra ones get labels | — | `MargolariaApp.swift` |
 | Key paths `\.name` | A reference to a property, usable as a function | Pointer to member | `MXDocumentTests.swift` |
 | `inout` / `&` | The callee may modify the argument | Non-const reference parameter | `MXLibrary.swift` |
+| Capture lists `[weak self]` | Capture `self` weakly in a closure, so the closure doesn't keep it alive | `__weak` before an ObjC block | `ViewportView.swift` |
+| `fatalError("...")` | Stop the program with a message; never returns | `abort()` | `ViewportView.swift` |
 
 ## Protocols and extensions
 
@@ -45,6 +51,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Identifiable`, `Hashable`, `Equatable` | Standard protocols; the compiler writes `==` and `hash` for simple structs | `operator==` defaulted | `MXDocument.swift` |
 | Associated types | A type placeholder inside a protocol, filled in by each conforming type | Template parameter | `MaterialXFileDocument.swift` (`Snapshot`) |
 | `some View` | An opaque return type: one concrete type, not named | `auto` return type | `MargolariaApp.swift` |
+| Subclassing and `override` | Swift classes can subclass ObjC ones; `override` is required and checked | ObjC subclassing, C++ `override` | `ViewportView.swift` (`StormMTKView: MTKView`) |
+| Initializer rules | Set your own properties *before* `super.init`; `required init?(coder:)` must be provided | Reverse of `[super init]` first | `ViewportView.swift` |
 
 ## Modules and access
 
@@ -54,6 +62,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Access levels | `public` > `internal` (default) > `fileprivate` > `private` | `CxxString.swift` |
 | `@testable import` | Tests can see `internal` declarations | `MXDocumentTests.swift` |
 | Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MXKit/Package.swift` |
+| `@_exported import` | Re-export another module to everyone who imports this one | An umbrella header | `Snapshot.swift` |
+| Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |
 
 ## Concurrency (Swift 6)
 
@@ -61,6 +71,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 |---|---|---|
 | `Sendable` | Safe to share between threads; checked by the compiler | `MXError.swift` |
 | `@unchecked Sendable` | "I checked this by hand." Always explain why. | `MXLibrary.swift` |
+| `Task { @MainActor in }` | Schedule work to run later on the main thread | `dispatch_async(dispatch_get_main_queue(), ^{})` | `ViewportView.swift` |
 
 ## SwiftUI
 
@@ -73,6 +84,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@State`, `$binding` | View-owned storage; `$` passes a read/write reference to it | `ContentView.swift` |
 | `@ObservedObject` | Redraw when an `ObservableObject` changes | `ContentView.swift` |
 | `DocumentGroup`, `ReferenceFileDocument` | The standard Mac document app: open, save, autosave, versions | `MargolariaApp.swift`, `MaterialXFileDocument.swift` |
+| `NSViewRepresentable` | Wraps an AppKit view for SwiftUI: `makeNSView` once, `updateNSView` on changes | `ViewportView.swift` |
+| `.task(id:)` | Run work when the view appears and whenever `id` changes | `ViewportView.swift` |
+| `WindowGroup`, `.fileImporter` | A plain (non-document) window; the system Open panel | `Spikes/M0bViewport/ViewportSpikeApp.swift` |
 
 ## Swift ↔ C++
 
@@ -84,3 +98,4 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | C++ classes are structs | Copying a Swift value copies the C++ object (copy constructor) | `MXBridge.h` |
 | `const` ↔ `mutating` | Non-const C++ methods are `mutating`, so they need a `var` | `MXDocument.swift` |
 | C++ exceptions | Can't be caught in Swift; one that escapes terminates the process. Catch them in C++. | `MXBridge.cpp` |
+| Objective-C classes | Import as Swift classes: `-initWithX:error:` becomes `init(x:) throws`, `nullable` becomes `?` | `MGStormRenderer.h`, `Snapshot.swift` |
