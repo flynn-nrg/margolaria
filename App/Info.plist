@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Info.plist: the app's metadata, read by macOS (Finder, Launch Services, the
+  Dock). Values written as $(NAME) are filled in from build settings at build
+  time; most of them come from Config/Base.xcconfig.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.graphics-design</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright © 2026 Miguel Mendez. MIT License.</string>
+
+	<!--
+	  Document types this app can open. "Editor" means we can open and save
+	  them. LSItemContentTypes refers to the type declared below by its
+	  identifier, not by file extension.
+	-->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>MaterialX Document</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Default</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.materialx.mtlx</string>
+			</array>
+		</dict>
+	</array>
+
+	<!--
+	  Teaches macOS what a .mtlx file is: a Uniform Type Identifier (UTI).
+	  It's "imported" rather than "exported" because we don't own the format;
+	  MaterialX does. If another app declares the same identifier, the two
+	  declarations simply agree. It conforms to public.xml, so tools that
+	  understand XML (Quick Look, text editors) can handle it too.
+	-->
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.materialx.mtlx</string>
+			<key>UTTypeDescription</key>
+			<string>MaterialX Document</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeReferenceURL</key>
+			<string>https://materialx.org</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>mtlx</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

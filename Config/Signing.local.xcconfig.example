@@ -1,0 +1,19 @@
+// Signing.local.xcconfig.example
+//
+// Copy this file to Config/Signing.local.xcconfig (git-ignored) and fill in
+// your own values. Base.xcconfig includes it last, so values here win.
+//
+// Find your Team ID at https://developer.apple.com/account (Membership details),
+// and list the signing identities on this Mac with:
+//
+//     security find-identity -v -p codesigning
+
+// Your 10-character Apple Developer Team ID.
+DEVELOPMENT_TEAM = XXXXXXXXXX
+
+// Debug builds: an "Apple Development" certificate is enough to run locally.
+CODE_SIGN_IDENTITY[config=Debug] = Apple Development
+
+// Release builds: "Developer ID Application" is the certificate that
+// notarization and distribution outside the App Store require.
+CODE_SIGN_IDENTITY[config=Release] = Developer ID Application

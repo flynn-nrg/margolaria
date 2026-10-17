@@ -1,0 +1,20 @@
+# --- Generated Xcode project ----------------------------------------------
+# project.yml is the source of truth; run `xcodegen` to (re)create the
+# .xcodeproj. Never edit the generated project by hand.
+/Margolaria.xcodeproj/
+
+# --- Build products ------------------------------------------------------
+/build/
+DerivedData/
+# SwiftPM's build directory, for local packages built with `swift build`.
+.build/
+.swiftpm/
+
+# --- Local, per-developer settings ---------------------------------------
+# Holds DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY (see Config/Signing.local.xcconfig.example).
+/Config/Signing.local.xcconfig
+xcuserdata/
+*.xcuserstate
+
+# --- macOS ---------------------------------------------------------------
+.DS_Store

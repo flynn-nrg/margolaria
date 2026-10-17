@@ -1,0 +1,65 @@
+// Base.xcconfig
+//
+// Build settings shared by every target and configuration (Debug and Release).
+//
+// An .xcconfig file is a plain-text list of Xcode build settings, `KEY = value`.
+// It replaces clicking through the "Build Settings" tab in Xcode. project.yml
+// points every configuration at this file, so settings live here, in a format
+// that reviews well in git, rather than inside the generated .xcodeproj.
+//
+// Comments in .xcconfig files use `//`, like C++.
+
+// --- Identity -------------------------------------------------------------
+
+// Reverse-DNS identifier for the app. macOS uses it to key preferences,
+// permissions and notarization, so it must not change after the first
+// notarized release (docs/PLAN.md §7.1).
+PRODUCT_BUNDLE_IDENTIFIER = eu.emerald-isle.margolaria
+
+// User-visible version ("0.1.0") and build number. CFBundleShortVersionString
+// and CFBundleVersion in the generated Info.plist read these.
+MARKETING_VERSION = 0.1.0
+CURRENT_PROJECT_VERSION = 1
+
+// --- Platform and language ------------------------------------------------
+
+// Oldest macOS the app runs on. SwiftUsd needs 14; 15 gives us the current
+// SwiftUI document and Observation APIs without availability checks.
+MACOSX_DEPLOYMENT_TARGET = 15.0
+
+// Swift 6 language mode: turns on strict data-race checking at compile time.
+// It is stricter than Swift 5 mode, and the errors it produces are a good way
+// to learn Swift's concurrency model (docs/PLAN.md §6.1).
+SWIFT_VERSION = 6.0
+
+// --- Swift / C++ interoperability (required by SwiftUsd) ------------------
+// See https://apple.github.io/SwiftUsd/documentation/openusd/gettingstarted
+
+// Lets Swift import C++ headers directly ("C++ / Objective-C++" in the UI).
+SWIFT_OBJC_INTEROP_MODE = objcxx
+
+// OpenUSD and its Swift bindings are compiled as GNU C++17; our C++ must match.
+CLANG_CXX_LANGUAGE_STANDARD = gnu++17
+
+// --- Code signing ---------------------------------------------------------
+//
+// Defaults are for a machine without an Apple certificate: "-" means ad-hoc
+// signing ("Sign to Run Locally"). The app runs on this Mac but cannot be
+// notarized. Real identities go in Signing.local.xcconfig, included at the end.
+
+// Manual: we name the identity explicitly instead of letting Xcode pick one.
+CODE_SIGN_STYLE = Manual
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+// Hardened Runtime is required for notarization. It is on from day one so that
+// any dependency that breaks under it shows up immediately (docs/PLAN.md §7.1).
+ENABLE_HARDENED_RUNTIME = YES
+
+// Entitlements: the capabilities the app asks the OS for. See the file.
+CODE_SIGN_ENTITLEMENTS = Config/Margolaria.entitlements
+
+// Per-developer overrides (team ID, signing identity). The `?` makes the
+// include optional, so the project still builds when the file does not exist.
+// The file is git-ignored; copy Signing.local.xcconfig.example to create it.
+#include? "Signing.local.xcconfig"

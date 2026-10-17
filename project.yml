@@ -1,0 +1,46 @@
+# project.yml
+#
+# XcodeGen specification for Margolaria.xcodeproj. The .xcodeproj is generated
+# from this file and is git-ignored; never edit it by hand. After changing this
+# file, or adding or removing source files, regenerate it with:
+#
+#     xcodegen
+#
+# Build settings do NOT live here. They are in Config/*.xcconfig, which review
+# better and are the same files Xcode itself understands. This file only says
+# which targets exist, where their sources are and what they depend on.
+#
+# Reference: https://github.com/yonaskolb/XcodeGen/blob/master/Docs/ProjectSpec.md
+
+name: Margolaria
+
+options:
+  # XcodeGen can fill in default build settings ("presets"). "project" keeps
+  # only its project-level defaults (Debug/Release optimisation levels, warning
+  # flags) and skips its target-level ones, so every target setting comes from
+  # our xcconfig files and nothing is set behind our backs.
+  settingPresets: project
+  # Mirror the folder structure as groups in Xcode's navigator.
+  createIntermediateGroups: true
+
+# Local Swift packages. MXKit is our MaterialX layer (Packages/MXKit). It pulls
+# in apple/SwiftUsd, so the app gets OpenUSD and MaterialX through it.
+packages:
+  MXKit:
+    path: Packages/MXKit
+
+targets:
+  Margolaria:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    # All build settings for this target, including signing (Config/Base.xcconfig).
+    configFiles:
+      Debug: Config/Margolaria.xcconfig
+      Release: Config/Margolaria.xcconfig
+    dependencies:
+      - package: MXKit
+        product: MXKit
+    # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
+    scheme: {}

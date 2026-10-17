@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Margolaria.entitlements
+
+  Entitlements are capabilities the app asks macOS for. They are embedded in the
+  code signature, so they cannot be changed without re-signing the app.
+
+  This list is empty on purpose:
+  - No App Sandbox yet (docs/PLAN.md §7.1). A .mtlx file can point at textures
+    anywhere on disk, and a sandboxed app would need the user to grant access.
+  - No Hardened Runtime exceptions (such as disable-library-validation). Each of
+    those weakens the app's protection, so each one gets added deliberately,
+    with a comment explaining why.
+
+  Xcode adds com.apple.security.get-task-allow to Debug builds by itself, so
+  the debugger can attach. Release builds never get it.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict/>
+</plist>
