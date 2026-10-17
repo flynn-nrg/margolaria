@@ -1,0 +1,24 @@
+// Margolaria.xcconfig
+//
+// Build settings for the Margolaria app target. The shared settings (bundle
+// ID, Swift version, C++ interop, signing) come from Base.xcconfig.
+
+#include "Base.xcconfig"
+
+// Build for macOS.
+SDKROOT = macosx
+
+// Name of the .app bundle and its executable: Margolaria.app/Contents/MacOS/Margolaria.
+PRODUCT_NAME = Margolaria
+
+// We keep a hand-written Info.plist (it declares the .mtlx document type)
+// instead of letting Xcode generate one.
+GENERATE_INFOPLIST_FILE = NO
+INFOPLIST_FILE = App/Info.plist
+
+// Where the dynamic linker looks for "@rpath/..." libraries: the app's
+// Contents/Frameworks folder. SwiftUsd's 108 frameworks are embedded there.
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+
+// Combine @1x and @2x images into one multi-resolution file.
+COMBINE_HIDPI_IMAGES = YES

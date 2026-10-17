@@ -1,0 +1,24 @@
+{
+  "originHash" : "b310e5cd61facc8181971f429364c75ee5ecbe2fab93e2e50a31fdbf8c7628c7",
+  "pins" : [
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "2b59c0c741e9184ab057fd22950b491076d42e91",
+        "version" : "603.0.0"
+      }
+    },
+    {
+      "identity" : "swiftusd",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/SwiftUsd",
+      "state" : {
+        "revision" : "203b5eb270db1616c3c129c8fe2a07ef3ad7f83a",
+        "version" : "8.1.0"
+      }
+    }
+  ],
+  "version" : 3
+}
