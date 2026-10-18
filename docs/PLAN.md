@@ -184,13 +184,13 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 | Hardened Runtime | **On** for all configurations | Notarization requires it. Turning it on from day one means we never find out late that a C++ dependency breaks under it. |
 | App Sandbox | **Off at first**, revisited before any App Store submission | A `.mtlx` file refers to textures by relative or absolute paths anywhere on disk. A sandboxed app can only read them after the user grants access, through security-scoped bookmarks or folder access. That is solvable, but it is extra work we don't want in M0–M2. |
 | Signing configuration | Tracked `Config/Base.xcconfig` with an optional `#include? "Signing.local.xcconfig"`. The local file holds `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY` and is in `.gitignore`. | The Team ID isn't secret, but keeping it out of the repo means anyone can clone and build with their own team. |
-| Bundle identifier | To decide, reverse-DNS on a domain the author owns | Must be stable before the first notarized release. Changing it later resets user preferences and permissions. |
-| Embedded C++ frameworks | Dynamic xcframeworks (SwiftUsd, OCIO, OIIO) are set to **Embed & Sign**, so Xcode re-signs them with our identity. Static ones are linked into the binary. | Under the Hardened Runtime, *library validation* refuses to load dylibs signed by a different team. |
+| Bundle identifier | **`eu.emerald-isle.margolaria`** (`Config/Base.xcconfig`); spikes use `eu.emerald-isle.margolaria.spike-*` | Must be stable before the first notarized release. Changing it later resets user preferences and permissions. |
+| Embedded C++ frameworks | Dynamic xcframeworks (SwiftUsd, OCIO, OIIO) are set to **Embed & Sign**, so Xcode re-signs them with our identity. Static ones are linked into the binary. SwiftUsd's are all dynamic and arm64 only, so the app is **Apple silicon only** (`ARCHS = arm64`; spike M0e). | Under the Hardened Runtime, *library validation* refuses to load dylibs signed by a different team. |
 | Bundle resources | USD `plugInfo.json` files, MaterialX `libraries/` and the OCIO config are shipped read-only inside `Contents/Resources`. **Nothing writes into the app bundle at runtime.** Shader and pipeline caches go to `~/Library/Caches/<bundle-id>/`. | Changing a signed bundle after signing breaks its signature. |
 | Embedded Python (M6) | Every `.so`/`.dylib` in the bundled Python, and the bundled site-packages, is signed by us at build time. User-installed **pure-Python** packages work. User-installed packages with **native extensions** signed by someone else would be blocked by library validation. As with Hydra delegates below, that needs `disable-library-validation`, so we decide it deliberately. | Blender and Houdini users expect `pip install`, so this trade-off will come up. |
 | Third-party Hydra delegates (M5) | Loading renderers such as Arnold or Karma at runtime needs the `com.apple.security.cs.disable-library-validation` entitlement. We postpone that and decide explicitly when we get there. | It weakens the Hardened Runtime's protection, so it should be a deliberate choice, not a default. |
 
-### 7.2 Release pipeline (scripted in `scripts/release.sh` once the app exists)
+### 7.2 Release pipeline (`scripts/release.sh`, since spike M0e)
 
 1. `xcodebuild archive` with the Release configuration.
 2. `xcodebuild -exportArchive`, with `method = developer-id` in the export options.
@@ -218,7 +218,7 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 4. Should we have our own reference path tracer later? The MaterialX roadmap mentions integrating OSL testrender, WGSL and MDL as reference renderers.
 5. Document format: plain `.mtlx` only, or also open `.usda`/`.usdz` and edit the MaterialX materials inside them?
 6. Licensing of the final app. The repo LICENSE already exists; every dependency above is Apache-2.0 or BSD-3.
-7. Are the SwiftUsd xcframeworks static or dynamic? This decides what gets embedded and re-signed (§7.1). Answered by spike M0e.
+7. ~~Are the SwiftUsd xcframeworks static or dynamic?~~ **Answered: dynamic** (108 frameworks, arm64 only). Xcode embeds and re-signs them; no library-validation exception is needed (spike M0e, `docs/spikes/M0e-signing-notarization.md`).
 8. Is the Mac App Store a real goal? If yes, the App Sandbox and security-scoped texture access move earlier in the roadmap.
 9. ~~How should power users script the app?~~ **Decided: Python** (§1.1, §3, M6). Still open: which Python version to pin, and whether to allow user-installed native packages (§7.1).
 

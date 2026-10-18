@@ -32,6 +32,11 @@ MACOSX_DEPLOYMENT_TARGET = 15.0
 // to learn Swift's concurrency model (docs/PLAN.md §6.1).
 SWIFT_VERSION = 6.0
 
+// Apple silicon only. SwiftUsd's macOS frameworks contain arm64 code and no
+// x86_64, so an Intel slice of the app could not link. Without this, Release
+// builds (which build every architecture, unlike Debug) fail at the link step.
+ARCHS = arm64
+
 // --- Swift / C++ interoperability (required by SwiftUsd) ------------------
 // See https://apple.github.io/SwiftUsd/documentation/openusd/gettingstarted
 
@@ -58,6 +63,12 @@ ENABLE_HARDENED_RUNTIME = YES
 
 // Entitlements: the capabilities the app asks the OS for. See the file.
 CODE_SIGN_ENTITLEMENTS = Config/Margolaria.entitlements
+
+// Xcode adds `com.apple.security.get-task-allow` (debugger may attach) to
+// every build it signs, Release included; only an archive export removes it.
+// Notarization rejects it, so keep it out of Release builds, which are then
+// notarizable as built (scripts/release.sh). Debug keeps it for the debugger.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS[config=Release] = NO
 
 // Per-developer overrides (team ID, signing identity). The `?` makes the
 // include optional, so the project still builds when the file does not exist.
