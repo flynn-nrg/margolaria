@@ -67,7 +67,7 @@ All of the following was verified on 2026-10-11.
 | Shader generation for previews | MaterialX **MslShaderGenerator** + our own small Metal renderer for node swatches | The main viewport uses Hydra/Storm, which already runs MaterialX codegen internally. |
 | Color management | **OpenColorIO** (C++), built as an xcframework | Needed for colour pickers, the viewport view transform and texture colour spaces. Not in SwiftUsd. Default config: ACES 2.0 studio. |
 | Image I/O | **Apple ImageIO** first (handles EXR, PNG, JPEG, TIFF, HEIC), then **OpenImageIO** (C++) when we need `.tx`, tiled or mip-mapped files, or UDIMs | SwiftUsd's Hio already reads images for Hydra. Note: the Swift package called "OpenImageIO" (1amageek) is an unrelated pure-Swift codec library, **not** OIIO. |
-| Graph canvas | Custom view. **Spike:** SwiftUI `Canvas` vs. AppKit `NSView` + Core Animation vs. Metal | Must handle about 500 nodes at 120 fps, plus hit testing, marquee selection and wire routing |
+| Graph canvas | Custom view: AppKit `NSView` + Core Animation, one layer per node (chosen in spike M0d over SwiftUI `Canvas` and Metal) | Must handle about 500 nodes at 120 fps, plus hit testing, marquee selection and wire routing |
 | Text view | AppKit `NSTextView` (TextKit 2) with XML highlighting | Two-way sync with the graph |
 | Scripting | **Embedded CPython 3.x** as a relocatable, signable `Python.framework`, for example from BeeWare's Python-Apple-support or a python.org build. PyMaterialX and USD's `pxr` are built against the **same** MaterialX and USD binaries the app uses. Our own `margolaria` module is bound with pybind11 or nanobind. | The same binaries are required so that Python and Swift operate on the *same* `mx::Document` in memory, not on copies. **Spike:** SwiftUsd does not appear to ship Python bindings, so we may have to build USD and MaterialX with Python enabled ourselves. |
 | Build | Xcode project plus SwiftPM local packages; xcframeworks for the C++ dependencies | We can use SwiftUsd's own scripts as the template for building OCIO and OIIO |
@@ -213,7 +213,7 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 ## 9. Open questions
 
 1. Does SwiftUsd expose the MaterialX C++ API to Swift directly, or only link it internally for Hydra? (M0a.) This decides whether we build MaterialX ourselves.
-2. Should the canvas be SwiftUI `Canvas` or Metal? It depends on M0d performance.
+2. ~~Should the canvas be SwiftUI `Canvas` or Metal?~~ **Decided: AppKit `NSView` + Core Animation**, one layer per node; no Metal (spike M0d, `docs/spikes/M0d-graph-canvas.md`).
 3. Should RealityKit's custom MaterialX nodes (RealityKit PBR, Unlit, geometry modifiers) be supported as a library or target, for visionOS users?
 4. Should we have our own reference path tracer later? The MaterialX roadmap mentions integrating OSL testrender, WGSL and MDL as reference renderers.
 5. Document format: plain `.mtlx` only, or also open `.usda`/`.usdz` and edit the MaterialX materials inside them?
