@@ -5,7 +5,7 @@
 // Open button picks another file. Drag to orbit, scroll to zoom.
 //
 // This is a throwaway target, kept small on purpose. The viewport itself
-// (Packages/ViewportKit) is what moves into the real app in M1.
+// (ViewportKit in Packages/MargolariaKit) is what moves into the real app in M1.
 //
 // Introduces (SWIFT): `WindowGroup`, `.fileImporter`, `Result` and its
 // `switch`, `.toolbar` with a button, `UTType` from a file extension.

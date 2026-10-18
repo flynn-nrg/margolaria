@@ -1,7 +1,8 @@
 // MXDocumentTests.swift
 //
 // Tests for MXKit: library loading, parsing, round-tripping, validation.
-// Run them from Packages/MXKit with `swift test`.
+// Run them from Packages/MargolariaKit with `swift test`, or with
+// `xcodebuild test -scheme Margolaria` from the repository root.
 //
 // Introduces (SWIFT): the Swift Testing framework (`@Test`, `#expect`,
 // `#require`, `@Suite`), attributes and macros, `@testable import`,
