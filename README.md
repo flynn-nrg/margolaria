@@ -37,3 +37,9 @@ Measured on 2026-10-18:
 |---|---|---|
 | `swift build` + tests, in `Packages/MargolariaKit` | 13 min per package (MXKit, ViewportKit) | 73 s (with the indexer running alongside) |
 | `xcodebuild build-for-testing -scheme Margolaria` (app + test bundles) | — | 96 s (indexer idle) |
+
+### Releases
+
+`scripts/release.sh` archives Margolaria, exports it signed with Developer ID, has Apple notarize it, staples the ticket and checks it with Gatekeeper. The result is `build/release/Margolaria-<version>.zip`. It needs a Developer ID certificate in your keychain and, once, a notarization profile; the comments at the top of the script explain both. `scripts/release.sh --no-notarize` stops after signing. Details and gotchas: [docs/spikes/M0e-signing-notarization.md](docs/spikes/M0e-signing-notarization.md).
+
+The app runs on Apple silicon only: SwiftUsd's macOS frameworks have no Intel code.
