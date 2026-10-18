@@ -43,6 +43,38 @@ struct ElementSummary {
     std::string type;
     /// Number of direct child elements (inputs, outputs, nodes inside a nodegraph, ...).
     int childCount = 0;
+    /// The element's path from the document root, such as "NG_copper/grain".
+    /// Equal to `name` for top-level elements.
+    std::string path;
+};
+
+/// One uniform (shader parameter) of a generated shader, with its default value.
+struct ShaderUniform {
+    /// The variable name in the generated source, such as "noise3d_amplitude"
+    /// or "u_worldMatrix".
+    std::string name;
+    /// The MaterialX type name: "float", "color3", "vector3", "matrix44",
+    /// "integer", "boolean", "filename", ...
+    std::string type;
+    /// The default value as numbers, in order (3 for a color3, 16 for a
+    /// matrix44, 1 for a float, integer or boolean). Empty when the uniform
+    /// has no default, such as the transform matrices the renderer must set.
+    std::vector<float> value;
+    /// The default value for string-like types ("filename", "string").
+    std::string stringValue;
+};
+
+/// A shader generated for one element, in the Metal Shading Language.
+struct GeneratedShader {
+    /// Complete MSL source for the vertex stage (entry point "VertexMain").
+    std::string vertexSource;
+    /// Complete MSL source for the fragment stage (entry point "FragmentMain").
+    std::string pixelSource;
+    /// The type of the output being shaded: "color3", "float",
+    /// "surfaceshader", ... Surface shaders need lights; plain values don't.
+    std::string outputType;
+    /// Every uniform of both stages, with default values where known.
+    std::vector<ShaderUniform> uniforms;
 };
 
 /// The MaterialX standard data libraries: stdlib, pbrlib, bxdf and the rest.
@@ -104,8 +136,20 @@ public:
     /// The direct children of the root <materialx> element, in file order.
     std::vector<ElementSummary> topLevelElements() const;
 
+    /// Every element a shader can be generated for, in file order: top-level
+    /// nodes and materials, and the nodes and outputs inside nodegraphs.
+    std::vector<ElementSummary> shadeableElements() const;
+
     /// The `version` attribute of the root element, such as "1.39".
     std::string documentVersion() const;
+
+    /// Generates a Metal shader for the element at `elementPath`: a node, a
+    /// node's output or a material, for example "NG_copper/grain" or
+    /// "M_BrushedCopper". The library provides the node implementations and
+    /// must be the one set with setDataLibrary().
+    /// Returns false and sets `errorMessage` if generation fails.
+    bool generateMsl(const std::string& elementPath, const Library& library,
+                     GeneratedShader& shader, std::string& errorMessage) const;
 
 private:
     struct Impl;

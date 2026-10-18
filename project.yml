@@ -52,6 +52,7 @@ targets:
       testTargets:
         - package: MargolariaKit/MXKitTests
         - package: MargolariaKit/ViewportKitTests
+        - package: MargolariaKit/PreviewKitTests
 
   # Spike M0b: a one-window demo of the Storm viewport (docs/spikes/M0b-storm-viewport.md).
   # The .mtlx next to the source is copied into the app's resources.
@@ -66,4 +67,20 @@ targets:
     dependencies:
       - package: MargolariaKit
         product: ViewportKit
+    scheme: {}
+
+  # Spike M0c: swatches from MaterialX's generated MSL (docs/spikes/M0c-msl-swatch.md).
+  SwatchSpike:
+    type: application
+    platform: macOS
+    sources:
+      - path: Spikes/M0cSwatches
+    configFiles:
+      Debug: Config/SwatchSpike.xcconfig
+      Release: Config/SwatchSpike.xcconfig
+    dependencies:
+      - package: MargolariaKit
+        product: MXKit
+      - package: MargolariaKit
+        product: PreviewKit
     scheme: {}
