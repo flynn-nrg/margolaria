@@ -24,8 +24,7 @@ import MXBridge
 ///   compiler writes the `==` and `hash(into:)` implementations for us.
 /// - `Sendable`: safe to pass between threads (see MXError.swift).
 public struct MXElementSummary: Identifiable, Hashable, Sendable {
-    /// The element's name, unique among the top-level elements, so it can
-    /// serve as the identifier.
+    /// The element's name, unique among its siblings.
     public let name: String
     /// The XML tag, such as "surfacematerial", "nodegraph" or "open_pbr_surface".
     public let category: String
@@ -33,12 +32,30 @@ public struct MXElementSummary: Identifiable, Hashable, Sendable {
     public let type: String
     /// Number of direct children (inputs, outputs, nested nodes).
     public let childCount: Int
+    /// The path from the document root, such as "NG_copper/grain". The same
+    /// as `name` for top-level elements.
+    public let path: String
 
-    /// Required by `Identifiable`.
+    /// Required by `Identifiable`. The path is unique in the whole document.
     ///
     /// SWIFT: A computed property again (no storage, see MXError.swift). For a
     /// one-line getter, the `return` keyword can be left out.
-    public var id: String { name }
+    public var id: String { path }
+}
+
+// SWIFT: An extension in the same file, adding an initializer. Keeping it out
+// of the struct's body means the struct still gets its automatic memberwise
+// initializer (`MXElementSummary(name:category:...)`); defining any `init`
+// inside the body would remove it.
+extension MXElementSummary {
+    /// Converts the bridge's C++ struct.
+    init(_ element: mxbridge.ElementSummary) {
+        self.init(name: element.name.swiftString,
+                  category: element.category.swiftString,
+                  type: element.type.swiftString,
+                  childCount: Int(element.childCount),
+                  path: element.path.swiftString)
+    }
 }
 
 /// The result of ``MXDocument/validate()``.
@@ -165,12 +182,17 @@ public final class MXDocument {
         // imported C++ struct `mxbridge.ElementSummary`, whose std::string
         // fields we convert to Swift Strings.
         for element in handle.topLevelElements() {
-            result.append(MXElementSummary(
-                name: element.name.swiftString,
-                category: element.category.swiftString,
-                type: element.type.swiftString,
-                childCount: Int(element.childCount)
-            ))
+            result.append(MXElementSummary(element))
+        }
+        return result
+    }
+
+    /// Every element a shader can be generated for (see ``generateMSL(for:library:)``):
+    /// top-level nodes and materials, and the nodes and outputs inside nodegraphs.
+    public var shadeableElements: [MXElementSummary] {
+        var result: [MXElementSummary] = []
+        for element in handle.shadeableElements() {
+            result.append(MXElementSummary(element))
         }
         return result
     }
@@ -178,6 +200,22 @@ public final class MXDocument {
     /// The document's MaterialX version, such as "1.39".
     public var documentVersion: String {
         handle.documentVersion().swiftString
+    }
+
+    /// Generates a Metal shader for the element at `path`, such as
+    /// "NG_copper/grain" (a node in a nodegraph) or "M_BrushedCopper" (a
+    /// material). `library` must be the one set with ``setDataLibrary(_:)``.
+    ///
+    /// - Throws: ``MXError/shaderGenerationFailed(_:)`` with MaterialX's message.
+    public func generateMSL(for path: String, library: MXLibrary) throws -> MXGeneratedShader {
+        // SWIFT: The C++ function fills in a struct passed by reference. In
+        // Swift that is an `inout` argument: a `var`, passed with `&`.
+        var shader = mxbridge.GeneratedShader()
+        var errorMessage = std.string()
+        guard handle.generateMsl(std.string(path), library.handle, &shader, &errorMessage) else {
+            throw MXError.shaderGenerationFailed(errorMessage.swiftString)
+        }
+        return MXGeneratedShader(shader)
     }
 
     /// The version of the MaterialX library Margolaria is linked against, such as "1.39.5".

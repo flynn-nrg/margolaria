@@ -38,6 +38,9 @@ public enum MXError: Error, Sendable {
 
     /// The document could not be serialised back to XML.
     case writeFailed
+
+    /// MaterialX could not generate a shader for an element.
+    case shaderGenerationFailed(String)
 }
 
 // SWIFT: An `extension` adds members to an existing type, here our own enum,
@@ -71,6 +74,9 @@ extension MXError: CustomStringConvertible {
 
         case .writeFailed:
             return "Could not write MaterialX document."
+
+        case .shaderGenerationFailed(let message):
+            return "Could not generate a shader: \(message)"
         }
     }
 }

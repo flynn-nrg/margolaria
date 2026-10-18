@@ -13,8 +13,14 @@
 #include <MaterialXFormat/File.h>
 #include <MaterialXFormat/Util.h>
 #include <MaterialXFormat/XmlIo.h>
+#include <MaterialXGenMsl/MslShaderGenerator.h>
+#include <MaterialXGenShader/DefaultColorManagementSystem.h>
+#include <MaterialXGenShader/GenContext.h>
+#include <MaterialXGenShader/Shader.h>
+#include <MaterialXGenShader/ShaderStage.h>
 
 #include <exception>
+#include <sstream>
 
 namespace mx = MaterialX;
 
@@ -28,6 +34,9 @@ namespace mxbridge {
 struct Library::Impl {
     mx::DocumentPtr definitions; // Every library file, merged into one document.
     int fileCount = 0;
+    // The folder containing `libraries`. Shader generation reads the node
+    // implementations (libraries/stdlib/genmsl/*.metal, ...) from here.
+    std::string librariesRoot;
 };
 
 struct Document::Impl {
@@ -59,6 +68,7 @@ Library Library::loadStandard(const std::string& librariesRoot, std::string& err
         }
 
         impl->fileCount = static_cast<int>(loadedFiles.size());
+        impl->librariesRoot = librariesRoot;
 
         Library library;
         library._impl = impl;
@@ -154,13 +164,148 @@ std::vector<ElementSummary> Document::topLevelElements() const {
         // attribute instead of casting to mx::TypedElement.
         summary.type = element->getAttribute(mx::TypedElement::TYPE_ATTRIBUTE);
         summary.childCount = static_cast<int>(element->getChildren().size());
+        summary.path = element->getNamePath();
         result.push_back(std::move(summary));
+    }
+    return result;
+}
+
+namespace {
+
+/// The summary of `element`, with its full path.
+ElementSummary Summarize(const mx::ElementPtr& element) {
+    ElementSummary summary;
+    summary.name = element->getName();
+    summary.category = element->getCategory();
+    summary.type = element->getAttribute(mx::TypedElement::TYPE_ATTRIBUTE);
+    summary.childCount = static_cast<int>(element->getChildren().size());
+    summary.path = element->getNamePath();
+    return summary;
+}
+
+} // namespace
+
+std::vector<ElementSummary> Document::shadeableElements() const {
+    std::vector<ElementSummary> result;
+    if (!_impl) {
+        return result;
+    }
+    for (const mx::ElementPtr& element : _impl->document->getChildren()) {
+        if (element->isA<mx::Node>()) {
+            // Top-level nodes, including surface shaders and materials.
+            result.push_back(Summarize(element));
+        } else if (mx::NodeGraphPtr graph = element->asA<mx::NodeGraph>()) {
+            // A nodegraph's own nodes and outputs, in file order.
+            for (const mx::ElementPtr& child : graph->getChildren()) {
+                if (child->isA<mx::Node>() || child->isA<mx::Output>()) {
+                    result.push_back(Summarize(child));
+                }
+            }
+        }
     }
     return result;
 }
 
 std::string Document::documentVersion() const {
     return _impl ? _impl->document->getVersionString() : std::string();
+}
+
+namespace {
+
+/// Splits a MaterialX value string ("0.95, 0.64, 0.54", "true", "2") into numbers.
+std::vector<float> ParseNumbers(const std::string& type, const std::string& text) {
+    std::vector<float> numbers;
+    if (type == "boolean") {
+        numbers.push_back(text == "true" ? 1.0f : 0.0f);
+        return numbers;
+    }
+    std::stringstream stream(text);
+    std::string item;
+    while (std::getline(stream, item, ',')) {
+        try {
+            numbers.push_back(std::stof(item));
+        } catch (const std::exception&) {
+            return {}; // Not numeric (an enum string, for example).
+        }
+    }
+    return numbers;
+}
+
+/// Appends the uniforms of every uniform block in `stage` to `uniforms`.
+void CollectUniforms(const mx::ShaderStage& stage, std::vector<ShaderUniform>& uniforms) {
+    for (const auto& [blockName, block] : stage.getUniformBlocks()) {
+        for (size_t i = 0; i < block->size(); ++i) {
+            const mx::ShaderPort* port = (*block)[i];
+            ShaderUniform uniform;
+            uniform.name = port->getVariable();
+            uniform.type = port->getType().getName();
+            if (mx::ValuePtr value = port->getValue()) {
+                const std::string text = value->getValueString();
+                if (uniform.type == "filename" || uniform.type == "string") {
+                    uniform.stringValue = text;
+                } else {
+                    uniform.value = ParseNumbers(uniform.type, text);
+                }
+            }
+            uniforms.push_back(std::move(uniform));
+        }
+    }
+}
+
+} // namespace
+
+bool Document::generateMsl(const std::string& elementPath, const Library& library,
+                           GeneratedShader& shader, std::string& errorMessage) const {
+    if (!_impl || !library._impl) {
+        errorMessage = "No document or library loaded";
+        return false;
+    }
+    try {
+        mx::ElementPtr element = _impl->document->getDescendant(elementPath);
+        if (!element) {
+            errorMessage = "No element at path " + elementPath;
+            return false;
+        }
+
+        mx::ShaderGeneratorPtr generator = mx::MslShaderGenerator::create();
+
+        // Colour management: converts colours and textures tagged with a
+        // colour space (such as srgb_texture) to the working space, using the
+        // conversion nodes defined in the standard library.
+        mx::DefaultColorManagementSystemPtr colorManagement =
+            mx::DefaultColorManagementSystem::create(generator->getTarget());
+        colorManagement->loadLibrary(library._impl->definitions);
+        generator->setColorManagementSystem(colorManagement);
+
+        mx::GenContext context(generator);
+        // Where the per-node MSL snippets live (libraries/stdlib/genmsl/...).
+        context.registerSourceCodeSearchPath(mx::FilePath(library._impl->librariesRoot));
+        // Shade in linear Rec.709, the documents' usual working space.
+        context.getOptions().targetColorSpaceOverride = "lin_rec709";
+
+        mx::ShaderPtr generated = generator->generate(element->getName(), element, context);
+        if (!generated) {
+            errorMessage = "Shader generation produced nothing for " + elementPath;
+            return false;
+        }
+
+        shader.vertexSource = generated->getSourceCode(mx::Stage::VERTEX);
+        shader.pixelSource = generated->getSourceCode(mx::Stage::PIXEL);
+
+        // The shaded output's type: the element's own type for an output or
+        // node, "material" for a material node.
+        if (auto typed = element->asA<mx::TypedElement>()) {
+            shader.outputType = typed->getType();
+        }
+
+        shader.uniforms.clear();
+        CollectUniforms(generated->getStage(mx::Stage::VERTEX), shader.uniforms);
+        CollectUniforms(generated->getStage(mx::Stage::PIXEL), shader.uniforms);
+        return true;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return false;
+    }
 }
 
 // --- Free functions ----------------------------------------------------------

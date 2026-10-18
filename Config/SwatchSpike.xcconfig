@@ -1,0 +1,22 @@
+// SwatchSpike.xcconfig
+//
+// Build settings for the SwatchSpike demo app (spike M0c). The shared
+// settings (Swift version, C++ interop, signing, Hardened Runtime) come from
+// Base.xcconfig, so the spike is signed exactly like the real app.
+
+#include "Base.xcconfig"
+
+SDKROOT = macosx
+
+// A separate identifier, so the spike and the app never share preferences.
+PRODUCT_BUNDLE_IDENTIFIER = eu.emerald-isle.margolaria.spike-swatches
+PRODUCT_NAME = SwatchSpike
+
+// The spike has no document types to declare, so let Xcode write the
+// Info.plist from build settings.
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_CFBundleDisplayName = Swatch Spike
+
+// SwiftUsd's frameworks are embedded in Contents/Frameworks.
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
+COMBINE_HIDPI_IMAGES = YES
