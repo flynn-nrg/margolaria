@@ -2,6 +2,8 @@
 
 **Question** (PLAN.md §8, M0b): Can we render a USD stage with a MaterialX material in Hydra Storm on Metal, inside an `NSView`, using SwiftUsd?
 
+> Since 2026-10-18, ViewportKit lives in `Packages/MargolariaKit` together with MXKit. Build-time gotcha 6 below led to that change; see "Build times" in the README.
+
 **Answer: yes.** `UsdImagingGLEngine` from SwiftUsd renders with Storm on HgiMetal and hands back the frame as an `id<MTLTexture>`, which an `MTKView` copies to the screen. Storm compiles the MaterialX graph itself. A `.mtlx` file is brought in with a plain USD reference through the UsdMtlx plugin. No OpenGL is involved.
 
 Date: 2026-10-17. SwiftUsd 8.1.0 (OpenUSD v26.08, MaterialX 1.39.5), Xcode 27.1, Swift 6.4, macOS 27.0.1 on arm64.
@@ -14,7 +16,7 @@ ViewportSpike.app ──▶ ViewportKit (Swift) ──▶ ViewportBridge (Object
                        StormMTKView (MTKView)
 ```
 
-- **`Packages/ViewportKit`**, a new local package with the same split as MXKit:
+- **ViewportKit** (originally its own package, `Packages/ViewportKit`), with the same split as MXKit:
   - **ViewportBridge** (`MGStormRenderer.h/.mm`) is the only code that includes OpenUSD headers. Its header is plain Objective-C, using only Foundation and Metal types. That way Swift gets an ordinary class, `init(materialXFile:) throws`, and a `render(withWidth:height:) -> MTLTexture?`.
   - **ViewportKit** (Swift) has two parts:
     - `ViewportView` (SwiftUI) wraps `StormMTKView`, an `MTKView` subclass that draws on demand, orbits the camera on drag and zooms on scroll.

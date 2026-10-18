@@ -10,6 +10,11 @@ DerivedData/
 .build/
 .swiftpm/
 
+# --- Third-party code fetched by scripts ---------------------------------
+# apple/SwiftUsd, cloned and patched by scripts/fetch-swiftusd.sh. The patch
+# itself (Vendor/*.patch) is tracked.
+/Vendor/SwiftUsd/
+
 # --- Local, per-developer settings ---------------------------------------
 # Holds DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY (see Config/Signing.local.xcconfig.example).
 /Config/Signing.local.xcconfig

@@ -23,14 +23,13 @@ options:
   # Mirror the folder structure as groups in Xcode's navigator.
   createIntermediateGroups: true
 
-# Local Swift packages. MXKit is our MaterialX layer (Packages/MXKit). It pulls
-# in apple/SwiftUsd, so the app gets OpenUSD and MaterialX through it.
+# Local Swift packages. MargolariaKit holds all our code that talks to OpenUSD
+# and MaterialX: MXKit (MaterialX) and ViewportKit (the Storm viewport). It
+# depends on the SwiftUsd copy in Vendor/SwiftUsd; run scripts/fetch-swiftusd.sh
+# before the first build.
 packages:
-  MXKit:
-    path: Packages/MXKit
-  # ViewportKit is the Storm/Metal viewport (spike M0b, Packages/ViewportKit).
-  ViewportKit:
-    path: Packages/ViewportKit
+  MargolariaKit:
+    path: Packages/MargolariaKit
 
 targets:
   Margolaria:
@@ -43,10 +42,16 @@ targets:
       Debug: Config/Margolaria.xcconfig
       Release: Config/Margolaria.xcconfig
     dependencies:
-      - package: MXKit
+      - package: MargolariaKit
         product: MXKit
     # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
-    scheme: {}
+    # Its Test action runs the package's tests in the same build folder as
+    # the app, so `xcodebuild test -scheme Margolaria` reuses the app's build
+    # instead of compiling everything again (which `swift test` would do).
+    scheme:
+      testTargets:
+        - package: MargolariaKit/MXKitTests
+        - package: MargolariaKit/ViewportKitTests
 
   # Spike M0b: a one-window demo of the Storm viewport (docs/spikes/M0b-storm-viewport.md).
   # The .mtlx next to the source is copied into the app's resources.
@@ -59,6 +64,6 @@ targets:
       Debug: Config/ViewportSpike.xcconfig
       Release: Config/ViewportSpike.xcconfig
     dependencies:
-      - package: ViewportKit
+      - package: MargolariaKit
         product: ViewportKit
     scheme: {}

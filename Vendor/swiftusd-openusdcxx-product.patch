@@ -1,0 +1,12 @@
+--- a/Package.swift
++++ b/Package.swift
+@@ -32,6 +32,9 @@
+             "_OpenUSD_SwiftBindingHelpers",
+             "OpenUSD"
+         ]),
++        // Margolaria: OpenUSD's headers and frameworks only, without the Swift
++        // overlay (see margolaria/scripts/fetch-swiftusd.sh).
++        .library(name: "OpenUSDCxx", targets: ["_OpenUSD_SwiftBindingHelpers"]),
+         .plugin(name: "build-vanilla-openusd-plugin", targets: ["build-vanilla-openusd-plugin"]),
+         .plugin(name: "generate-plug-info-json", targets: ["generate-plug-info-json"]),
+     ],

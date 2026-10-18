@@ -4,6 +4,8 @@
 
 **Answer: yes, through a small C++ bridge. No separate MaterialX build is needed.**
 
+> Since 2026-10-18, MXKit lives in `Packages/MargolariaKit` together with ViewportKit, and depends on a local, patched copy of SwiftUsd (`scripts/fetch-swiftusd.sh`). See "Build times" in the README.
+
 Date: 2026-10-17. SwiftUsd 8.1.0 (OpenUSD v26.08), Xcode 27.1, Swift 6.4, macOS 27.0.1 on arm64.
 
 ## Findings
@@ -25,12 +27,12 @@ Date: 2026-10-17. SwiftUsd 8.1.0 (OpenUSD v26.08), Xcode 27.1, Swift 6.4, macOS 
 App (Swift) ──imports──▶ MXKit (Swift) ──imports──▶ MXBridge (C++) ──#include──▶ MaterialX (C++, from SwiftUsd)
 ```
 
-- **MXBridge** (`Packages/MXKit/Sources/MXBridge`) is the only code that includes MaterialX headers. Its header follows three rules:
+- **MXBridge** (`Packages/MargolariaKit/Sources/MXBridge`) is the only code that includes MaterialX headers. Its header follows three rules:
   - It includes **no MaterialX headers**: the MaterialX objects hide behind a pimpl.
   - **No C++ exception crosses into Swift**: they're caught and turned into an error string.
   - Its signatures use **only simple types**: `std::string`, `std::vector`, plain structs.
-- **MXKit** (`Packages/MXKit/Sources/MXKit`) wraps the bridge in Swift types: `MXDocument`, `MXLibrary`, `MXError`, `MXValidationResult`. The app never sees a C++ type.
-- The tests in `Packages/MXKit/Tests` cover:
+- **MXKit** (`Packages/MargolariaKit/Sources/MXKit`) wraps the bridge in Swift types: `MXDocument`, `MXLibrary`, `MXError`, `MXValidationResult`. The app never sees a C++ type.
+- The tests in `Packages/MargolariaKit/Tests/MXKitTests` cover:
   - loading the libraries;
   - parsing, and listing the elements in file order;
   - a **stable round trip** (writing the same document twice gives identical text);
@@ -38,7 +40,7 @@ App (Swift) ──imports──▶ MXKit (Swift) ──imports──▶ MXBridge
   - malformed XML producing a Swift error instead of a crash;
   - a v1.38 file being upgraded on load.
 
-Run them with `swift test` in `Packages/MXKit`.
+Run them with `swift test` in `Packages/MargolariaKit`.
 
 ## Gotchas found (worth remembering)
 

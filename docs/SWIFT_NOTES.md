@@ -61,7 +61,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `import` | Imports a compiled module, not text | everywhere |
 | Access levels | `public` > `internal` (default) > `fileprivate` > `private` | `CxxString.swift` |
 | `@testable import` | Tests can see `internal` declarations | `MXDocumentTests.swift` |
-| Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MXKit/Package.swift` |
+| Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MargolariaKit/Package.swift` |
 | `@_exported import` | Re-export another module to everyone who imports this one | An umbrella header | `Snapshot.swift` |
 | Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |
 
