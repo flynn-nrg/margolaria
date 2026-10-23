@@ -20,6 +20,7 @@
 #include <MaterialXGenShader/ShaderStage.h>
 
 #include <exception>
+#include <set>
 #include <sstream>
 
 namespace mx = MaterialX;
@@ -114,6 +115,29 @@ Document Document::readFromXmlString(const std::string& xml, std::string& errorM
     }
 }
 
+Document Document::readFromFile(const std::string& path, std::string& errorMessage) {
+    try {
+        auto impl = std::make_shared<Impl>();
+        impl->document = mx::createDocument();
+
+        // xi:include hrefs are looked up on the search path. Put the file's
+        // own folder on it, so includes relative to the file are found.
+        // Reading from a file also records the file's path as the
+        // document's source URI, which included elements override with their
+        // own file's path (see PortInfo::sourceUri).
+        mx::FilePath filePath(path);
+        mx::FileSearchPath searchPath(filePath.getParentPath());
+        mx::readFromXmlFile(impl->document, filePath, searchPath);
+
+        Document document;
+        document._impl = impl;
+        return document;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return Document();
+    }
+}
+
 bool Document::isLoaded() const {
     return _impl != nullptr;
 }
@@ -149,6 +173,88 @@ bool Document::validate(std::string& message) const {
         message = e.what();
         return false;
     }
+}
+
+namespace {
+
+/// The lines of `element`'s validation message: one per problem, for the
+/// element and everything below it. Empty when they are all valid.
+std::vector<std::string> ValidationLines(const mx::ElementPtr& element) {
+    std::string message;
+    // Element::validate is virtual, so this runs the Node, NodeGraph or
+    // Document version as appropriate. It is recursive: it validates the
+    // children too and appends their messages after the element's own.
+    element->validate(&message);
+    std::vector<std::string> lines;
+    std::stringstream stream(message);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty()) {
+            lines.push_back(line);
+        }
+    }
+    return lines;
+}
+
+/// MaterialX writes each problem as "<message>: <the element's XML tag>".
+/// We report the element by path instead, so drop the quoted tag.
+std::string StripQuotedElement(const std::string& line) {
+    const size_t quote = line.rfind(": <");
+    return quote == std::string::npos ? line : line.substr(0, quote);
+}
+
+/// Adds the problems of `element` and its descendants to `issues`, each
+/// attached to the element it is about, parents before children. Returns
+/// all the subtree's lines (for the caller's own bookkeeping).
+///
+/// MaterialX only reports problems for a whole subtree. To find which
+/// element a line belongs to, validate each child's subtree too: the lines
+/// that none of the children reported are the element's own. Valid subtrees
+/// are skipped entirely, so a valid document is validated only once.
+std::vector<std::string> CollectIssues(const mx::ElementPtr& element, std::vector<Issue>& issues) {
+    std::vector<std::string> all = ValidationLines(element);
+    if (all.empty()) {
+        return all;
+    }
+
+    // Where this element's own issues go: before its children's.
+    const size_t insertAt = issues.size();
+
+    // A multiset, not a set: two identical elements with the same problem
+    // produce two identical lines, and both must be accounted for.
+    std::multiset<std::string> fromChildren;
+    for (const mx::ElementPtr& child : element->getChildren()) {
+        for (std::string& line : CollectIssues(child, issues)) {
+            fromChildren.insert(std::move(line));
+        }
+    }
+
+    std::vector<Issue> own;
+    for (const std::string& line : all) {
+        auto found = fromChildren.find(line);
+        if (found != fromChildren.end()) {
+            fromChildren.erase(found); // Erases one copy only.
+        } else {
+            own.push_back(Issue{ element->getNamePath(), StripQuotedElement(line) });
+        }
+    }
+    issues.insert(issues.begin() + static_cast<std::ptrdiff_t>(insertAt), own.begin(), own.end());
+    return all;
+}
+
+} // namespace
+
+std::vector<Issue> Document::validationIssues() const {
+    std::vector<Issue> issues;
+    if (!_impl) {
+        return issues;
+    }
+    try {
+        CollectIssues(_impl->document, issues);
+    } catch (const std::exception& e) {
+        issues.push_back(Issue{ "", std::string("Validation failed: ") + e.what() });
+    }
+    return issues;
 }
 
 std::vector<ElementSummary> Document::topLevelElements() const {
@@ -201,6 +307,236 @@ std::vector<ElementSummary> Document::shadeableElements() const {
                     result.push_back(Summarize(child));
                 }
             }
+        }
+    }
+    return result;
+}
+
+namespace {
+
+/// The `xpos`/`ypos` attributes, if both are present and numeric.
+void ReadPosition(const mx::ElementPtr& element, NodeInfo& info) {
+    const std::string x = element->getAttribute("xpos");
+    const std::string y = element->getAttribute("ypos");
+    if (x.empty() || y.empty()) {
+        return;
+    }
+    try {
+        info.xpos = std::stof(x);
+        info.ypos = std::stof(y);
+        info.hasPosition = true;
+    } catch (const std::exception&) {
+        // Not numbers: treat the node as unpositioned.
+    }
+}
+
+/// The absolute path of the file `element` was read from, or "" if the
+/// document wasn't read from a file.
+///
+/// MaterialX records the source of included elements as the xi:include href,
+/// as written: usually relative to the file that included it. So a relative
+/// source URI is resolved against the source of the element above it, which
+/// handles includes inside includes too.
+std::string ResolvedSourceUri(const mx::ElementPtr& element) {
+    // The nearest element, from this one upwards, that records a source.
+    mx::ElementPtr owner = element;
+    while (owner && !owner->hasSourceUri()) {
+        owner = owner->getParent();
+    }
+    if (!owner) {
+        return {};
+    }
+    mx::FilePath uri(owner->getSourceUri());
+    mx::ElementPtr parent = owner->getParent();
+    if (uri.isAbsolute() || !parent) {
+        return uri.asString();
+    }
+    const std::string base = ResolvedSourceUri(parent);
+    if (base.empty()) {
+        return uri.asString();
+    }
+    return (mx::FilePath(base).getParentPath() / uri).getNormalized().asString();
+}
+
+/// An input or output element that exists in the document.
+PortInfo DescribePort(const mx::PortElementPtr& port) {
+    PortInfo info;
+    info.name = port->getName();
+    info.type = port->getType();
+    info.value = port->getValueString();
+    info.isAuthored = true;
+    info.nodeName = port->getNodeName();
+    info.nodeGraphName = port->getNodeGraphString();
+    info.outputName = port->getOutputString();
+    // Only inputs can refer to their graph's interface.
+    if (mx::InputPtr input = port->asA<mx::Input>()) {
+        info.interfaceName = input->getInterfaceName();
+    }
+    info.colorSpace = port->getColorSpace();
+    if (info.type == mx::FILENAME_TYPE_STRING) {
+        // Applies `fileprefix` from this element or any ancestor.
+        info.resolvedFilename = port->getResolvedValueString();
+    }
+    info.sourceUri = ResolvedSourceUri(port);
+    info.isUniform = port->getIsUniform();
+    return info;
+}
+
+/// An input that only exists in the nodedef: the node uses its default.
+PortInfo DescribeDefaultInput(const mx::InputPtr& definition) {
+    PortInfo info;
+    info.name = definition->getName();
+    info.type = definition->getType();
+    info.value = definition->getValueString();
+    info.isAuthored = false;
+    info.isUniform = definition->getIsUniform();
+    return info;
+}
+
+/// The inputs of `element` (a node or nodegraph) merged with those of its
+/// nodedef, if it has one: nodedef order first, then extra authored inputs.
+std::vector<PortInfo> MergeInputs(const mx::InterfaceElementPtr& element, const mx::NodeDefPtr& nodeDef) {
+    std::vector<PortInfo> inputs;
+    std::set<std::string> listed;
+    if (nodeDef) {
+        // getActiveInputs includes inputs inherited from parent nodedefs.
+        for (const mx::InputPtr& definition : nodeDef->getActiveInputs()) {
+            PortInfo info;
+            if (mx::InputPtr authored = element->getInput(definition->getName())) {
+                info = DescribePort(authored);
+            } else {
+                info = DescribeDefaultInput(definition);
+            }
+            info.uiFolder = definition->getAttribute("uifolder");
+            info.isUniform = info.isUniform || definition->getIsUniform();
+            listed.insert(info.name);
+            inputs.push_back(std::move(info));
+        }
+    }
+    for (const mx::InputPtr& authored : element->getInputs()) {
+        if (listed.count(authored->getName()) == 0) {
+            inputs.push_back(DescribePort(authored));
+        }
+    }
+    return inputs;
+}
+
+NodeInfo DescribeNode(const mx::NodePtr& node) {
+    NodeInfo info;
+    info.name = node->getName();
+    info.category = node->getCategory();
+    info.type = node->getType();
+    info.path = node->getNamePath();
+    ReadPosition(node, info);
+
+    // Finds the nodedef by category, type and input types, in the document
+    // and in its data library (Document::setDataLibrary).
+    mx::NodeDefPtr nodeDef = node->getNodeDef();
+    if (nodeDef) {
+        info.nodeDefName = nodeDef->getName();
+    }
+    info.inputs = MergeInputs(node, nodeDef);
+
+    if (nodeDef) {
+        for (const mx::OutputPtr& output : nodeDef->getActiveOutputs()) {
+            PortInfo port;
+            port.name = output->getName();
+            port.type = output->getType();
+            info.outputs.push_back(std::move(port));
+        }
+    } else if (info.type != mx::MULTI_OUTPUT_TYPE_STRING) {
+        // Unknown node: assume the usual single output.
+        PortInfo port;
+        port.name = "out";
+        port.type = info.type;
+        info.outputs.push_back(std::move(port));
+    }
+    return info;
+}
+
+NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
+    NodeInfo info;
+    info.name = graph->getName();
+    info.category = graph->getCategory(); // "nodegraph"
+    info.path = graph->getNamePath();
+    info.isNodeGraph = true;
+    ReadPosition(graph, info);
+
+    // A nodegraph that implements a nodedef (a "functional" graph) takes its
+    // interface from the nodedef.
+    mx::NodeDefPtr nodeDef = graph->getNodeDef();
+    if (nodeDef) {
+        info.nodeDefName = nodeDef->getName();
+    }
+    info.inputs = MergeInputs(graph, nodeDef);
+
+    std::vector<mx::OutputPtr> outputs = graph->getOutputs();
+    for (const mx::OutputPtr& output : outputs) {
+        info.outputs.push_back(DescribePort(output));
+    }
+    info.type = outputs.size() == 1 ? outputs.front()->getType() : mx::MULTI_OUTPUT_TYPE_STRING;
+    return info;
+}
+
+} // namespace
+
+bool Document::graph(const std::string& path, GraphInfo& graph, std::string& errorMessage) const {
+    if (!_impl) {
+        errorMessage = "No document loaded";
+        return false;
+    }
+    try {
+        // The document itself is a graph (mx::Document derives from
+        // mx::GraphElement), holding the top-level nodes and nodegraphs.
+        mx::ElementPtr scope = _impl->document;
+        if (!path.empty()) {
+            scope = _impl->document->getDescendant(path);
+            if (!scope || !scope->isA<mx::NodeGraph>()) {
+                errorMessage = "No nodegraph at path " + path;
+                return false;
+            }
+        }
+
+        graph = GraphInfo();
+        graph.path = path;
+        for (const mx::ElementPtr& child : scope->getChildren()) {
+            if (mx::NodePtr node = child->asA<mx::Node>()) {
+                graph.nodes.push_back(DescribeNode(node));
+            } else if (mx::NodeGraphPtr nodeGraph = child->asA<mx::NodeGraph>()) {
+                graph.nodes.push_back(DescribeNodeGraph(nodeGraph));
+            } else if (mx::OutputPtr output = child->asA<mx::Output>()) {
+                graph.outputs.push_back(DescribePort(output));
+            } else if (mx::InputPtr input = child->asA<mx::Input>()) {
+                // Only nodegraphs have inputs as direct children.
+                graph.interfaceInputs.push_back(DescribePort(input));
+            }
+            // Everything else (nodedefs, looks, backdrops, ...) is not part
+            // of the graph view.
+        }
+
+        // A functional nodegraph declares its interface in its nodedef, not
+        // as <input> children; use the merged list from DescribeNodeGraph.
+        if (mx::NodeGraphPtr nodeGraph = scope->asA<mx::NodeGraph>()) {
+            if (nodeGraph->getNodeDef()) {
+                graph.interfaceInputs = DescribeNodeGraph(nodeGraph).inputs;
+            }
+        }
+        return true;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return false;
+    }
+}
+
+std::vector<ElementSummary> Document::nodeGraphs() const {
+    std::vector<ElementSummary> result;
+    if (!_impl) {
+        return result;
+    }
+    // traverseTree visits every element depth-first, in file order.
+    for (const mx::ElementPtr& element : _impl->document->traverseTree()) {
+        if (element->isA<mx::NodeGraph>()) {
+            result.push_back(Summarize(element));
         }
     }
     return result;

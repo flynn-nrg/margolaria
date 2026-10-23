@@ -14,6 +14,8 @@ DerivedData/
 # apple/SwiftUsd, cloned and patched by scripts/fetch-swiftusd.sh. The patch
 # itself (Vendor/*.patch) is tracked.
 /Vendor/SwiftUsd/
+# MaterialX's example materials, fetched by scripts/fetch-materialx-examples.sh.
+/Vendor/MaterialX/
 
 # --- Local, per-developer settings ---------------------------------------
 # Holds DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY (see Config/Signing.local.xcconfig.example).
