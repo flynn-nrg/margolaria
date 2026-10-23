@@ -33,7 +33,8 @@
 	<!--
 	  Document types this app can open. "Editor" means we can open and save
 	  them. LSItemContentTypes refers to the type declared below by its
-	  identifier, not by file extension.
+	  identifier, not by file extension. The same identifier is passed to
+	  MaterialXDocument as `typeName`.
 	-->
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -46,27 +47,40 @@
 			<string>Default</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>org.materialx.mtlx</string>
+				<string>io.aswf.materialx</string>
 			</array>
+			<!--
+			  The NSDocument subclass that opens this type. Swift classes
+			  are registered with the Objective-C runtime under their module
+			  name, so it is "Margolaria.MaterialXDocument".
+			-->
+			<key>NSDocumentClass</key>
+			<string>$(PRODUCT_MODULE_NAME).MaterialXDocument</string>
 		</dict>
 	</array>
 
 	<!--
 	  Teaches macOS what a .mtlx file is: a Uniform Type Identifier (UTI).
 	  It's "imported" rather than "exported" because we don't own the format;
-	  MaterialX does. If another app declares the same identifier, the two
-	  declarations simply agree. It conforms to public.xml, so tools that
-	  understand XML (Quick Look, text editors) can handle it too.
+	  MaterialX does.
+
+	  macOS 27 declares this type itself ("MaterialX Shader Document", in
+	  CoreTypes), and a system declaration wins over any app's. We use the
+	  same identifier and conformances, so this entry only matters on older
+	  macOS versions that don't know the type. (Until M1a we used our own
+	  identifier, org.materialx.mtlx; macOS 27 then labelled .mtlx files with
+	  its type, and NSDocumentController refused to open them.)
 	-->
 	<key>UTImportedTypeDeclarations</key>
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>org.materialx.mtlx</string>
+			<string>io.aswf.materialx</string>
 			<key>UTTypeDescription</key>
 			<string>MaterialX Document</string>
 			<key>UTTypeConformsTo</key>
 			<array>
+				<string>public.3d-content</string>
 				<string>public.xml</string>
 			</array>
 			<key>UTTypeReferenceURL</key>

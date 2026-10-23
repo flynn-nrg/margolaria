@@ -15,13 +15,13 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Enum with no cases | A namespace for static helpers | C++ `namespace` | `MXDocumentTests.swift` (`Fixtures`) |
 | Optionals `T?` | A value or `nil`. Non-optional types can never be nil | Nullable pointer vs reference; Go's `v, ok` | `MXLibrary.swift` |
 | `if let` / `guard let` | Unwrap an optional; `guard` exits early if it's nil | `if (p) {...}` / `if (!p) return` | `MXLibrary.swift` |
-| `!`, `try!` | Force-unwrap / force-try: crash if nil or if it throws. Only use when failure is impossible. | `assert` + dereference | `MaterialXFileDocument.swift`, tests |
-| `??` | Use a default if the left side is nil | `p ? *p : d` | `MaterialXFileDocument.swift` |
-| Tuples | Anonymous fixed group of values; elements can have labels | `std::tuple` | `MaterialXFileDocument.swift` |
-| `typealias` | A second name for a type | `typedef` / `using` | `MaterialXFileDocument.swift` |
+| `!`, `try!` | Force-unwrap / force-try: crash if nil or if it throws. Only use when failure is impossible. | `assert` + dereference | `MaterialXDocument.swift`, tests |
+| `??` | Use a default if the left side is nil | `p ? *p : d` | `MaterialXDocument.swift` |
+| Tuples | Anonymous fixed group of values; elements can have labels | `std::tuple` | `SwatchGeometry.swift`, `MXCorpusTests.swift` |
+| `typealias` | A second name for a type | `typedef` / `using` | (was in `MaterialXFileDocument.swift`, removed in M1a) |
 | Computed properties | A property whose getter runs code, with no storage | ObjC `@property` with a custom getter | `MXError.swift` |
 | `static` / `static let` | Type members; `static let` is initialised lazily, exactly once, thread-safely | C++ static member; function-local static; `dispatch_once` | `MXLibrary.swift` (`bundled`) |
-| `Self` | "This type", inside its own declaration | — | `MaterialXFileDocument.swift` |
+| `Self` | "This type", inside its own declaration | — | `MXGraph.swift` (`Self.resolveFile`) |
 | `Result<T, E>` | Stores either a success value or an error | `std::expected` | `MXLibrary.swift` |
 | Number types | `Int`, `Int32`, `Double`… never convert implicitly; use `Int(x)` | Stricter than C | `MXLibrary.swift` |
 | `===` / `!==` | Same instance? (identity, for classes) | Pointer comparison | `ViewportView.swift` |
@@ -39,6 +39,12 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Enum as a state machine | Each case carries the data that state needs (`.movingNodes(start:original:)`) | A tagged union with a `switch` | `GraphCanvasController.swift` (`DragState`) |
 | Multi-pattern `case` | `case .a(let x), .b(let x):` binds the same name in each pattern | Fall-through `case` labels | `GraphCanvasController.swift` (`mouseDown`) |
 | Option sets | Bit flags as a set: `flags.contains(.shift)` | `if (flags & NSEventModifierFlagShift)` | `GraphEventView.swift` |
+| Failable initializer `init?` | An initializer that can return `nil`; the result is optional | ObjC `-init` returning nil | `MXGraph.swift` (`MXConnection`) |
+| Assigning `self` in an enum's `init` | `self = .node(name, output: nil)` picks the case | — | `MXGraph.swift` (`MXConnection`) |
+| `if let x` shorthand | Unwraps `x` into a constant of the same name | — | `MXGraph.swift` |
+| Nested types | `MXIssue.Severity`: a type declared inside another, for naming only | C++ nested class | `MXIssue.swift` |
+| `for … where` | Loops only over elements for which the condition holds | `continue` at the top of the loop | `MXIssue.swift` |
+| `try?` | Turns a thrown error into `nil` | Ignoring an error return | `MXIssue.swift` |
 
 ## Functions and closures
 
@@ -47,7 +53,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Argument labels | Part of the function name; `_` removes one at the call site | ObjC message syntax | `MXDocument.swift` (`setDataLibrary(_:)`) |
 | `throws` / `try` / `do`-`catch` | Errors are thrown and must be acknowledged with `try` at every call site | Go's `err` returns, but enforced by the compiler | `MXLibrary.swift` |
 | Closures | Anonymous functions; `$0` is the first argument | ObjC blocks, C++ lambdas | `MXDocument.swift` (`.map { String($0) }`) |
-| Trailing closures | A closure can follow the call's parentheses; extra ones get labels | — | `MargolariaApp.swift` |
+| Trailing closures | A closure can follow the call's parentheses; extra ones get labels | — | `ContentView.swift` (`Label { } icon: { }`) |
 | Key paths `\.name` | A reference to a property, usable as a function | Pointer to member | `MXDocumentTests.swift` |
 | `inout` / `&` | The callee may modify the argument | Non-const reference parameter | `MXLibrary.swift` |
 | Capture lists `[weak self]` | Capture `self` weakly in a closure, so the closure doesn't keep it alive | `__weak` before an ObjC block | `ViewportView.swift` |
@@ -55,6 +61,11 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `async` / `await`, `Task.yield()` | A function that can suspend without blocking its thread; `yield` lets other work (UI updates) run | Coroutines; Go's `runtime.Gosched()` | `SwatchSpikeApp.swift` |
 | `reduce` | Folds a collection into one value: `xs.reduce(0, +)` | `std::accumulate` | `GraphLayout.swift` |
 | `@objc` and `#selector` | Expose a method to the Objective-C runtime and name it for target/action, checked at compile time | `@selector(tick:)` | `GraphBenchmark.swift` |
+| `Selector(("name:"))` | A selector from its name, for actions with no Swift declaration | `NSSelectorFromString` | `MainMenu.swift` |
+| Variadic parameters | `_ items: Item...`: any number of arguments, seen as an array | C `...`, but typed | `MainMenu.swift` |
+| `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |
+| Default arguments | `func graph(at path: String = "")`: callers may leave the argument out | C++ default arguments | `MXDocument.swift` |
+| Nested functions | A `func` inside a `func`; it can use the outer function's constants | A lambda assigned to a local | `MXCorpusTests.swift` |
 
 ## Protocols and extensions
 
@@ -63,12 +74,14 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Protocols | A set of requirements a type promises to meet | Go interfaces, ObjC protocols | `MXError.swift` (`Error`) |
 | Extensions | Add members or conformances to any type, including Apple's and C++ ones | ObjC categories | `MXError.swift`, `CxxString.swift` |
 | `Identifiable`, `Hashable`, `Equatable` | Standard protocols; the compiler writes `==` and `hash` for simple structs | `operator==` defaulted | `MXDocument.swift` |
-| Associated types | A type placeholder inside a protocol, filled in by each conforming type | Template parameter | `MaterialXFileDocument.swift` (`Snapshot`) |
-| `some View` | An opaque return type: one concrete type, not named | `auto` return type | `MargolariaApp.swift` |
+| Associated types | A type placeholder inside a protocol, filled in by each conforming type | Template parameter | (was `Snapshot` in `MaterialXFileDocument.swift`, removed in M1a) |
+| `some View` | An opaque return type: one concrete type, not named | `auto` return type | `ContentView.swift` |
 | Subclassing and `override` | Swift classes can subclass ObjC ones; `override` is required and checked | ObjC subclassing, C++ `override` | `ViewportView.swift` (`StormMTKView: MTKView`) |
 | Initializer rules | Set your own properties *before* `super.init`; `required init?(coder:)` must be provided | Reverse of `[super init]` first | `ViewportView.swift` |
 | `RandomNumberGenerator` | Implement `next() -> UInt64` and every `random(in:using:)` API accepts your generator | — | `GraphModel.swift` (`SeededRandom`) |
 | Subclassing `CALayer` | Override `draw(in:)`; also `init(layer:)`, which Core Animation uses to copy layers | ObjC `CALayer` subclass | `LayerGraphView.swift` (`NodeLayer`) |
+| Subclassing AppKit classes | `override func read(from:ofType:)`; `override class var` for class properties AppKit asks the type | ObjC subclassing | `MaterialXDocument.swift` |
+| `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
 
 ## Modules and access
 
@@ -77,6 +90,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `import` | Imports a compiled module, not text | everywhere |
 | Access levels | `public` > `internal` (default) > `fileprivate` > `private` | `CxxString.swift` |
 | `@testable import` | Tests can see `internal` declarations | `MXDocumentTests.swift` |
+| `public private(set)` | On a stored property: readable everywhere, settable only inside the type | — | `MXDocument.swift` (`hasDataLibrary`) |
 | Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MargolariaKit/Package.swift` |
 | `@_exported import` | Re-export another module to everyone who imports this one | An umbrella header | `Snapshot.swift` |
 | Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |
@@ -100,13 +114,16 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 
 | Concept | In one line | First appears |
 |---|---|---|
-| `@main` + `App` | The program's entry point | `MargolariaApp.swift` |
+| `@main` + `App` | A SwiftUI app's entry point (the spikes; the main app uses AppKit's, see below) | `Spikes/M0dGraphCanvas/GraphSpikeApp.swift` |
+| `@main` + `static func main()` | Any type with a `static func main()` can be the entry point, like C's `main()` | `MargolariaApp.swift` |
 | `View` and `body` | `body` *describes* the UI for the current state; SwiftUI applies the changes | `ContentView.swift` |
-| Result builders | The `{ ... }` UI syntax: each expression becomes part of the result | `MargolariaApp.swift` |
+| Result builders | The `{ ... }` UI syntax: each expression becomes part of the result | `ContentView.swift` |
 | View modifiers | `.font(...)`, `.padding()`: each wraps the view in a new one, so they chain | `ContentView.swift` |
 | `@State`, `$binding` | View-owned storage; `$` passes a read/write reference to it | `ContentView.swift` |
 | `@ObservedObject` | Redraw when an `ObservableObject` changes | `ContentView.swift` |
-| `DocumentGroup`, `ReferenceFileDocument` | The standard Mac document app: open, save, autosave, versions | `MargolariaApp.swift`, `MaterialXFileDocument.swift` |
+| `DocumentGroup`, `ReferenceFileDocument` | SwiftUI's document app. Replaced in M1a by `NSDocument`, because it doesn't give the document its file's URL | (removed in M1a) |
+| `NSHostingController` | An AppKit view controller showing a SwiftUI view: SwiftUI inside AppKit | `MaterialXDocument.swift` |
+| `@Observable` in a view | A plain `let` of an `@Observable` object is enough: SwiftUI tracks what `body` reads | `CanvasGraphView.swift`, `ContentView.swift` |
 | `NSViewRepresentable` | Wraps an AppKit view for SwiftUI: `makeNSView` once, `updateNSView` on changes | `ViewportView.swift` |
 | `.task(id:)` | Run work when the view appears and whenever `id` changes | `ViewportView.swift` |
 | `WindowGroup`, `.fileImporter` | A plain (non-document) window; the system Open panel | `Spikes/M0bViewport/ViewportSpikeApp.swift` |
@@ -130,3 +147,14 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | C++ exceptions | Can't be caught in Swift; one that escapes terminates the process. Catch them in C++. | `MXBridge.cpp` |
 | Objective-C classes | Import as Swift classes: `-initWithX:error:` becomes `init(x:) throws`, `nullable` becomes `?` | `MGStormRenderer.h`, `Snapshot.swift` |
 | Out-parameter structs | A C++ `T&` parameter is an `inout` argument: pass a `var` with `&` | `MXDocument.swift` (`generateMSL`) |
+
+## Testing
+
+| Concept | In one line | First appears |
+|---|---|---|
+| `@Test`, `#expect`, `@Suite` | Swift Testing: a test function, a checked condition, a group of tests | `MXDocumentTests.swift` |
+| `#require` | Like `#expect`, but stops the test on failure, and unwraps an optional | `MXGraphTests.swift` |
+| Parameterized tests | `@Test(arguments: list)` runs once per element, each reported separately | `MXCorpusTests.swift` |
+| Traits | `.serialized`, `.enabled(if:)`: change how a test or suite runs | `StormRendererTests.swift`, `MXCorpusTests.swift` |
+| `Issue.record` | Records a failure with a message, without stopping the test | `MXCorpusTests.swift` |
+| `#filePath` | The path of the current source file, like `__FILE__` | `MXCorpusTests.swift` |

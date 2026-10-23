@@ -1,13 +1,13 @@
 // ContentView.swift
 //
 // The document window for the M0 skeleton: a sidebar listing the document's
-// top-level elements, the XML in the main area, the validation status in the
+// top-level elements, the XML in the main area, the issue count in the
 // toolbar and library information along the bottom.
 //
 // This is a placeholder for the real interface (docs/PLAN.md §4). Its job is
 // to prove that a document flows from disk, through MaterialX, to the screen.
 //
-// Introduces (SWIFT): the `View` protocol, `@ObservedObject`, `@State`,
+// Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
 // `ForEach`, `ViewBuilder` helpers, private sub-views.
 
@@ -21,14 +21,15 @@ import MXKit
 /// that state changes and updates only what differs. You never hold on to a
 /// view or mutate it.
 struct ContentView: View {
-    /// The open document.
+    /// The open document. It is owned by AppKit's document controller; the
+    /// window only shows it.
     ///
-    /// SWIFT: `@ObservedObject` is a *property wrapper*: the `@` attribute
-    /// wraps the property in extra behaviour. Here it subscribes the view to
-    /// the object's change notifications, so the view redraws when the
-    /// document changes. The document is owned by DocumentGroup; this view
-    /// only watches it.
-    @ObservedObject var file: MaterialXFileDocument
+    /// SWIFT: A plain `let`. MaterialXDocument is `@Observable`, so SwiftUI
+    /// records which of its properties `body` reads (`elements`, `xml`, ...)
+    /// and calls `body` again when one of those changes. No property wrapper
+    /// is needed; the older `ObservableObject` protocol needed
+    /// `@ObservedObject` here.
+    let document: MaterialXDocument
 
     /// The element selected in the sidebar, identified by its name.
     ///
@@ -46,7 +47,7 @@ struct ContentView: View {
             // the `@State` storage. The List writes the user's selection into
             // it. Writing the property name without `$` reads the value; with
             // `$`, you pass the storage itself.
-            List(file.elements, selection: $selection) { element in
+            List(document.elements, selection: $selection) { element in
                 ElementRow(element: element)
             }
             // SWIFT: Calls like `.navigationSplitViewColumnWidth(...)` are
@@ -54,16 +55,16 @@ struct ContentView: View {
             // with extra configuration, which is why they chain.
             .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } detail: {
-            XMLTextView(xml: file.xml)
+            XMLTextView(xml: document.xml)
         }
         .toolbar {
             ToolbarItem(placement: .status) {
-                ValidationBadge(result: file.validation)
+                IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
             }
         }
         // A thin bar along the bottom of the window.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            LibraryStatusBar(documentVersion: file.document.documentVersion)
+            LibraryStatusBar(documentVersion: document.content.documentVersion)
         }
     }
 }
@@ -138,29 +139,30 @@ private struct XMLTextView: View {
     }
 }
 
-/// "Valid" in green, or the number of problems with the messages as a tooltip.
-private struct ValidationBadge: View {
-    let result: MXValidationResult?
+/// "Valid" in green, or the number of problems with the messages as a
+/// tooltip: red if any is an error, orange for warnings only.
+private struct IssuesBadge: View {
+    let issues: [MXIssue]
+    let libraryLoaded: Bool
 
     var body: some View {
-        // SWIFT: `switch` can appear directly inside a view body, because the
-        // result builder turns each case into one possible view.
-        switch result {
-        case .valid:
-            Label("Valid", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-        case .invalid(let messages):
-            Label("\(messages.count) issues", systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                // Hover to see the messages. A proper Issues panel comes later.
-                // SWIFT: `joined(separator:)` concatenates an array of Strings.
-                .help(messages.joined(separator: "\n"))
-        case nil:
-            // SWIFT: `nil` is matched as a case of an optional. This is the
-            // case where the libraries failed to load.
+        // SWIFT: `if` can appear directly inside a view body, because the
+        // result builder turns each branch into one possible view.
+        if !libraryLoaded {
             Label("Not validated", systemImage: "questionmark.circle")
                 .foregroundStyle(.secondary)
                 .help(libraryErrorDescription)
+        } else if issues.isEmpty {
+            Label("Valid", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+        } else {
+            Label(issues.count == 1 ? "1 issue" : "\(issues.count) issues", systemImage: "exclamationmark.triangle.fill")
+                // SWIFT: `contains(where:)` is true if the closure is true for
+                // any element.
+                .foregroundStyle(issues.contains(where: { $0.severity == .error }) ? .red : .orange)
+                // Hover to see the messages. The Issues panel comes in M1d.
+                // SWIFT: `joined(separator:)` concatenates an array of Strings.
+                .help(issues.map { "\($0.elementPath): \($0.message)" }.joined(separator: "\n"))
         }
     }
 

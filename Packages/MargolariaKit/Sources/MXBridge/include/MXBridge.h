@@ -77,6 +77,92 @@ struct GeneratedShader {
     std::vector<ShaderUniform> uniforms;
 };
 
+/// One input or output of a node, nodegraph or nodedef, as the graph view
+/// needs it. Connection fields hold the MaterialX attributes as written in
+/// the file; empty means "not set".
+struct PortInfo {
+    /// The port's name: "base_color", "out", ...
+    std::string name;
+    /// The MaterialX type: "float", "color3", "surfaceshader", ...
+    std::string type;
+    /// The value as written in the file ("0.8, 0.8, 0.8"). For an input the
+    /// document doesn't set, the nodedef's default. Empty for outputs.
+    std::string value;
+    /// True when the element exists in the document; false for an input that
+    /// only exists in the nodedef (the node uses the default).
+    bool isAuthored = false;
+    /// `nodename`: connected to the output of this node (same graph).
+    std::string nodeName;
+    /// `nodegraph`: connected to an output of this nodegraph (same graph).
+    std::string nodeGraphName;
+    /// `output`: which output of the node or nodegraph above; on its own, a
+    /// top-level <output> element.
+    std::string outputName;
+    /// `interfacename`: inside a nodegraph, connected to the graph's input.
+    std::string interfaceName;
+    /// `colorspace` on this port, if any ("srgb_texture", ...).
+    std::string colorSpace;
+    /// For "filename" inputs: the value with any `fileprefix` applied. Still
+    /// relative to `sourceUri`'s folder unless absolute.
+    std::string resolvedFilename;
+    /// Absolute path of the file this element was read from: differs from
+    /// the document's file for elements brought in with xi:include. Empty
+    /// for nodedef-only inputs and documents read from a string.
+    std::string sourceUri;
+    /// The nodedef's `uifolder`, for grouping inputs ("Specular", ...).
+    std::string uiFolder;
+    /// `uniform="true"`: can't be connected, only set.
+    bool isUniform = false;
+};
+
+/// One node in a graph, or one nodegraph shown as a node in its parent graph.
+struct NodeInfo {
+    std::string name;
+    /// The node's category ("open_pbr_surface", "image", ...), or "nodegraph".
+    std::string category;
+    /// The output type ("color3", "surfaceshader", "multioutput", ...).
+    std::string type;
+    /// Path from the document root, such as "NG_copper/grain".
+    std::string path;
+    /// The nodedef this node resolves to, such as "ND_image_color3"; for a
+    /// nodegraph, the nodedef it implements, if any. Empty when there is none
+    /// or it isn't found. Needs Document::setDataLibrary first.
+    std::string nodeDefName;
+    bool isNodeGraph = false;
+    /// `xpos`/`ypos`, as written by MaterialX's Graph Editor. Most files
+    /// don't have them; the app lays those out itself.
+    bool hasPosition = false;
+    float xpos = 0;
+    float ypos = 0;
+    /// Every input: the nodedef's, in nodedef order, with the document's
+    /// values and connections; then any the document sets that the nodedef
+    /// doesn't have (an error, but shown). For a nodegraph, its interface inputs.
+    std::vector<PortInfo> inputs;
+    /// The outputs: from the nodedef, or a nodegraph's <output> elements.
+    std::vector<PortInfo> outputs;
+};
+
+/// One level of a document's graph: the document root, or one nodegraph.
+struct GraphInfo {
+    /// "" for the document root; otherwise the nodegraph's path.
+    std::string path;
+    /// The nodes in this graph, in file order. Nodegraphs are included as
+    /// nodes (with `isNodeGraph`).
+    std::vector<NodeInfo> nodes;
+    /// A nodegraph's interface inputs (empty at the document root).
+    std::vector<PortInfo> interfaceInputs;
+    /// The <output> elements directly in this graph, with their connections.
+    std::vector<PortInfo> outputs;
+};
+
+/// One problem found by validation, attached to the element it is about.
+struct Issue {
+    /// Path of the element, or "" for the document itself.
+    std::string elementPath;
+    /// MaterialX's message, without the XML of the element it quotes.
+    std::string message;
+};
+
 /// The MaterialX standard data libraries: stdlib, pbrlib, bxdf and the rest.
 /// These hold the node definitions (nodedefs) that documents refer to. They
 /// are loaded once and shared by every open document.
@@ -118,6 +204,11 @@ public:
     /// `errorMessage` (for example, to the XML parser's message).
     static Document readFromXmlString(const std::string& xml, std::string& errorMessage);
 
+    /// Reads a .mtlx file, following any xi:include elements relative to the
+    /// file's folder. On failure, returns an empty Document and sets
+    /// `errorMessage`.
+    static Document readFromFile(const std::string& path, std::string& errorMessage);
+
     /// True when this handle refers to a document.
     bool isLoaded() const;
 
@@ -139,6 +230,18 @@ public:
     /// Every element a shader can be generated for, in file order: top-level
     /// nodes and materials, and the nodes and outputs inside nodegraphs.
     std::vector<ElementSummary> shadeableElements() const;
+
+    /// Like validate(), but with each problem attached to the element it is
+    /// about. Empty when the document is valid.
+    std::vector<Issue> validationIssues() const;
+
+    /// One level of the graph: the document root for "", or the nodegraph at
+    /// `path`. Returns false and sets `errorMessage` if there is no nodegraph
+    /// at that path.
+    bool graph(const std::string& path, GraphInfo& graph, std::string& errorMessage) const;
+
+    /// Every nodegraph in the document, in file order, at any depth.
+    std::vector<ElementSummary> nodeGraphs() const;
 
     /// The `version` attribute of the root element, such as "1.39".
     std::string documentVersion() const;

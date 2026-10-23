@@ -6,6 +6,9 @@
 // `Sendable`, computed properties, `switch` pattern matching, string
 // interpolation.
 
+// For `LocalizedError`, at the end of the file.
+import Foundation
+
 /// Errors thrown by MXKit.
 ///
 /// SWIFT: A Swift `enum` is much more than a C enum. Each `case` can carry its
@@ -41,6 +44,8 @@ public enum MXError: Error, Sendable {
 
     /// MaterialX could not generate a shader for an element.
     case shaderGenerationFailed(String)
+    /// There is no element (of the expected kind) at a path.
+    case notFound(String)
 }
 
 // SWIFT: An `extension` adds members to an existing type, here our own enum,
@@ -77,6 +82,18 @@ extension MXError: CustomStringConvertible {
 
         case .shaderGenerationFailed(let message):
             return "Could not generate a shader: \(message)"
+        case .notFound(let message):
+            return message
         }
+    }
+}
+
+// SWIFT: `LocalizedError` is the protocol AppKit and SwiftUI use to get a
+// user-facing message from an error. Without it, an alert would show a
+// generic "The operation couldn't be completed (MXKit.MXError error 2.)".
+extension MXError: LocalizedError {
+    /// The message shown in alerts, such as NSDocument's "could not be opened".
+    public var errorDescription: String? {
+        description
     }
 }

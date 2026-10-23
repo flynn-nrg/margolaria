@@ -94,6 +94,10 @@ public final class MXDocument {
     /// correctness shows up in Swift.
     private var handle: mxbridge.Document
 
+    /// The file the document was read from, or nil if it came from a string.
+    /// Relative texture paths and xi:includes are resolved against its folder.
+    public let fileURL: URL?
+
     /// Parses MaterialX XML.
     ///
     /// Older documents (for example v1.38) are upgraded to the current
@@ -109,17 +113,34 @@ public final class MXDocument {
             throw MXError.parseFailed(errorMessage.swiftString)
         }
         self.handle = document
+        self.fileURL = nil
+    }
+
+    /// Wraps a handle that was loaded some other way (see `read(from:)`).
+    ///
+    /// SWIFT: `private init`: only code in this file can call it. Swift lets
+    /// a class have several initializers, distinguished by their labels.
+    private init(handle: mxbridge.Document, fileURL: URL) {
+        self.handle = handle
+        self.fileURL = fileURL
     }
 
     /// Reads a .mtlx file from disk.
     ///
-    /// SWIFT: `static func ... -> MXDocument` instead of a second `init`, to
-    /// make the file read visible at the call site: `MXDocument.read(from: url)`.
-    /// `String(contentsOf:encoding:)` comes from Foundation and throws if the
-    /// file can't be read. `try` passes that error on to our caller unchanged.
+    /// Reading from the file, rather than from its contents, lets MaterialX
+    /// follow `xi:include` elements, and records where every element came
+    /// from, so relative texture paths can be resolved (``MXPort/fileURL``).
+    ///
+    /// SWIFT: `static func ... -> MXDocument` instead of a second public
+    /// `init`, to make the file read visible at the call site:
+    /// `MXDocument.read(from: url)`.
     public static func read(from url: URL) throws -> MXDocument {
-        let xml = try String(contentsOf: url, encoding: .utf8)
-        return try MXDocument(xml: xml)
+        var errorMessage = std.string()
+        let document = mxbridge.Document.readFromFile(std.string(url.path(percentEncoded: false)), &errorMessage)
+        guard document.isLoaded() else {
+            throw MXError.parseFailed(errorMessage.swiftString)
+        }
+        return MXDocument(handle: document, fileURL: url)
     }
 
     /// The document as MaterialX XML, ready to save.
@@ -147,7 +168,15 @@ public final class MXDocument {
     /// name already says what the argument is.
     public func setDataLibrary(_ library: MXLibrary) {
         handle.setDataLibrary(library.handle)
+        hasDataLibrary = true
     }
+
+    /// True once ``setDataLibrary(_:)`` has been called. Without a library no
+    /// nodedef can be found, so checks that depend on nodedefs are skipped.
+    ///
+    /// SWIFT: `public private(set)`: readable by everyone, settable only
+    /// inside this type.
+    public private(set) var hasDataLibrary: Bool = false
 
     /// Runs MaterialX's validation over the whole document.
     public func validate() -> MXValidationResult {
@@ -195,6 +224,52 @@ public final class MXDocument {
             result.append(MXElementSummary(element))
         }
         return result
+    }
+
+    /// Every problem MaterialX's validation finds, each attached to the
+    /// element it is about. Empty when the document is valid. Call
+    /// ``setDataLibrary(_:)`` first.
+    ///
+    /// ``validate()`` returns the same problems as plain lines; this is what
+    /// the Issues panel uses, so that clicking an issue can select its node.
+    public func validationIssues() -> [MXIssue] {
+        var issues: [MXIssue] = []
+        for issue in handle.validationIssues() {
+            issues.append(MXIssue(elementPath: issue.elementPath.swiftString,
+                                  message: issue.message.swiftString,
+                                  severity: .error,
+                                  source: .materialX))
+        }
+        return issues
+    }
+
+    /// Every problem in the document: MaterialX's validation
+    /// (``validationIssues()``) followed by Margolaria's own checks
+    /// (``MXLint``). Call ``setDataLibrary(_:)`` first.
+    public func issues() -> [MXIssue] {
+        validationIssues() + MXLint.check(self)
+    }
+
+    /// One level of the graph: the document root for "" (the default), or
+    /// the nodegraph at `path`. Call ``setDataLibrary(_:)`` first, so nodes
+    /// get their nodedef's inputs and outputs.
+    ///
+    /// - Throws: ``MXError/notFound(_:)`` if there is no nodegraph at `path`.
+    ///
+    /// SWIFT: `path: String = ""` is a *default argument*: callers may leave
+    /// it out and write `document.graph()`.
+    public func graph(at path: String = "") throws -> MXGraph {
+        var info = mxbridge.GraphInfo()
+        var errorMessage = std.string()
+        guard handle.graph(std.string(path), &info, &errorMessage) else {
+            throw MXError.notFound(errorMessage.swiftString)
+        }
+        return MXGraph(info)
+    }
+
+    /// Every nodegraph in the document, in file order, at any depth.
+    public var nodeGraphs: [MXElementSummary] {
+        handle.nodeGraphs().map { MXElementSummary($0) }
     }
 
     /// The document's MaterialX version, such as "1.39".

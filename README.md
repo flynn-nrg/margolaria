@@ -9,6 +9,7 @@ Requires Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew i
 
 ```sh
 scripts/fetch-swiftusd.sh     # once: clones apple/SwiftUsd into Vendor/ (about 1.4 GB) and patches it
+scripts/fetch-materialx-examples.sh  # once: MaterialX's example materials (52 MB), for tests and trying the app
 xcodegen                      # generates Margolaria.xcodeproj from project.yml
 open Margolaria.xcodeproj
 ```
