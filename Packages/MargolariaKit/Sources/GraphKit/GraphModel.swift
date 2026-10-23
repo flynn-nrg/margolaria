@@ -1,31 +1,128 @@
 // GraphModel.swift
 //
 // The data a graph canvas draws: nodes with typed ports, and wires between
-// them. Spike M0d (docs/spikes/M0d-graph-canvas.md) uses synthetic graphs;
-// in M1 this is filled from an MXDocument instead.
+// them. Spike M0d (docs/spikes/M0d-graph-canvas.md) used synthetic graphs;
+// since M1 the app fills it from a MaterialX document (GraphBuilder.swift).
 //
-// Plain value types with no MaterialX or UI dependency, so the canvas can be
-// tested and benchmarked on its own.
+// Plain value types with no UI dependency, so the canvas can be tested and
+// benchmarked on its own.
 //
-// Introduces (SWIFT): `CaseIterable`, enums with raw values, a seeded random
-// number generator conforming to `RandomNumberGenerator`, `mutating` methods,
-// `&+`/`&*` wrapping arithmetic.
+// Introduces (SWIFT): `CaseIterable`, enums with raw values, a struct with
+// static constants standing in for an open-ended enum, a seeded random
+// number generator conforming to `RandomNumberGenerator`, `mutating`
+// methods, `&+`/`&*` wrapping arithmetic.
 
 import CoreGraphics
 
-/// A port's MaterialX type, which decides its colour.
-public enum PortType: String, CaseIterable, Sendable {
-    case float, integer, boolean, color3, color4, vector2, vector3, vector4
-    case filename, string, surfaceshader, displacementshader, material
+/// A port's MaterialX type, such as "float" or "surfaceshader". It decides
+/// the pin's colour.
+///
+/// SWIFT: A struct, not an enum: MaterialX has many types and documents can
+/// define their own (custom struct types), so the set isn't closed. The
+/// `static let`s give the common ones enum-like names (`.float`), and any
+/// other name still works: `PortType("BSDF")`.
+public struct PortType: Hashable, Sendable {
+    /// The MaterialX type name.
+    public let name: String
+
+    public init(_ name: String) {
+        self.name = name
+    }
+
+    public static let float = PortType("float")
+    public static let integer = PortType("integer")
+    public static let boolean = PortType("boolean")
+    public static let color3 = PortType("color3")
+    public static let color4 = PortType("color4")
+    public static let vector2 = PortType("vector2")
+    public static let vector3 = PortType("vector3")
+    public static let vector4 = PortType("vector4")
+    public static let filename = PortType("filename")
+    public static let string = PortType("string")
+    public static let surfaceshader = PortType("surfaceshader")
+    public static let displacementshader = PortType("displacementshader")
+    public static let material = PortType("material")
+
+    /// Related types share a colour (PLAN.md §4.3).
+    public enum Family: Sendable {
+        case scalar, color, vector, matrix, text, shader, closure, material, other
+    }
+
+    /// The family this type's colour comes from.
+    public var family: Family {
+        switch name {
+        case "float", "integer", "boolean":
+            return .scalar
+        case "color3", "color4":
+            return .color
+        case "vector2", "vector3", "vector4":
+            return .vector
+        case "matrix33", "matrix44":
+            return .matrix
+        case "string", "filename", "geomname":
+            return .text
+        case "surfaceshader", "displacementshader", "volumeshader", "lightshader":
+            return .shader
+        case "BSDF", "EDF", "VDF":
+            return .closure
+        case "material":
+            return .material
+        default:
+            // Arrays (`floatarray`), `multioutput`, custom types.
+            return .other
+        }
+    }
 }
 
-/// A node's category, which decides its header colour (PLAN.md §4.3:
-/// muted, so selection and errors stand out).
+/// A node's header colour group (PLAN.md §4.3: muted, so selection and
+/// errors stand out). Most come from the nodedef's `nodegroup`; see
+/// ``init(nodeGroup:)``.
 ///
 /// SWIFT: `CaseIterable` makes the compiler generate `allCases`, an array of
-/// every case, used below to pick random categories.
+/// every case.
 public enum NodeCategory: String, CaseIterable, Sendable {
-    case pbr, texture, procedural, geometry, math, adjustment, compositing, conditional, channel
+    case pbr, material, texture, procedural, geometry, math, adjustment, compositing, conditional, channel
+    case organization
+    /// A nodegraph shown as a node (double-click to enter it).
+    case nodeGraph
+    /// A nodegraph's own inputs and outputs, shown at the edges of its graph.
+    case graphInterface
+    /// Anything else, including nodes without a nodedef.
+    case other
+
+    /// The colour group for a MaterialX `nodegroup` attribute.
+    public init(nodeGroup: String?) {
+        switch nodeGroup {
+        case "pbr", "shader", "light", "npr":
+            self = .pbr
+        case "material":
+            self = .material
+        case "texture2d", "texture3d", "convolution2d":
+            self = .texture
+        case "procedural", "procedural2d", "procedural3d":
+            self = .procedural
+        case "geometric":
+            self = .geometry
+        case "math":
+            self = .math
+        case "adjustment", "colortransform":
+            self = .adjustment
+        case "compositing":
+            self = .compositing
+        case "conditional":
+            self = .conditional
+        case "channel":
+            self = .channel
+        case "organization", "translation", "application":
+            self = .organization
+        default:
+            self = .other
+        }
+    }
+
+    /// The categories the synthetic benchmark graph uses.
+    static let synthetic: [NodeCategory] = [.pbr, .texture, .procedural, .geometry, .math,
+                                            .adjustment, .compositing, .conditional, .channel]
 }
 
 /// One input or output of a node.
@@ -53,10 +150,21 @@ public struct GraphNode: Identifiable, Sendable {
     public var category: NodeCategory
     /// Top-left corner, in graph coordinates (points at zoom 1, y down).
     public var position: CGPoint
+    /// The inputs shown as rows, with pins.
     public var inputs: [GraphPort]
     public var outputs: [GraphPort]
     /// Whether the node shows a preview thumbnail (PLAN.md §4.1).
     public var hasThumbnail: Bool
+    /// Shown in the header after the title, dimmed: the MaterialX category,
+    /// such as "open_pbr_surface". Nil to show only the title.
+    ///
+    /// SWIFT: Properties with default values can be left out of the
+    /// automatic memberwise initializer, so code written before they existed
+    /// (the synthetic graph below) still compiles.
+    public var subtitle: String? = nil
+    /// How many more inputs the node has that aren't shown: those that use
+    /// their default value. Drawn as one "+N more inputs" row.
+    public var collapsedInputCount: Int = 0
 }
 
 /// Identifies one port: which node, which side, which row.
@@ -108,7 +216,7 @@ public struct GraphModel: Sendable {
         for id in 0..<nodeCount {
             let column: Int = id * columns / nodeCount
             let isLast: Bool = column == columns - 1
-            let category: NodeCategory = isLast ? .pbr : NodeCategory.allCases[random.next(below: NodeCategory.allCases.count)]
+            let category: NodeCategory = isLast ? .pbr : NodeCategory.synthetic[random.next(below: NodeCategory.synthetic.count)]
 
             var inputs: [GraphPort] = []
             let inputCount: Int = isLast ? 8 : 1 + random.next(below: 4)

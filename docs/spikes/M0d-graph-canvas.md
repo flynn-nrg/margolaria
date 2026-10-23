@@ -87,7 +87,7 @@ What we give up: `Canvas` code is shorter (166 lines against 384) and has no cac
 5. **Layer property changes animate by default.** Every update runs in a `CATransaction` with actions disabled. Node layers also disable the `contents` cross-fade.
 6. **Layers wider than the node.** Pins stick out of the node's frame by their radius, so each node layer is wider than the node by that margin. A layer is clipped to its bounds when it is drawn.
 7. **A benchmark built on a display link only measures the app's side.** It can't see frames the window server drops after the app commits them. For that, use Instruments' *Animation Hitches* template. The numbers above are a quick, repeatable comparison, not a hitch audit.
-8. **Resizing a view changes what is visible without changing the controller.** The layer renderer also updates in `layout()`, or nodes uncovered by a resize would stay blank.
+8. **Resizing a view changes what is visible without changing the controller.** The layer renderer also updates when its size changes, or nodes uncovered by a resize would stay blank. (In the spike this was in `layout()`; M1b moved it to `setFrameSize(_:)`, which AppKit calls on every size change, while `layout()` only runs when a view is marked as needing layout.)
 
 ## Not done / open
 

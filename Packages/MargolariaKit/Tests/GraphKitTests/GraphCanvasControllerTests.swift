@@ -6,6 +6,7 @@
 //
 // Introduces (SWIFT): `@MainActor` on a test suite.
 
+import AppKit
 import CoreGraphics
 import Testing
 @testable import GraphKit
@@ -137,5 +138,38 @@ struct GraphCanvasControllerTests {
         // One mouse event per frame needs one hit test in well under a
         // millisecond; this allows 1 ms each, in a debug build.
         #expect(elapsed < .seconds(1))
+    }
+}
+
+/// The canvas's keyboard shortcuts, sent straight to the view (focus is
+/// AppKit's business; this checks what the view does with the keys).
+@MainActor
+@Suite("Canvas keys")
+struct CanvasKeyTests {
+    /// A key-down event for `characters`, as AppKit would deliver it.
+    func key(_ characters: String) -> NSEvent {
+        NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                         windowNumber: 0, context: nil, characters: characters,
+                         charactersIgnoringModifiers: characters, isARepeat: false, keyCode: 0)!
+    }
+
+    @Test("A frames everything, F the selection, U asks to go up")
+    func shortcuts() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 50))
+        let view = GraphEventView(controller: controller)
+        view.setFrameSize(NSSize(width: 800, height: 600))
+
+        var wentUp: Bool = false
+        controller.onNavigateUp = { wentUp = true }
+        view.keyDown(with: key("u"))
+        #expect(wentUp)
+
+        // Select one node and frame it: zoomed in on it.
+        controller.selection = [0]
+        view.keyDown(with: key("f"))
+        let selectionZoom: CGFloat = controller.zoom
+        // A shows everything: further out.
+        view.keyDown(with: key("a"))
+        #expect(controller.zoom < selectionZoom)
     }
 }

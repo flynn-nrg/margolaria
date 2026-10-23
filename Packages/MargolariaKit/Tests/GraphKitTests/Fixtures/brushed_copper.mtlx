@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<materialx version="1.39" colorspace="lin_rec709">
+  <!-- Test fixture for GraphKitTests (a copy of MXKitTests' one): one OpenPBR material driven by a nodegraph. -->
+  <nodegraph name="NG_copper">
+    <noise3d name="grain" type="float">
+      <input name="amplitude" type="float" value="0.25" />
+      <input name="pivot" type="float" value="0.5" />
+    </noise3d>
+    <output name="roughness_out" type="float" nodename="grain" />
+  </nodegraph>
+  <open_pbr_surface name="SR_copper" type="surfaceshader">
+    <input name="base_color" type="color3" value="0.95, 0.64, 0.54" />
+    <input name="base_metalness" type="float" value="1.0" />
+    <input name="specular_roughness" type="float" nodegraph="NG_copper" output="roughness_out" />
+  </open_pbr_surface>
+  <surfacematerial name="M_BrushedCopper" type="material">
+    <input name="surfaceshader" type="surfaceshader" nodename="SR_copper" />
+  </surfacematerial>
+</materialx>

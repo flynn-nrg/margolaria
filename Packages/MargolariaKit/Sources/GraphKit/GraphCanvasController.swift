@@ -76,6 +76,46 @@ public final class GraphCanvasController {
 
     private var drag: DragState = .idle
 
+    /// Called when a node is double-clicked, with its ID. The app uses it to
+    /// step into nodegraphs.
+    ///
+    /// SWIFT: `@ObservationIgnored` excludes a property of an `@Observable`
+    /// class from observation: changing it redraws nothing. Callbacks and
+    /// bookkeeping that views never display should be ignored like this.
+    @ObservationIgnored public var onOpenNode: (@MainActor (Int) -> Void)? = nil
+
+    /// Called when the user asks to leave the current graph (the U key).
+    @ObservationIgnored public var onNavigateUp: (@MainActor () -> Void)? = nil
+
+    /// The size of the view showing the canvas, kept up to date by the view.
+    /// Framing needs it; until the view has been laid out it is zero.
+    @ObservationIgnored public var viewSize: CGSize = .zero {
+        didSet {
+            // Framing again for the new size: a frame requested before the
+            // view had a size, or the last one, if the user hasn't panned or
+            // zoomed since. (While a window opens, its views get several
+            // sizes in turn; framing only once would use one of the early
+            // ones. It also keeps the graph framed while resizing.)
+            if viewSize.width > 0, viewSize.height > 0, let request = pendingFrame ?? activeFrame {
+                pendingFrame = nil
+                frame(request)
+            }
+        }
+    }
+
+    /// What ``frame(_:)`` can fit in the view.
+    public enum FrameRequest: Sendable {
+        /// The whole graph (the A key).
+        case all
+        /// The selected nodes (the F key), or everything if none are.
+        case selection
+    }
+
+    @ObservationIgnored private var pendingFrame: FrameRequest? = nil
+
+    /// The last frame applied, until the user pans or zooms.
+    @ObservationIgnored private var activeFrame: FrameRequest? = nil
+
     public init(model: GraphModel) {
         self.model = model
     }
@@ -224,12 +264,14 @@ public final class GraphCanvasController {
 
     /// Two-finger scroll (or mouse wheel): pan by `delta` view points.
     public func scroll(by delta: CGSize) {
+        activeFrame = nil
         offset = CGPoint(x: offset.x + delta.width, y: offset.y + delta.height)
     }
 
     /// Pinch (or ⌥-scroll): zoom by `factor`, keeping the graph point under
     /// `viewPoint` where it is.
     public func zoom(by factor: CGFloat, at viewPoint: CGPoint) {
+        activeFrame = nil
         let anchor: CGPoint = graphPoint(fromView: viewPoint)
         let newZoom: CGFloat = min(max(zoom * factor, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
         zoom = newZoom
@@ -239,14 +281,52 @@ public final class GraphCanvasController {
 
     /// Fits the whole graph in a view of `size`, with a margin.
     public func frameAll(viewSize size: CGSize) {
-        let bounds: CGRect = GraphLayout.bounds(of: model)
+        fit(GraphLayout.bounds(of: model), in: size)
+    }
+
+    /// Fits the whole graph or the selection in the view (``viewSize``). If
+    /// the view hasn't been laid out yet, this happens as soon as it has.
+    public func frame(_ request: FrameRequest) {
+        guard viewSize.width > 0, viewSize.height > 0 else {
+            pendingFrame = request
+            return
+        }
+        var bounds: CGRect = .null
+        if request == .selection {
+            for id in selection {
+                bounds = bounds.union(GraphLayout.frame(of: model.nodes[id]))
+            }
+        }
+        if bounds.isNull {
+            bounds = GraphLayout.bounds(of: model)
+        }
+        // Don't zoom in past 100% just because one small node is selected.
+        fit(bounds, in: viewSize, maximumZoom: 1)
+        activeFrame = request
+    }
+
+    /// Sets zoom and offset so `bounds` (graph coordinates) fills a view of
+    /// `size`, with a margin, centred.
+    private func fit(_ bounds: CGRect, in size: CGSize, maximumZoom: CGFloat = zoomRange.upperBound) {
         guard !bounds.isNull, bounds.width > 0, bounds.height > 0 else {
             return
         }
         let margin: CGFloat = 40
         let fit: CGFloat = min((size.width - 2 * margin) / bounds.width, (size.height - 2 * margin) / bounds.height)
-        zoom = min(max(fit, Self.zoomRange.lowerBound), Self.zoomRange.upperBound)
+        zoom = min(max(fit, Self.zoomRange.lowerBound), maximumZoom)
         offset = CGPoint(x: (size.width - bounds.width * zoom) / 2 - bounds.minX * zoom,
                          y: (size.height - bounds.height * zoom) / 2 - bounds.minY * zoom)
+    }
+
+    /// A double-click at `viewPoint`: opens the node there, if any.
+    public func doubleClick(at viewPoint: CGPoint) {
+        switch hitTest(graphPoint(fromView: viewPoint)) {
+        case .node(let id):
+            onOpenNode?(id)
+        case .output(let port), .input(let port):
+            onOpenNode?(port.node)
+        case .empty:
+            break
+        }
     }
 }

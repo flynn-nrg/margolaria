@@ -128,6 +128,9 @@ struct NodeInfo {
     /// nodegraph, the nodedef it implements, if any. Empty when there is none
     /// or it isn't found. Needs Document::setDataLibrary first.
     std::string nodeDefName;
+    /// The nodedef's `nodegroup`: "pbr", "texture2d", "math", ... Empty
+    /// without a nodedef. The canvas colours node headers by it.
+    std::string nodeGroup;
     bool isNodeGraph = false;
     /// `xpos`/`ypos`, as written by MaterialX's Graph Editor. Most files
     /// don't have them; the app lays those out itself.

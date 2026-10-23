@@ -434,6 +434,7 @@ NodeInfo DescribeNode(const mx::NodePtr& node) {
     mx::NodeDefPtr nodeDef = node->getNodeDef();
     if (nodeDef) {
         info.nodeDefName = nodeDef->getName();
+        info.nodeGroup = nodeDef->getNodeGroup();
     }
     info.inputs = MergeInputs(node, nodeDef);
 
@@ -467,6 +468,7 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     mx::NodeDefPtr nodeDef = graph->getNodeDef();
     if (nodeDef) {
         info.nodeDefName = nodeDef->getName();
+        info.nodeGroup = nodeDef->getNodeGroup();
     }
     info.inputs = MergeInputs(graph, nodeDef);
 
