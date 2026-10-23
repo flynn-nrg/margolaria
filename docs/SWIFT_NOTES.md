@@ -45,6 +45,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Nested types | `MXIssue.Severity`: a type declared inside another, for naming only | C++ nested class | `MXIssue.swift` |
 | `for … where` | Loops only over elements for which the condition holds | `continue` at the top of the loop | `MXIssue.swift` |
 | `try?` | Turns a thrown error into `nil` | Ignoring an error return | `MXIssue.swift` |
+| String indices | Strings are sliced with `String.Index` values (`path[..<slash]`), not integers, because characters vary in size | — | `GraphPanel.swift` (`parent(of:)`) |
+| `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
 
 ## Functions and closures
 
@@ -65,6 +67,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Variadic parameters | `_ items: Item...`: any number of arguments, seen as an array | C `...`, but typed | `MainMenu.swift` |
 | `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |
 | Default arguments | `func graph(at path: String = "")`: callers may leave the argument out | C++ default arguments | `MXDocument.swift` |
+| `@discardableResult` | A function whose result callers may ignore without a warning | — | `LayerGraphView.swift` (`drawText`) |
+| `inout` on your own functions | `func apply(to model: inout GraphModel)`, called with `&model` | Non-const reference parameter | `GraphAutoLayout.swift` |
 | Nested functions | A `func` inside a `func`; it can use the outer function's constants | A lambda assigned to a local | `MXCorpusTests.swift` |
 
 ## Protocols and extensions
@@ -108,6 +112,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@MainActor` on a type | Every property and method runs on the main thread; callers from elsewhere must `await` | "Main thread only" in the docs, but checked | `GraphCanvasController.swift`, `GraphCanvasControllerTests.swift` (suite) |
 | `@MainActor` in a function type | `@MainActor (T) -> Void`: the closure runs on the main actor, so it may touch main-actor state | — | `GraphBenchmark.swift` (`Scenario`) |
 | `MainActor.assumeIsolated { }` | "I know I'm on the main thread" (e.g. in a main-run-loop Timer); checked at run time, traps if wrong | `assert([NSThread isMainThread])` | `GraphBenchmark.swift` |
+| `@ObservationIgnored` | Excludes a property of an `@Observable` class from observation (callbacks, bookkeeping) | — | `GraphCanvasController.swift` |
 | `nonisolated(unsafe)` | Turns off the concurrency check for one declaration (a thread-safe but non-`Sendable` value). Always explain why. | — | `LayerGraphView.swift` (`NodeLayer.titleFont`) |
 
 ## SwiftUI
@@ -134,6 +139,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `ZStack`, `.overlay` | Stack views on top of each other | Subviews in z order | `GraphSpikeApp.swift`, `CanvasGraphView.swift` |
 | `Picker` + `.tag` | A choice control; `.tag(value)` is what selecting a row writes into the binding | `NSPopUpButton` + `representedObject` | `GraphSpikeApp.swift` |
 | `UserDefaults` from the command line | `-key value` launch arguments appear as defaults | `NSArgumentDomain` | `GraphSpikeApp.swift` (`LaunchOptions`) |
+| `@Binding` | A property that refers to state another view owns; `$state` passes one | A pointer to the owner's field | `GraphPanel.swift` |
+| `.onChange(of:initial:)` | Run code when a value changes (and, with `initial: true`, on appear) | KVO observer | `GraphPanel.swift` |
+| `ContentUnavailableView` | The standard "nothing to show" placeholder | — | `GraphPanel.swift` |
 
 ## Swift ↔ C++
 

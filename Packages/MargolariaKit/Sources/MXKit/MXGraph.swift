@@ -166,6 +166,9 @@ public struct MXNode: Identifiable, Hashable, Sendable {
     /// "ND_image_color3". Nil if not found: an unknown node, or a document
     /// without a data library.
     public let nodeDefName: String?
+    /// The nodedef's `nodegroup`, such as "pbr", "texture2d" or "math". Nil
+    /// without a nodedef. The canvas colours node headers by it.
+    public let nodeGroup: String?
     /// True for a nodegraph shown as a node.
     public let isNodeGraph: Bool
     /// The `xpos`/`ypos` position saved in the file, if any. MaterialX's
@@ -187,6 +190,7 @@ public struct MXNode: Identifiable, Hashable, Sendable {
         type = node.type.swiftString
         path = node.path.swiftString
         nodeDefName = node.nodeDefName.swiftString.nonEmpty
+        nodeGroup = node.nodeGroup.swiftString.nonEmpty
         isNodeGraph = node.isNodeGraph
         // SWIFT: The ternary operator works as in C. `CGFloat(...)` converts
         // the C++ `float` (Swift `Float`, 32 bits) to Core Graphics' 64-bit

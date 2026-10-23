@@ -44,6 +44,8 @@ targets:
     dependencies:
       - package: MargolariaKit
         product: MXKit
+      - package: MargolariaKit
+        product: GraphKit
     # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
     # Its Test action runs the package's tests in the same build folder as
     # the app, so `xcodebuild test -scheme Margolaria` reuses the app's build

@@ -13,6 +13,7 @@
 //   │   └──────────────┘   │
 //   │               out ●  │  one row per output
 //   │ ● in    0.5          │  one row per input (value if unconnected)
+//   │   +3 more inputs     │  if some inputs are collapsed
 //   └──────────────────────┘
 //
 // Introduces (SWIFT): `enum` as a namespace for constants and static
@@ -23,7 +24,8 @@ import CoreGraphics
 
 /// Fixed sizes and geometry functions for the canvas.
 public enum GraphLayout {
-    public static let nodeWidth: CGFloat = 180
+    /// Wide enough for "specular_roughness" and a colour value side by side.
+    public static let nodeWidth: CGFloat = 220
     public static let headerHeight: CGFloat = 24
     public static let thumbnailSize: CGFloat = 96
     public static let rowHeight: CGFloat = 20
@@ -34,7 +36,7 @@ public enum GraphLayout {
     /// The node's frame (position and size), in graph coordinates.
     public static func frame(of node: GraphNode) -> CGRect {
         let thumbnail: CGFloat = node.hasThumbnail ? thumbnailSize + 8 : 0
-        let rows: CGFloat = CGFloat(node.outputs.count + node.inputs.count)
+        let rows: CGFloat = CGFloat(rowCount(of: node))
         let height: CGFloat = headerHeight + thumbnail + rows * rowHeight + bottomPadding
         return CGRect(x: node.position.x, y: node.position.y, width: nodeWidth, height: height)
     }
@@ -44,6 +46,16 @@ public enum GraphLayout {
         CGRect(x: node.position.x + (nodeWidth - thumbnailSize) / 2,
                y: node.position.y + headerHeight + 4,
                width: thumbnailSize, height: thumbnailSize)
+    }
+
+    /// How many rows a node has: outputs, inputs, and the "+N more" row.
+    static func rowCount(of node: GraphNode) -> Int {
+        node.outputs.count + node.inputs.count + (node.collapsedInputCount > 0 ? 1 : 0)
+    }
+
+    /// The vertical centre of the "+N more inputs" row (the last row).
+    public static func collapsedRowCentre(of node: GraphNode) -> CGFloat {
+        rowCentre(of: node, row: node.outputs.count + node.inputs.count)
     }
 
     /// The vertical centre of row `row` (outputs first, then inputs).
@@ -150,6 +162,7 @@ public enum GraphPalette {
     public static func header(_ category: NodeCategory) -> (CGFloat, CGFloat, CGFloat) {
         switch category {
         case .pbr: return (0.45, 0.30, 0.30)
+        case .material: return (0.50, 0.36, 0.24)
         case .texture: return (0.30, 0.38, 0.30)
         case .procedural: return (0.35, 0.32, 0.45)
         case .geometry: return (0.30, 0.38, 0.45)
@@ -158,18 +171,25 @@ public enum GraphPalette {
         case .compositing: return (0.40, 0.30, 0.40)
         case .conditional: return (0.30, 0.40, 0.40)
         case .channel: return (0.36, 0.36, 0.30)
+        case .organization: return (0.30, 0.30, 0.30)
+        case .nodeGraph: return (0.24, 0.34, 0.52)
+        case .graphInterface: return (0.26, 0.26, 0.28)
+        case .other: return (0.40, 0.40, 0.40)
         }
     }
 
-    /// Pin colours by type.
+    /// Pin colours by type family.
     public static func pin(_ type: PortType) -> (CGFloat, CGFloat, CGFloat) {
-        switch type {
-        case .float, .integer, .boolean: return (0.65, 0.65, 0.65)
-        case .color3, .color4: return (0.90, 0.75, 0.25)
-        case .vector2, .vector3, .vector4: return (0.40, 0.60, 0.95)
-        case .filename, .string: return (0.55, 0.80, 0.55)
-        case .surfaceshader, .displacementshader: return (0.85, 0.45, 0.45)
+        switch type.family {
+        case .scalar: return (0.65, 0.65, 0.65)
+        case .color: return (0.90, 0.75, 0.25)
+        case .vector: return (0.40, 0.60, 0.95)
+        case .matrix: return (0.30, 0.75, 0.75)
+        case .text: return (0.55, 0.80, 0.55)
+        case .shader: return (0.85, 0.45, 0.45)
+        case .closure: return (0.80, 0.50, 0.80)
         case .material: return (0.95, 0.55, 0.30)
+        case .other: return (0.85, 0.85, 0.85)
         }
     }
 }

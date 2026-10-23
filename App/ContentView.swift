@@ -1,18 +1,28 @@
 // ContentView.swift
 //
-// The document window for the M0 skeleton: a sidebar listing the document's
-// top-level elements, the XML in the main area, the issue count in the
-// toolbar and library information along the bottom.
+// The document window: a sidebar listing the document's top-level
+// elements, the graph canvas (or the XML) in the main area, the issue count
+// in the toolbar and library information along the bottom.
 //
-// This is a placeholder for the real interface (docs/PLAN.md §4). Its job is
-// to prove that a document flows from disk, through MaterialX, to the screen.
+// On its way to the real interface (docs/PLAN.md §4): M1c adds the viewport,
+// M1d the bottom panel (XML, Issues) and the final layout.
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
-// `ForEach`, `ViewBuilder` helpers, private sub-views.
+// `ForEach`, `ViewBuilder` helpers, private sub-views, enums for view
+// modes, `Picker` in a toolbar.
 
 import SwiftUI
 import MXKit
+
+/// What the main area shows (PLAN.md §4.1: Graph / Split / Text; Split
+/// comes with the bottom panel in M1d).
+enum ViewMode: String, CaseIterable, Identifiable {
+    case graph = "Graph"
+    case text = "Text"
+
+    var id: String { rawValue }
+}
 
 /// The main window content for one document.
 ///
@@ -40,6 +50,16 @@ struct ContentView: View {
     /// and it's optional because nothing may be selected.
     @State private var selection: MXElementSummary.ID?
 
+    /// Graph or XML text.
+    @State private var viewMode: ViewMode = .graph
+
+    /// The graph level the canvas shows: "" for the document's top level,
+    /// or a nodegraph's path. GraphPanel changes it too (double-click, U).
+    @State private var graphPath: String = ""
+
+    /// A node for the canvas to select and frame (set from the sidebar).
+    @State private var focus: String? = nil
+
     var body: some View {
         // A two-column layout: sidebar on the left, detail on the right.
         NavigationSplitView {
@@ -55,11 +75,42 @@ struct ContentView: View {
             // with extra configuration, which is why they chain.
             .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } detail: {
-            XMLTextView(xml: document.xml)
+            switch viewMode {
+            case .graph:
+                GraphPanel(document: document, levelPath: $graphPath, focus: $focus)
+            case .text:
+                XMLTextView(xml: document.xml)
+            }
         }
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                // SWIFT: A segmented Picker bound to `viewMode`; each row's
+                // `.tag` is the value it writes.
+                Picker("View", selection: $viewMode) {
+                    ForEach(ViewMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Show the graph or the XML")
+            }
             ToolbarItem(placement: .status) {
                 IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
+            }
+        }
+        // Clicking in the sidebar opens a nodegraph, or selects a top-level
+        // node in the document's graph.
+        .onChange(of: selection) {
+            guard let path = selection,
+                  let element = document.elements.first(where: { $0.path == path }) else {
+                return
+            }
+            viewMode = .graph
+            if element.category == "nodegraph" {
+                graphPath = element.path
+            } else {
+                graphPath = ""
+                focus = element.path
             }
         }
         // A thin bar along the bottom of the window.

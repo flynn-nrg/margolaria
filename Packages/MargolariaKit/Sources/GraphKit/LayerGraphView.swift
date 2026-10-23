@@ -17,7 +17,7 @@
 //
 // Introduces (SWIFT): subclassing `CALayer` and overriding `draw(in:)`,
 // `withObservationTracking`, CoreText from Swift, `CATransaction`,
-// `log2`/`ceil` and `pow`.
+// `log2`/`ceil` and `pow`, `@discardableResult`.
 
 import AppKit
 import CoreText
@@ -45,6 +45,9 @@ public final class LayerGraphView: GraphEventView {
         super.init(controller: controller)
 
         wantsLayer = true
+        // Nodes outside the view must not draw over its neighbours (the
+        // breadcrumb bar above it, in the app).
+        layer?.masksToBounds = true
         // Draw the background via the layer, not via `draw(_:)`.
         layer?.backgroundColor = Self.cgColor(GraphPalette.background)
 
@@ -87,8 +90,8 @@ public final class LayerGraphView: GraphEventView {
 
     /// Resizing the view shows more (or less) of the graph without any change
     /// to the controller, so newly visible nodes need drawing here too.
-    public override func layout() {
-        super.layout()
+    public override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
         update()
     }
 
@@ -300,24 +303,49 @@ final class NodeLayer: CALayer {
         }
 
         if detail.showsTitle {
-            Self.drawText(local.title, font: Self.titleFont, color: GraphPalette.text,
-                          at: CGPoint(x: frame.minX + 8, y: frame.minY + GraphLayout.headerHeight / 2),
-                          alignRight: false, in: context)
+            // The title, then the MaterialX category dimmed after it, both
+            // shortened with "…" if the header is too narrow.
+            let left: CGFloat = frame.minX + 8
+            let available: CGFloat = frame.width - 16
+            let titleWidth: CGFloat = Self.drawText(local.title, font: Self.titleFont, color: GraphPalette.text,
+                                                    at: CGPoint(x: left, y: frame.minY + GraphLayout.headerHeight / 2),
+                                                    alignRight: false, maxWidth: available, in: context)
+            if let subtitle = local.subtitle, subtitle != local.title {
+                let gap: CGFloat = 6
+                let remaining: CGFloat = available - titleWidth - gap
+                // Not worth drawing two or three letters of it.
+                if remaining > 30 {
+                    Self.drawText(subtitle, font: Self.labelFont, color: GraphPalette.secondaryText,
+                                  at: CGPoint(x: left + titleWidth + gap, y: frame.minY + GraphLayout.headerHeight / 2),
+                                  alignRight: false, maxWidth: remaining, in: context)
+                }
+            }
         }
         if detail.showsPortLabels {
             for (index, port) in local.outputs.enumerated() {
                 let point: CGPoint = GraphLayout.outputPoint(of: local, index: index)
                 Self.drawText(port.name, font: Self.labelFont, color: GraphPalette.text,
-                              at: CGPoint(x: point.x - 10, y: point.y), alignRight: true, in: context)
+                              at: CGPoint(x: point.x - 10, y: point.y), alignRight: true,
+                              maxWidth: frame.width - 20, in: context)
             }
             for (index, port) in local.inputs.enumerated() {
                 let point: CGPoint = GraphLayout.inputPoint(of: local, index: index)
-                Self.drawText(port.name, font: Self.labelFont, color: GraphPalette.text,
-                              at: CGPoint(x: point.x + 10, y: point.y), alignRight: false, in: context)
+                // The name gets up to 60% of the row; the value what's left.
+                let nameWidth: CGFloat = Self.drawText(port.name, font: Self.labelFont, color: GraphPalette.text,
+                                                       at: CGPoint(x: point.x + 10, y: point.y), alignRight: false,
+                                                       maxWidth: (frame.width - 18) * 0.6, in: context)
                 if let value = port.value {
                     Self.drawText(value, font: Self.labelFont, color: GraphPalette.secondaryText,
-                                  at: CGPoint(x: frame.maxX - 8, y: point.y), alignRight: true, in: context)
+                                  at: CGPoint(x: frame.maxX - 8, y: point.y), alignRight: true,
+                                  maxWidth: frame.width - 18 - nameWidth - 10, in: context)
                 }
+            }
+            if local.collapsedInputCount > 0 {
+                let count: Int = local.collapsedInputCount
+                Self.drawText(count == 1 ? "+1 more input" : "+\(count) more inputs",
+                              font: Self.labelFont, color: GraphPalette.secondaryText,
+                              at: CGPoint(x: frame.minX + 10, y: GraphLayout.collapsedRowCentre(of: local)),
+                              alignRight: false, maxWidth: frame.width - 20, in: context)
             }
         }
     }
@@ -342,16 +370,34 @@ final class NodeLayer: CALayer {
     nonisolated(unsafe) static let labelFont: CTFont = CTFontCreateUIFontForLanguage(.system, 10, nil)!
 
     /// Draws one line of text, vertically centred on `point.y`, starting at
-    /// (or, if `alignRight`, ending at) `point.x`.
+    /// (or, if `alignRight`, ending at) `point.x`. Text wider than
+    /// `maxWidth` is shortened with "…". Returns the width drawn.
+    ///
+    /// SWIFT: `@discardableResult` lets callers ignore the returned width
+    /// without a warning; most of them do.
+    @discardableResult
     static func drawText(_ string: String, font: CTFont, color: (CGFloat, CGFloat, CGFloat),
-                         at point: CGPoint, alignRight: Bool, in context: CGContext) {
+                         at point: CGPoint, alignRight: Bool, maxWidth: CGFloat, in context: CGContext) -> CGFloat {
+        guard maxWidth > 0 else {
+            return 0
+        }
         // SWIFT: A Swift dictionary bridges to the CFDictionary CoreText wants.
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: LayerGraphView.cgColor(color),
         ]
-        let line: CTLine = CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: attributes))
-        let width: CGFloat = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        var line: CTLine = CTLineCreateWithAttributedString(NSAttributedString(string: string, attributes: attributes))
+        var width: CGFloat = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        if width > maxWidth {
+            // CoreText cuts the line to fit and appends the token.
+            let token: CTLine = CTLineCreateWithAttributedString(NSAttributedString(string: "…", attributes: attributes))
+            // SWIFT: `CTLineCreateTruncatedLine` returns an optional (nil if
+            // even the token doesn't fit); `if let` keeps the full line then.
+            if let truncated = CTLineCreateTruncatedLine(line, Double(maxWidth), .end, token) {
+                line = truncated
+                width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+            }
+        }
         let ascent: CGFloat = CTFontGetAscent(font)
         let descent: CGFloat = CTFontGetDescent(font)
 
@@ -363,6 +409,7 @@ final class NodeLayer: CALayer {
         context.textPosition = CGPoint(x: x, y: point.y + (ascent - descent) / 2)
         CTLineDraw(line, context)
         context.restoreGState()
+        return width
     }
 }
 
