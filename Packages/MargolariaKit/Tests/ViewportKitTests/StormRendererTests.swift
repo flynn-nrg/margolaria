@@ -119,6 +119,44 @@ struct StormRendererTests {
         #expect(lit.g > lit.r + 40 && lit.g > lit.b + 40, "sphere should be green, got \(lit)")
     }
 
+    @Test("Lists every material, and switches between them")
+    func switchesMaterials() throws {
+        let xml: String = #"""
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <open_pbr_surface name="SR_red" type="surfaceshader">
+                <input name="base_color" type="color3" value="0.8, 0.05, 0.05" />
+              </open_pbr_surface>
+              <surfacematerial name="M_Red" type="material">
+                <input name="surfaceshader" type="surfaceshader" nodename="SR_red" />
+              </surfacematerial>
+              <open_pbr_surface name="SR_blue" type="surfaceshader">
+                <input name="base_color" type="color3" value="0.05, 0.05, 0.8" />
+              </open_pbr_surface>
+              <surfacematerial name="M_Blue" type="material">
+                <input name="surfaceshader" type="surfaceshader" nodename="SR_blue" />
+              </surfacematerial>
+            </materialx>
+            """#
+        let url: URL = FileManager.default.temporaryDirectory.appendingPathComponent("red_blue.mtlx")
+        try xml.write(to: url, atomically: true, encoding: .utf8)
+
+        let renderer = try MGStormRenderer(materialXFile: url)
+        #expect(renderer.materialPaths == ["/World/MaterialX/Materials/M_Red", "/World/MaterialX/Materials/M_Blue"])
+        #expect(renderer.boundMaterialPath == "/World/MaterialX/Materials/M_Red")
+        let red = Fixtures.pixel(try #require(renderer.snapshot(width: 128, height: 128)), x: 55, y: 55)
+        #expect(red.r > red.b + 40, "first material is red, got \(red)")
+
+        #expect(renderer.bindMaterial(atPath: "/World/MaterialX/Materials/M_Blue"))
+        #expect(renderer.boundMaterialPath == "/World/MaterialX/Materials/M_Blue")
+        let blue = Fixtures.pixel(try #require(renderer.snapshot(width: 128, height: 128)), x: 55, y: 55)
+        #expect(blue.b > blue.r + 40, "after switching, blue, got \(blue)")
+
+        // Not a material: refused, nothing changes.
+        #expect(!renderer.bindMaterial(atPath: "/World/Sphere"))
+        #expect(renderer.boundMaterialPath == "/World/MaterialX/Materials/M_Blue")
+    }
+
     @Test("A file without materials is an error, not a crash")
     func noMaterial() throws {
         let folder: URL = FileManager.default.temporaryDirectory

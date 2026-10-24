@@ -2,7 +2,8 @@
 //
 // Renders a still image with MGStormRenderer, offscreen. Used by the tests to
 // check a render without opening a window, and a starting point for the
-// thumbnails in M3.
+// thumbnails in M3. Anti-aliased the same way as the viewport: rendered at
+// twice the size and scaled down with Downsampler.
 //
 // Introduces (SWIFT): importing an Objective-C module, how Objective-C names
 // and nullability appear in Swift, `extension`, `public`, `while` loops,
@@ -41,15 +42,16 @@ extension MGStormRenderer {
         // arrives in Swift as `(any MTLTexture)?`.
         var texture: (any MTLTexture)? = nil
         var passes: Int = 0
+        let factor: Int = Downsampler.factor
         // SWIFT: `repeat { } while` is C's `do { } while`.
         repeat {
-            texture = render(withWidth: width, height: height)
+            texture = render(withWidth: width * factor, height: height * factor)
             passes += 1
         } while !isConverged && passes < maxPasses
 
         // SWIFT: `guard let` unwraps an optional or leaves the function. After
-        // this line, `texture` is a plain non-optional texture.
-        guard let texture else {
+        // this line, `big` is a plain non-optional texture.
+        guard let big = texture, let small = downsample(big, width: width, height: height) else {
             return nil
         }
 
@@ -61,12 +63,30 @@ extension MGStormRenderer {
         let sRGB: CGColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
         // SWIFT: `[.colorSpace: sRGB]` is a dictionary literal, and
         // `.colorSpace` is short for `CIImageOption.colorSpace`.
-        guard let image = CIImage(mtlTexture: texture, options: [.colorSpace: sRGB]) else {
+        guard let image = CIImage(mtlTexture: small, options: [.colorSpace: sRGB]) else {
             return nil
         }
         // Metal textures store the top row first; Core Image puts its origin
         // at the bottom left. Flip vertically so the snapshot is upright.
         let upright: CIImage = image.oriented(.downMirrored)
         return context.createCGImage(upright, from: upright.extent, format: .RGBA8, colorSpace: sRGB)
+    }
+
+    /// `texture` scaled down to `width` × `height` by the viewport's
+    /// Downsampler, in a new texture. Nil if Metal can't do it.
+    private func downsample(_ texture: any MTLTexture, width: Int, height: Int) -> (any MTLTexture)? {
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture.pixelFormat,
+                                                                  width: width, height: height, mipmapped: false)
+        // Drawn into by the downsampler, then read by Core Image.
+        descriptor.usage = [.renderTarget, .shaderRead]
+        guard let downsampler = try? Downsampler(device: device, pixelFormat: texture.pixelFormat),
+              let target = device.makeTexture(descriptor: descriptor),
+              let commandBuffer = commandQueue.makeCommandBuffer()
+        else {
+            return nil
+        }
+        downsampler.encode(from: texture, to: target, in: commandBuffer)
+        commandBuffer.commit()
+        return target
     }
 }

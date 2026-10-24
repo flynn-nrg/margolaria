@@ -72,8 +72,10 @@ This is the stage PLAN.md §5 describes: Hydra renders a generated USD stage tha
 
 ## Not done / open
 
-- **Anti-aliasing.** Edges are jagged. Storm supports MSAA on its AOVs; turn it on when the viewport moves into the app.
+> Since M1c: the viewport is in the main window, with a material picker. UsdMtlx also creates USD materials for a look's `materialassign`s ("preview", "calibration" in the look examples), so the app lists the MaterialX document's own materials rather than the renderer's.
+
+- ~~**Anti-aliasing.**~~ Done in M1c, by supersampling: Storm renders at 2× and `ViewportKit/Downsampler.swift` scales the frame down, only while the camera is still. UsdImagingGLEngine has no MSAA option, and `HDX_MSAA_SAMPLE_COUNT` had no effect on its colour output. At 1040 × 1500 a frame takes 6.7 ms at 1× and 21.8 ms at 2×.
 - **The key light seems weak** next to the HDR dome. Light balancing belongs to M3 (and needs a neutral studio HDR instead of Stinson Beach).
-- **No UVs on the sphere.** `GeomUtilSphereMeshGenerator` produces no texture coordinates, so `texcoord`-driven image nodes won't map yet. Add an `st` primvar before M1's texture work.
+- ~~**No UVs on the sphere.**~~ Done in M1c: a face-varying `st` primvar, with the seam and poles handled. The generator also put the sphere's poles on Z (our stage is Y-up); M1c turns them to Y. All 84 materials in MaterialX's examples now render, textures included (`StormCorpusTests`).
 - **Main thread.** Rendering runs in `MTKView.draw`. That's fine for one sphere, but PLAN.md §5 wants heavy work off the main thread; revisit with M1's real scenes.
 - **Picking and selection outlines**: not attempted. `UsdImagingGLEngine::TestIntersection` exists; compare with wabiverse's HydraKit (PLAN.md §3) before building our own.
