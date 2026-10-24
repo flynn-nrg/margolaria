@@ -31,8 +31,8 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 ///
 /// It owns an in-memory USD stage containing a sphere, two lights and a
 /// reference to the .mtlx file. OpenUSD's UsdMtlx plugin translates the
-/// MaterialX document into UsdShade prims; the first material found is bound
-/// to the sphere.
+/// MaterialX document into UsdShade prims; one of its materials is bound to
+/// the sphere (the first, unless bindMaterialAtPath: picks another).
 ///
 /// Not thread-safe: use one renderer from one thread (the main thread, in the
 /// app).
@@ -53,8 +53,17 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 @property (nonatomic, readonly) id<MTLCommandQueue> commandQueue;
 
 /// The USD path of the material bound to the sphere, for example
-/// "/World/MaterialX/Materials/M_BrushedCopper".
+/// "/World/MaterialX/Materials/M_BrushedCopper". The first material in the
+/// file, until bindMaterialAtPath: chooses another.
 @property (nonatomic, readonly) NSString *boundMaterialPath;
+
+/// The USD paths of every material in the file, in file order. The last
+/// path component is the MaterialX material's name.
+@property (nonatomic, readonly) NSArray<NSString *> *materialPaths;
+
+/// Binds the material at `path` (one of materialPaths) to the sphere.
+/// Returns NO, and changes nothing, if there is no material there.
+- (BOOL)bindMaterialAtPath:(NSString *)path;
 
 /// The name of the Hydra renderer in use ("GL" for Storm, whatever its backend).
 @property (nonatomic, readonly) NSString *rendererName;

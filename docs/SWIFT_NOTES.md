@@ -32,6 +32,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `ContinuousClock`, `Duration` | Measure elapsed time: `clock.measure { }` | `std::chrono::steady_clock` | `SwatchRendererTests.swift` |
 | Iterating `indices` | `for i in array.indices` to change elements in place; `for x in array` gives copies | Index loop vs range-for by value | `SwatchSpikeApp.swift` |
 | Raw strings `#"..."#` | Backslashes and quotes are literal; `"""` makes them multi-line | C++ `R"(...)"` | `StormRendererTests.swift` |
+| Multi-line strings `"""` | Text over several lines; the closing `"""`'s indentation is removed from each line | C++ raw string literal | `Downsampler.swift` (Metal source) |
 | `defer { }` | Runs when the enclosing scope exits, however it exits | Go `defer`; a C++ RAII guard | `LayerGraphView.swift` (`update`) |
 | `CaseIterable` | The compiler generates `allCases`, an array of every case of an enum | An X-macro list | `GraphModel.swift` |
 | Wrapping arithmetic `&+`, `&*` | Plain `+` traps on overflow; `&+` wraps around like unsigned C arithmetic | C unsigned `+` | `GraphModel.swift` (`SeededRandom`) |
@@ -66,6 +67,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Selector(("name:"))` | A selector from its name, for actions with no Swift declaration | `NSSelectorFromString` | `MainMenu.swift` |
 | Variadic parameters | `_ items: Item...`: any number of arguments, seen as an array | C `...`, but typed | `MainMenu.swift` |
 | `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |
+| `Task.sleep(for:)` | Suspends a task for a while without blocking its thread | `dispatch_after` | `ViewportView.swift` (`cameraMoved`) |
 | Default arguments | `func graph(at path: String = "")`: callers may leave the argument out | C++ default arguments | `MXDocument.swift` |
 | `@discardableResult` | A function whose result callers may ignore without a warning | — | `LayerGraphView.swift` (`drawText`) |
 | `inout` on your own functions | `func apply(to model: inout GraphModel)`, called with `&model` | Non-const reference parameter | `GraphAutoLayout.swift` |
@@ -142,6 +144,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@Binding` | A property that refers to state another view owns; `$state` passes one | A pointer to the owner's field | `GraphPanel.swift` |
 | `.onChange(of:initial:)` | Run code when a value changes (and, with `initial: true`, on appear) | KVO observer | `GraphPanel.swift` |
 | `ContentUnavailableView` | The standard "nothing to show" placeholder | — | `GraphPanel.swift` |
+| `.id(_:)` | Gives a view an identity; changing it discards the view and its `@State` and builds a new one | — | `ViewportPanel.swift`, `GraphPanel.swift` |
+| `HSplitView`, `Toggle` as a button | Side-by-side views with a draggable divider; a toolbar button that stays pressed | `NSSplitView`; a toggle `NSButton` | `ContentView.swift` |
 
 ## Swift ↔ C++
 

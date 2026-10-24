@@ -4,8 +4,9 @@
 // elements, the graph canvas (or the XML) in the main area, the issue count
 // in the toolbar and library information along the bottom.
 //
-// On its way to the real interface (docs/PLAN.md §4): M1c adds the viewport,
-// M1d the bottom panel (XML, Issues) and the final layout.
+// On its way to the real interface (docs/PLAN.md §4): the viewport sits to
+// the right of the canvas; M1d adds the bottom panel (XML, Issues) and the
+// final layout.
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
@@ -60,6 +61,12 @@ struct ContentView: View {
     /// A node for the canvas to select and frame (set from the sidebar).
     @State private var focus: String? = nil
 
+    /// The material shown in the viewport (its MaterialX name).
+    @State private var previewMaterial: String? = nil
+
+    /// Whether the viewport column is shown.
+    @State private var showsViewport: Bool = true
+
     var body: some View {
         // A two-column layout: sidebar on the left, detail on the right.
         NavigationSplitView {
@@ -75,11 +82,22 @@ struct ContentView: View {
             // with extra configuration, which is why they chain.
             .navigationSplitViewColumnWidth(min: 220, ideal: 280)
         } detail: {
-            switch viewMode {
-            case .graph:
-                GraphPanel(document: document, levelPath: $graphPath, focus: $focus)
-            case .text:
-                XMLTextView(xml: document.xml)
+            // SWIFT: `HSplitView` puts its children side by side with a
+            // draggable divider (AppKit's NSSplitView).
+            HSplitView {
+                Group {
+                    switch viewMode {
+                    case .graph:
+                        GraphPanel(document: document, levelPath: $graphPath, focus: $focus)
+                    case .text:
+                        XMLTextView(xml: document.xml)
+                    }
+                }
+                .frame(minWidth: 300, maxWidth: .infinity)
+                if showsViewport {
+                    ViewportPanel(document: document, materialName: $previewMaterial)
+                        .frame(minWidth: 240, idealWidth: 360, maxWidth: 800)
+                }
             }
         }
         .toolbar {
@@ -97,6 +115,15 @@ struct ContentView: View {
             ToolbarItem(placement: .status) {
                 IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
             }
+            ToolbarItem(placement: .primaryAction) {
+                // SWIFT: `Toggle` bound to a Bool; `.toggleStyle(.button)`
+                // draws it as a toolbar button that stays pressed when on.
+                Toggle(isOn: $showsViewport) {
+                    Label("Viewport", systemImage: "cube.transparent")
+                }
+                .toggleStyle(.button)
+                .help("Show or hide the 3D preview")
+            }
         }
         // Clicking in the sidebar opens a nodegraph, or selects a top-level
         // node in the document's graph.
@@ -106,6 +133,10 @@ struct ContentView: View {
                 return
             }
             viewMode = .graph
+            if element.type == "material" {
+                // Materials also go to the preview.
+                previewMaterial = element.name
+            }
             if element.category == "nodegraph" {
                 graphPath = element.path
             } else {
