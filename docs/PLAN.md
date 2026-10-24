@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: planning (session 1, 2026-10-11). No code yet.
+Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is next; its plan is §8.1.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -209,6 +209,36 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 | **M4: Authoring power** | Nodegraph creation, promote to interface, custom nodedef authoring, backdrops, two-way XML editing, command palette | Can build a custom nodedef from scratch and use it in another document |
 | **M5: Pipeline** | USD/USDZ export, other Hydra delegates, shader export (MSL/GLSL/OSL), image I/O through OIIO | USDZ opens correctly in Reality Composer Pro / Quick Look |
 | **M6: Python** | Embedded interpreter, Console tab as a Python REPL, `margolaria` module (document, selection, commands, undo grouping), PyMaterialX and `pxr` on the shared document, startup scripts and user commands in the command palette, a Python CLI | A script can build a material and appear in the undo history as one step; the signed and notarized build still passes `spctl` |
+
+### 8.1 M2 plan (editor)
+
+M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app working. The order puts the foundation first (edits, undo, saving), then what makes editing visible (the inspector and a live viewport), then the canvas gestures.
+
+**Design decisions** (checked against the libraries on 2026-10-24):
+
+| Topic | Decision | Why |
+|---|---|---|
+| Edits | Every change goes through one command layer in MXKit (`MXDocument` mutating methods, grouped into named edits) | §5: the UI and Python (M6) must make the same edits, undoably |
+| Undo | **Snapshots**: before each edit, keep `Document::copy()` of the whole document; undo swaps it back | MaterialX documents are small (the largest example is 32 KB). Snapshots are correct by construction, for any edit, including a Python script's many steps as one undo. Inverse operations would each need their own undo code. Revisit if documents get large. |
+| Undo grouping | A slider drag, or a script, is one undo step (one snapshot at the start) | §4.2: value scrubs are coalesced |
+| Undo manager | NSDocument's `undoManager`, so Edit > Undo, the "Edited" dot and autosave all work | M1a chose NSDocument for this |
+| Positions | Saved as `xpos`/`ypos` in the Graph Editor's units: node sizes, so `xpos` = points / 138 and `ypos` = points / 116, y down (MaterialX `Graph.cpp`) | Layouts made in either editor survive in the other. Auto-layout only places nodes without positions. |
+| Included elements | Elements from `xi:include`d files are **read-only** in M2 (shown with a badge) | MaterialX writes includes back as `xi:include`, so edits to included elements would be silently lost on save |
+| Live viewport | Storm reads the edited document from memory with `UsdMtlxRead(document, stage)`, not from the file on disk | M1c's viewport rereads the file; an editor must show unsaved edits |
+| Round-trip check | The corpus test writes each example, reads it back, and compares with `Element::isEquivalent`; byte differences are counted and reported | M2's exit criterion: "byte-equivalent or semantically equal" |
+| Version upgrades | A v1.38 file is upgraded on read; saving asks before writing it as 1.39 | Saving silently changes the file's version otherwise |
+
+**PRs:**
+
+| PR | Scope | Done when |
+|---|---|---|
+| **M2a: Edits, undo, save** | Bridge and MXKit mutations: set an input's value, connect/disconnect, add/remove/rename a node, set a position. Snapshot undo through NSDocument. Saving, and the version-upgrade prompt. Positions saved as `xpos`/`ypos`. Included elements read-only. On the canvas: **move** and **delete** nodes (Delete key), the simplest edits, to exercise the rest. The round-trip corpus test. | Moving and deleting nodes undo, redo, autosave and reopen correctly; the round-trip test passes on all 50 examples |
+| **M2b: Inspector** | The right-hand panel (PLAN §4.1, region 5): the selected node's name, category and nodedef; every input, grouped by `uifolder`; set inputs marked, defaults dimmed; reset to default; connected inputs show their source and jump to it. Editing: numbers (typed, with expressions later), sliders from `uimin`/`uimax`, colour wells (with the colour space shown), vectors, booleans, enums, strings, file pickers. One undo step per drag. Renaming nodes. | Every input type in the examples can be edited and undone |
+| **M2c: Live viewport** | The viewport renders the in-memory document (`UsdMtlxRead`), updated after each edit; value edits feel interactive (measure Storm's cost of a value change versus a graph change, and throttle if needed) | Dragging a colour in the inspector updates the sphere while dragging |
+| **M2d: Wiring** | Drag from an output to an input to connect (type-checked: incompatible inputs are dimmed); drag a connected input away, or ⌥-drag a wire, to disconnect; dropping a wire on a node offers its compatible inputs, hidden ones included; "+N more inputs" expands; cycles refused | Any example can be rewired by mouse, with undo |
+| **M2e: Adding nodes** | The node library (stdlib, pbrlib and the document's nodedefs, grouped by `nodegroup`) as a sidebar tab, with search; Tab on the canvas opens a search popup; dragging off a pin opens it filtered to compatible nodes and connects the result; choosing among a node's type variants (`ND_add_float`, `ND_add_color3`, ...); File > New starts from a material template | A material can be built from an empty document without touching the XML |
+
+**Not in M2** (as PLAN §8 says): nodegraph creation and promote-to-interface (M4), backdrops (M4), two-way XML editing (M4), per-node thumbnails (M3), OCIO colour pickers (M3).
 
 ## 9. Open questions
 
