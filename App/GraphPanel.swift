@@ -49,6 +49,10 @@ struct GraphPanel: View {
     /// An element to select and frame once its level is shown, then cleared.
     @Binding var focus: String?
 
+    /// The path of the node selected on the canvas, when exactly one is;
+    /// nil otherwise. Written here, read by the XML panel.
+    @Binding var selectedPath: String?
+
     /// The level on screen. Rebuilt when the path or the document changes.
     @State private var level: GraphLevel? = nil
 
@@ -84,6 +88,17 @@ struct GraphPanel: View {
         }
         .onChange(of: focus) {
             applyFocus()
+        }
+        // SWIFT: Reading `level?.controller.selection` here, in `body`, makes
+        // SwiftUI observe it (the controller is `@Observable`), so this runs
+        // whenever the canvas selection changes, or the level is replaced.
+        .onChange(of: level?.controller.selection, initial: true) {
+            guard let level, level.controller.selection.count == 1,
+                  let id = level.controller.selection.first else {
+                selectedPath = nil
+                return
+            }
+            selectedPath = level.graph.elementPaths[id]
         }
     }
 

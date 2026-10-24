@@ -97,6 +97,22 @@ enum MainMenu {
                                   Item("Copy", #selector(NSText.copy(_:)), "c"),
                                   Item("Paste", #selector(NSText.paste(_:)), "v"),
                                   Item("Select All", #selector(NSText.selectAll(_:)), "a")))
+        // Find, for the XML panel. Text views handle these through one action,
+        // performTextFinderAction:, told which command by the item's tag.
+        if let editMenu = bar.items.last?.submenu {
+            editMenu.addItem(.separator())
+            let finds: [(String, String, NSTextFinder.Action)] = [
+                ("Find…", "f", .showFindInterface),
+                ("Find Next", "g", .nextMatch),
+                ("Find Previous", "G", .previousMatch),
+            ]
+            for (title, key, action) in finds {
+                let item = NSMenuItem(title: title, action: #selector(NSTextView.performTextFinderAction(_:)), keyEquivalent: key)
+                // SWIFT: `rawValue` is the enum case's underlying Int.
+                item.tag = action.rawValue
+                editMenu.addItem(item)
+            }
+        }
 
         // View.
         bar.addItem(submenu: menu("View",
