@@ -8,9 +8,15 @@
 // "edited" dot in the close button, and asking to save on close. We
 // override only reading, writing and window creation.
 //
+// Editing (M2): every change goes through `edit(_:change:)`, which keeps a
+// copy of the whole document first and registers it with NSDocument's undo
+// manager. Undo puts the copy back; NSDocument then handles the "Edited"
+// state, autosave and Revert To by itself (PLAN.md §8.1).
+//
 // Introduces (SWIFT): subclassing an AppKit class (`NSDocument`) and
 // overriding its methods, `override class var`, `@Observable` on an AppKit
-// subclass, `NSHostingController` (SwiftUI inside AppKit), `LocalizedError`.
+// subclass, `NSHostingController` (SwiftUI inside AppKit), `LocalizedError`,
+// `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets.
 
 import AppKit
 import MXKit
@@ -24,15 +30,28 @@ import SwiftUI
 /// user opens a .mtlx file.
 ///
 /// SWIFT: `@Observable` (see GraphCanvasController.swift) makes SwiftUI
-/// views that read `elements`, `xml` or `issues` update when they change.
-/// They change when the file is read again: File > Revert To, or when
-/// another app changes the file on disk.
+/// views that read `elements`, `xml`, `issues` or `revision` update when
+/// they change: after every edit, undo and redo, and when the file is read
+/// again (File > Revert To, or another app changing it).
 @Observable
 final class MaterialXDocument: NSDocument {
-    /// The parsed document. Starts empty; replaced when a file is read.
+    /// The parsed document. Starts empty; replaced when a file is read;
+    /// changed in place by edits (`edit(_:change:)`), undo and redo.
     ///
     /// SWIFT: `private(set)`: only this class replaces it. The views read it.
     private(set) var content: MXDocument = MaterialXDocument.emptyDocument()
+
+    /// Counts changes to `content`: edits, undos, redos and reads. Views
+    /// that show the document rebuild when it changes.
+    private(set) var revision: Int = 0
+
+    /// Counts reads of the file only. The viewport reads the file itself,
+    /// so it reloads on these (until M2c feeds it the edited document).
+    private(set) var loadGeneration: Int = 0
+
+    /// True once the user agreed to save an upgraded document in the
+    /// current MaterialX version (see `confirmUpgrade`).
+    private var upgradeConfirmed: Bool = false
 
     /// The document's top-level elements, for the sidebar.
     private(set) var elements: [MXElementSummary] = []
@@ -85,12 +104,15 @@ final class MaterialXDocument: NSDocument {
     override func read(from url: URL, ofType typeName: String) throws {
         let document: MXDocument = try MXDocument.read(from: url)
         load(document)
+        loadGeneration += 1
+        upgradeConfirmed = false
     }
 
     /// The file's contents when saving: MaterialX's XML.
     ///
-    /// Until editing arrives (M2) the document never changes, so AppKit only
-    /// calls this for Duplicate and Save As.
+    /// With autosave, AppKit calls this shortly after each edit, and for
+    /// Duplicate and Save As. Elements from `xi:include`d files are written
+    /// back as the include, not copied in.
     ///
     /// SWIFT: `Data(string.utf8)` copies the string's UTF-8 bytes into
     /// Foundation's byte buffer (NSData). `.utf8` is a view of the String as
@@ -122,10 +144,111 @@ final class MaterialXDocument: NSDocument {
         addWindowController(NSWindowController(window: window))
     }
 
+    // MARK: Editing
+
+    /// Changes the document, as one undoable step called `name` (shown as
+    /// "Undo Move", "Undo Delete scale"). `change` makes the edits with
+    /// MXKit; if it throws, the document is put back as it was and the
+    /// error is shown.
+    ///
+    /// A document MaterialX upgraded when reading (an older version in the
+    /// file) is only changed once the user agrees to saving it in the new
+    /// version: autosave will write it soon after.
+    ///
+    /// SWIFT: `@escaping`: the closure may be called after this method
+    /// returns (when the user answers the upgrade question), so Swift must
+    /// keep it alive. Closures passed as parameters are non-escaping by
+    /// default, which lets the compiler avoid that cost.
+    func edit(_ name: String, change: @escaping (MXDocument) throws -> Void) {
+        guard upgradeConfirmed || !needsUpgrade else {
+            confirmUpgrade { [weak self] in
+                self?.edit(name, change: change)
+            }
+            return
+        }
+        let before: MXDocument = content.copy()
+        do {
+            try change(content)
+        } catch {
+            content.restore(from: before)
+            contentChanged()
+            presentError(error)
+            return
+        }
+        registerUndo(restoring: before, name: name)
+        contentChanged()
+    }
+
+    /// Registers an undo step that puts `snapshot` back.
+    ///
+    /// SWIFT: `registerUndo(withTarget:handler:)` stores a closure that the
+    /// undo manager calls on Undo, passing the target (`self`) back in. The
+    /// target is held weakly by the undo manager, so the closure uses the
+    /// parameter, not `self`. Registering during an undo is how redo works:
+    /// the undo manager records that registration as the redo step.
+    private func registerUndo(restoring snapshot: MXDocument, name: String) {
+        guard let undoManager else {
+            return
+        }
+        undoManager.registerUndo(withTarget: self) { document in
+            let current: MXDocument = document.content.copy()
+            document.content.restore(from: snapshot)
+            document.registerUndo(restoring: current, name: name)
+            document.contentChanged()
+        }
+        undoManager.setActionName(name)
+    }
+
+    /// True if the file's MaterialX version is older than the document's:
+    /// MaterialX upgraded it when reading, and saving writes the new version.
+    private var needsUpgrade: Bool {
+        guard let fileVersion = content.fileVersion else {
+            return false
+        }
+        return fileVersion != content.documentVersion
+    }
+
+    /// Asks whether to go ahead and save in the new version; calls
+    /// `proceed` if so.
+    private func confirmUpgrade(then proceed: @escaping () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Upgrade “\(displayName ?? "this document")” to MaterialX \(content.documentVersion)?"
+        alert.informativeText = "The file is MaterialX \(content.fileVersion ?? "?"). Changes are saved automatically, "
+            + "and will be saved as MaterialX \(content.documentVersion), which tools that only read "
+            + "\(content.fileVersion ?? "the older version") may not open. To keep the original, use Duplicate and edit the copy."
+        alert.addButton(withTitle: "Upgrade and Edit")
+        alert.addButton(withTitle: "Duplicate")
+        alert.addButton(withTitle: "Cancel")
+        // SWIFT: A trailing closure called when the sheet is dismissed, with
+        // the button pressed. `[weak self]`: the window might close first.
+        let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            switch response {
+            case .alertFirstButtonReturn:
+                self?.upgradeConfirmed = true
+                proceed()
+            case .alertSecondButtonReturn:
+                self?.duplicate(nil)
+            default:
+                break
+            }
+        }
+        if let window = windowControllers.first?.window {
+            alert.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            handler(alert.runModal())
+        }
+    }
+
+    /// Recomputes what the window shows after `content` changed in place.
+    private func contentChanged() {
+        load(content)
+    }
+
     // MARK: Private
 
     /// Replaces the document's contents and recomputes what the window shows.
     private func load(_ document: MXDocument) {
+        revision += 1
         switch MXLibrary.bundled {
         case .success(let library):
             document.setDataLibrary(library)

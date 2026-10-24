@@ -87,6 +87,14 @@ public final class GraphCanvasController {
     /// Called when the user asks to leave the current graph (the U key).
     @ObservationIgnored public var onNavigateUp: (@MainActor () -> Void)? = nil
 
+    /// Called when a drag has moved nodes, with their new positions (graph
+    /// coordinates), when the mouse button is released. The app saves them
+    /// in the document; the canvas has already moved them.
+    @ObservationIgnored public var onNodesMoved: (@MainActor ([Int: CGPoint]) -> Void)? = nil
+
+    /// Called with the IDs of the nodes to delete (see ``deleteSelection()``).
+    @ObservationIgnored public var onDeleteNodes: (@MainActor (Set<Int>) -> Void)? = nil
+
     /// The size of the view showing the canvas, kept up to date by the view.
     /// Framing needs it; until the view has been laid out it is zero.
     @ObservationIgnored public var viewSize: CGSize = .zero {
@@ -218,7 +226,8 @@ public final class GraphCanvasController {
                 selection = [id]
             }
             var original: [Int: CGPoint] = [:]
-            for selected in selection {
+            // Locked nodes stay where they are.
+            for selected in selection where !model.nodes[selected].isLocked {
                 original[selected] = model.nodes[selected].position
             }
             drag = .movingNodes(start: point, original: original)
@@ -250,8 +259,27 @@ public final class GraphCanvasController {
 
     /// Mouse button released.
     public func mouseUp() {
+        // Report a finished move, once, with the new positions.
+        if case .movingNodes(_, let original) = drag {
+            var moved: [Int: CGPoint] = [:]
+            for (id, start) in original where model.nodes[id].position != start {
+                moved[id] = model.nodes[id].position
+            }
+            if !moved.isEmpty {
+                onNodesMoved?(moved)
+            }
+        }
         drag = .idle
         marquee = nil
+    }
+
+    /// Asks the app to delete the selected nodes (the Delete key, or Edit >
+    /// Delete). Locked nodes are left out; nothing happens if none remain.
+    public func deleteSelection() {
+        let deletable: Set<Int> = selection.filter { !model.nodes[$0].isLocked }
+        if !deletable.isEmpty {
+            onDeleteNodes?(deletable)
+        }
     }
 
     /// Moves the nodes in `original` to their original position plus `delta`.

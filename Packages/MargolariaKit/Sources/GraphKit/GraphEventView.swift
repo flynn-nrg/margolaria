@@ -105,10 +105,23 @@ public class GraphEventView: NSView {
             controller.frame(.selection)
         case "u":
             controller.onNavigateUp?()
+        case "\u{7F}", String(Character(UnicodeScalar(NSDeleteFunctionKey)!)):
+            // The Delete key (⌫, character 127) and Forward Delete (⌦).
+            controller.deleteSelection()
         default:
             // Unhandled keys go up the responder chain (and beep at its end).
             super.keyDown(with: event)
         }
+    }
+
+    /// Edit > Delete. AppKit finds this method through the responder chain
+    /// when the canvas has keyboard focus, and enables the menu item.
+    ///
+    /// SWIFT: `@objc` makes the method visible to the Objective-C runtime,
+    /// which is how menu actions find it. `delete(_:)` is a standard AppKit
+    /// action name (NSText declares it too).
+    @objc public func delete(_ sender: Any?) {
+        controller.deleteSelection()
     }
 
     /// Keeps the controller's idea of the view size current, for framing.

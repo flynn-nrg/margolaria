@@ -71,6 +71,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |
 | `Task.sleep(for:)` | Suspends a task for a while without blocking its thread | `dispatch_after` | `ViewportView.swift` (`cameraMoved`) |
 | Default arguments | `func graph(at path: String = "")`: callers may leave the argument out | C++ default arguments | `MXDocument.swift` |
+| `@escaping` closures | A closure parameter that may run after the function returns must be marked; others can't outlive the call | A block copied to the heap | `MaterialXDocument.swift` (`edit`) |
+| Closures with `inout` parameters | `(inout std.string) -> Bool`: the closure can write to the caller's variable | A lambda taking `T&` | `MXEdit.swift` (`perform`) |
 | `@discardableResult` | A function whose result callers may ignore without a warning | — | `LayerGraphView.swift` (`drawText`) |
 | `inout` on your own functions | `func apply(to model: inout GraphModel)`, called with `&model` | Non-const reference parameter | `GraphAutoLayout.swift` |
 | Nested functions | A `func` inside a `func`; it can use the outer function's constants | A lambda assigned to a local | `MXCorpusTests.swift` |
@@ -89,6 +91,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `RandomNumberGenerator` | Implement `next() -> UInt64` and every `random(in:using:)` API accepts your generator | — | `GraphModel.swift` (`SeededRandom`) |
 | Subclassing `CALayer` | Override `draw(in:)`; also `init(layer:)`, which Core Animation uses to copy layers | ObjC `CALayer` subclass | `LayerGraphView.swift` (`NodeLayer`) |
 | Subclassing AppKit classes | `override func read(from:ofType:)`; `override class var` for class properties AppKit asks the type | ObjC subclassing | `MaterialXDocument.swift` |
+| `UndoManager.registerUndo(withTarget:)` | Stores a closure to call on Undo; registering during an undo becomes the redo | `-registerUndoWithTarget:handler:` | `MaterialXDocument.swift` |
 | `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
 
 ## Modules and access
@@ -99,6 +102,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Access levels | `public` > `internal` (default) > `fileprivate` > `private` | `CxxString.swift` |
 | `@testable import` | Tests can see `internal` declarations | `MXDocumentTests.swift` |
 | `public private(set)` | On a stored property: readable everywhere, settable only inside the type | — | `MXDocument.swift` (`hasDataLibrary`) |
+| `public internal(set)`; `private` is per file | Readable everywhere, settable anywhere in the module. Swift's `private` means "this file", so an extension in another file can't use it | — | `MXDocument.swift` (`hasDataLibrary`) |
 | Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MargolariaKit/Package.swift` |
 | `@_exported import` | Re-export another module to everyone who imports this one | An umbrella header | `Snapshot.swift` |
 | Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |

@@ -135,6 +135,41 @@ struct MXCorpusTests {
         }
     }
 
+    /// M2's exit criterion: saving loses nothing. Each example is written as
+    /// MaterialX would save it, read back, and compared element by element.
+    @Test("Writes back losslessly (M2 exit criterion)", arguments: Corpus.files)
+    func roundTrip(_ file: String) throws {
+        let url: URL = Corpus.examplesFolder.appending(path: file)
+        let original = try MXDocument.read(from: url)
+        let written: String = try original.xmlString()
+        let reread = try MXDocument.parse(xml: written, includesFrom: url.deletingLastPathComponent())
+        // SWIFT: `if let` on the optional message: nil means no difference.
+        if let difference = original.difference(from: reread) {
+            Issue.record("\(file): \(difference)")
+        }
+    }
+
+    /// How close the written text is to the file, byte for byte. Not a
+    /// check (PLAN.md §8 asks for byte-equivalent *or* semantically equal);
+    /// the numbers show how much reformatting saving does.
+    @Test("Statistics: files written back byte for byte")
+    func byteStatistics() throws {
+        var identical: Int = 0
+        var differing: [String] = []
+        for file in Corpus.files {
+            let url: URL = Corpus.examplesFolder.appending(path: file)
+            let text: String = try String(contentsOf: url, encoding: .utf8)
+            let written: String = try MXDocument.read(from: url).xmlString()
+            if text == written {
+                identical += 1
+            } else {
+                differing.append(file)
+            }
+        }
+        print("Round trip: \(identical) of \(Corpus.files.count) examples written back byte for byte.")
+        print("Differing: \(differing.prefix(8).joined(separator: ", "))\(differing.count > 8 ? ", ..." : "")")
+    }
+
     @Test("Margolaria's own checks find nothing (nodedefs, textures)", arguments: Corpus.files)
     func lintIsClean(_ file: String) throws {
         let library = try MXLibrary.bundled.get()

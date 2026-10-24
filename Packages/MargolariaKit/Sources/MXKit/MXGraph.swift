@@ -171,6 +171,9 @@ public struct MXNode: Identifiable, Hashable, Sendable {
     public let nodeGroup: String?
     /// True for a nodegraph shown as a node.
     public let isNodeGraph: Bool
+    /// True if the node came from an `xi:include`d file: read-only, because
+    /// saving writes the include back as a reference.
+    public let isIncluded: Bool
     /// The `xpos`/`ypos` position saved in the file, if any. MaterialX's
     /// Graph Editor writes these; none of MaterialX's own examples have them.
     public let position: CGPoint?
@@ -192,6 +195,7 @@ public struct MXNode: Identifiable, Hashable, Sendable {
         nodeDefName = node.nodeDefName.swiftString.nonEmpty
         nodeGroup = node.nodeGroup.swiftString.nonEmpty
         isNodeGraph = node.isNodeGraph
+        isIncluded = node.isIncluded
         // SWIFT: The ternary operator works as in C. `CGFloat(...)` converts
         // the C++ `float` (Swift `Float`, 32 bits) to Core Graphics' 64-bit
         // floating-point type; Swift never converts numbers implicitly.

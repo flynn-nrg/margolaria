@@ -129,6 +129,22 @@ Document Document::readFromXmlString(const std::string& xml, std::string& errorM
     }
 }
 
+Document Document::readFromXmlStringInFolder(const std::string& xml, const std::string& searchFolder,
+                                             std::string& errorMessage) {
+    try {
+        auto impl = std::make_shared<Impl>();
+        impl->document = mx::createDocument();
+        const mx::XmlReadOptions options = ReadOptions();
+        mx::readFromXmlString(impl->document, xml, mx::FileSearchPath(searchFolder), &options);
+        Document document;
+        document._impl = impl;
+        return document;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return Document();
+    }
+}
+
 Document Document::readFromFile(const std::string& path, std::string& errorMessage) {
     try {
         auto impl = std::make_shared<Impl>();
@@ -377,6 +393,18 @@ std::string ResolvedSourceUri(const mx::ElementPtr& element) {
     return (mx::FilePath(base).getParentPath() / uri).getNormalized().asString();
 }
 
+/// True if `element` came from an `xi:include`d file: it, or an ancestor
+/// below the document, records a source file other than the document's.
+bool IsIncluded(const mx::ElementPtr& element) {
+    const mx::DocumentPtr document = element->getDocument();
+    for (mx::ElementPtr e = element; e && e != document; e = e->getParent()) {
+        if (e->hasSourceUri() && e->getSourceUri() != document->getSourceUri()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// An input or output element that exists in the document.
 PortInfo DescribePort(const mx::PortElementPtr& port) {
     PortInfo info;
@@ -446,6 +474,7 @@ NodeInfo DescribeNode(const mx::NodePtr& node) {
     info.category = node->getCategory();
     info.type = node->getType();
     info.path = node->getNamePath();
+    info.isIncluded = IsIncluded(node);
     ReadPosition(node, info);
 
     // Finds the nodedef by category, type and input types, in the document
@@ -480,6 +509,7 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     info.category = graph->getCategory(); // "nodegraph"
     info.path = graph->getNamePath();
     info.isNodeGraph = true;
+    info.isIncluded = IsIncluded(graph);
     ReadPosition(graph, info);
 
     // A nodegraph that implements a nodedef (a "functional" graph) takes its
@@ -561,6 +591,391 @@ std::vector<ElementSummary> Document::nodeGraphs() const {
         }
     }
     return result;
+}
+
+Document Document::copy() const {
+    Document result;
+    if (_impl) {
+        auto impl = std::make_shared<Impl>();
+        // Document::copy copies every element and the data library. The
+        // source file paths (which xi:include and textures depend on) are
+        // copied with the elements; the test MXEditTests checks it.
+        impl->document = _impl->document->copy();
+        impl->document->setSourceUri(_impl->document->getSourceUri());
+        result._impl = impl;
+    }
+    return result;
+}
+
+bool Document::isEquivalent(const Document& other, std::string& message) const {
+    if (!_impl || !other._impl) {
+        message = "No document loaded";
+        return false;
+    }
+    try {
+        mx::ElementEquivalenceOptions options;
+        return _impl->document->isEquivalent(other._impl->document, options, &message);
+    } catch (const std::exception& e) {
+        message = e.what();
+        return false;
+    }
+}
+
+bool Document::isIncluded(const std::string& path) const {
+    if (!_impl) {
+        return false;
+    }
+    mx::ElementPtr element = _impl->document->getDescendant(path);
+    return element && IsIncluded(element);
+}
+
+// --- Edits -------------------------------------------------------------------
+
+namespace {
+
+/// Thrown by the helpers below to refuse an edit; the edit functions catch
+/// it (with every other exception) and report its message.
+struct Refusal : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+/// The element at `path`, which must exist and not come from an include.
+mx::ElementPtr EditableElement(const mx::DocumentPtr& document, const std::string& path) {
+    mx::ElementPtr element = document->getDescendant(path);
+    if (!element) {
+        throw Refusal("No element at " + path);
+    }
+    if (IsIncluded(element)) {
+        throw Refusal(path + " comes from an included file and can't be changed here");
+    }
+    return element;
+}
+
+/// The input `inputName` of the node or nodegraph `element`, or `element`
+/// itself if it is an <output>. With `create`, an input the node doesn't set
+/// yet is added from its nodedef.
+mx::PortElementPtr Port(const mx::ElementPtr& element, const std::string& inputName, bool create) {
+    if (mx::OutputPtr output = element->asA<mx::Output>()) {
+        return output;
+    }
+    mx::InterfaceElementPtr owner = element->asA<mx::InterfaceElement>();
+    if (!owner) {
+        throw Refusal(element->getNamePath() + " has no inputs");
+    }
+    mx::InputPtr input = owner->getInput(inputName);
+    if (!input && create) {
+        if (mx::NodePtr node = element->asA<mx::Node>()) {
+            input = node->addInputFromNodeDef(inputName);
+        }
+    }
+    if (!input) {
+        throw Refusal(element->getNamePath() + " has no input " + inputName);
+    }
+    return input;
+}
+
+/// Removes the attributes that connect a port to something.
+void ClearConnection(const mx::PortElementPtr& port) {
+    port->removeAttribute(mx::PortElement::NODE_NAME_ATTRIBUTE);
+    port->removeAttribute(mx::PortElement::NODE_GRAPH_ATTRIBUTE);
+    port->removeAttribute(mx::PortElement::OUTPUT_ATTRIBUTE);
+    port->removeAttribute(mx::ValueElement::INTERFACE_NAME_ATTRIBUTE);
+}
+
+/// Disconnects `port`; an input left with no value is removed, so the
+/// node goes back to its default.
+void Disconnect(const mx::PortElementPtr& port) {
+    ClearConnection(port);
+    if (port->isA<mx::Input>() && !port->hasValueString()) {
+        port->getParent()->removeChild(port->getName());
+    }
+}
+
+/// The names of the nodes and nodegraphs `name` reads from, in `graph`.
+std::vector<std::string> UpstreamNames(const mx::ElementPtr& graph, const std::string& name) {
+    std::vector<std::string> names;
+    mx::InterfaceElementPtr element = graph->getChild(name) ? graph->getChild(name)->asA<mx::InterfaceElement>() : nullptr;
+    if (!element) {
+        return names;
+    }
+    for (const mx::InputPtr& input : element->getInputs()) {
+        if (!input->getNodeName().empty()) {
+            names.push_back(input->getNodeName());
+        } else if (!input->getNodeGraphString().empty()) {
+            names.push_back(input->getNodeGraphString());
+        }
+    }
+    return names;
+}
+
+/// True if `to` is `from` or upstream of it: connecting `to` to read from
+/// `from` would then close a loop.
+bool Reaches(const mx::ElementPtr& graph, const std::string& from, const std::string& to) {
+    std::vector<std::string> pending{ from };
+    std::set<std::string> seen;
+    while (!pending.empty()) {
+        std::string name = pending.back();
+        pending.pop_back();
+        if (name == to) {
+            return true;
+        }
+        if (!seen.insert(name).second) {
+            continue;
+        }
+        for (std::string& upstream : UpstreamNames(graph, name)) {
+            pending.push_back(std::move(upstream));
+        }
+    }
+    return false;
+}
+
+/// Runs an edit on `document`, turning any exception into `false` and a
+/// message. Every edit function below is one call to this, with the edit
+/// as a lambda.
+template <typename Edit>
+bool Perform(const mx::DocumentPtr& document, std::string& errorMessage, Edit edit) {
+    if (!document) {
+        errorMessage = "No document loaded";
+        return false;
+    }
+    try {
+        edit(document);
+        return true;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return false;
+    }
+}
+
+} // namespace
+
+bool Document::setInputValue(const std::string& elementPath, const std::string& inputName,
+                             const std::string& value, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::PortElementPtr port = Port(EditableElement(document, elementPath), inputName, true);
+        // Check the text means something for this type before storing it.
+        if (!mx::Value::createValueFromStrings(value, port->getType())) {
+            throw Refusal("\"" + value + "\" is not a valid " + port->getType());
+        }
+        ClearConnection(port);
+        port->setValueString(value);
+    });
+}
+
+bool Document::resetInput(const std::string& elementPath, const std::string& inputName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr element = EditableElement(document, elementPath);
+        mx::PortElementPtr port = Port(element, inputName, false);
+        element->removeChild(port->getName());
+    });
+}
+
+bool Document::connectInput(const std::string& targetPath, const std::string& inputName,
+                            const std::string& sourceName, const std::string& sourceOutput,
+                            std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr target = EditableElement(document, targetPath);
+        // An <output>'s graph is its parent; a node's input's graph is the
+        // node's parent.
+        mx::ElementPtr graph = target->getParent();
+        mx::ElementPtr source = graph->getChild(sourceName);
+        if (!source || !(source->isA<mx::Node>() || source->isA<mx::NodeGraph>())) {
+            throw Refusal("No node or nodegraph " + sourceName + " next to " + targetPath);
+        }
+
+        // The type that comes out of the source.
+        std::string sourceType;
+        if (mx::NodeGraphPtr nodeGraph = source->asA<mx::NodeGraph>()) {
+            std::vector<mx::OutputPtr> outputs = nodeGraph->getOutputs();
+            mx::OutputPtr output = sourceOutput.empty() ? (outputs.size() == 1 ? outputs.front() : nullptr)
+                                                        : nodeGraph->getOutput(sourceOutput);
+            if (!output) {
+                throw Refusal("Say which output of " + sourceName + " to use");
+            }
+            sourceType = output->getType();
+        } else {
+            mx::NodePtr node = source->asA<mx::Node>();
+            sourceType = node->getType();
+            if (!sourceOutput.empty() || sourceType == mx::MULTI_OUTPUT_TYPE_STRING) {
+                mx::NodeDefPtr nodeDef = node->getNodeDef();
+                mx::OutputPtr output = nodeDef ? nodeDef->getActiveOutput(sourceOutput) : nullptr;
+                if (!output) {
+                    throw Refusal(sourceName + " has no output " + sourceOutput);
+                }
+                sourceType = output->getType();
+            }
+        }
+
+        mx::PortElementPtr port = Port(target, inputName, true);
+        if (port->getType() != sourceType) {
+            throw Refusal("Can't connect " + sourceType + " to " + port->getType());
+        }
+        // A node can't read from itself or from anything downstream of it.
+        if (!target->isA<mx::Output>() && Reaches(graph, sourceName, target->getName())) {
+            throw Refusal("Connecting " + sourceName + " to " + target->getName() + " would make a loop");
+        }
+
+        ClearConnection(port);
+        port->removeAttribute(mx::ValueElement::VALUE_ATTRIBUTE);
+        if (source->isA<mx::NodeGraph>()) {
+            port->setNodeGraphString(sourceName);
+        } else {
+            port->setNodeName(sourceName);
+        }
+        if (!sourceOutput.empty()) {
+            port->setOutputString(sourceOutput);
+        }
+    });
+}
+
+bool Document::connectInterface(const std::string& targetPath, const std::string& inputName,
+                                const std::string& interfaceName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr target = EditableElement(document, targetPath);
+        mx::NodeGraphPtr graph = target->getParent()->asA<mx::NodeGraph>();
+        mx::InputPtr interface = graph ? graph->getInput(interfaceName) : nullptr;
+        if (!interface) {
+            throw Refusal("The graph around " + targetPath + " has no input " + interfaceName);
+        }
+        mx::PortElementPtr port = Port(target, inputName, true);
+        mx::InputPtr input = port->asA<mx::Input>();
+        if (!input) {
+            throw Refusal("Only inputs can use the graph's inputs");
+        }
+        if (input->getType() != interface->getType()) {
+            throw Refusal("Can't connect " + interface->getType() + " to " + input->getType());
+        }
+        ClearConnection(input);
+        input->removeAttribute(mx::ValueElement::VALUE_ATTRIBUTE);
+        input->setInterfaceName(interfaceName);
+    });
+}
+
+bool Document::disconnectInput(const std::string& targetPath, const std::string& inputName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        Disconnect(Port(EditableElement(document, targetPath), inputName, false));
+    });
+}
+
+bool Document::addNode(const std::string& parentPath, const std::string& nodeDefName, const std::string& nameHint,
+                       std::string& newPath, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr parent = parentPath.empty() ? mx::ElementPtr(document) : EditableElement(document, parentPath);
+        mx::GraphElementPtr graph = parent->asA<mx::GraphElement>();
+        if (!graph) {
+            throw Refusal(parentPath + " is not a graph");
+        }
+        // The document's own nodedefs first, then the data library's.
+        mx::NodeDefPtr nodeDef = document->getNodeDef(nodeDefName);
+        if (!nodeDef && document->getDataLibrary()) {
+            nodeDef = document->getDataLibrary()->getNodeDef(nodeDefName);
+        }
+        if (!nodeDef) {
+            throw Refusal("No nodedef " + nodeDefName);
+        }
+        const std::string name = graph->createValidChildName(nameHint.empty() ? nodeDef->getNodeString() : nameHint);
+        mx::NodePtr node = graph->addNodeInstance(nodeDef, name);
+        newPath = node->getNamePath();
+    });
+}
+
+bool Document::removeNode(const std::string& path, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr element = EditableElement(document, path);
+        if (!(element->isA<mx::Node>() || element->isA<mx::NodeGraph>())) {
+            throw Refusal(path + " is not a node or nodegraph");
+        }
+        const std::string name = element->getName();
+        mx::ElementPtr graph = element->getParent();
+        // Disconnect everything in the same graph that reads from it.
+        for (const mx::ElementPtr& sibling : graph->getChildren()) {
+            std::vector<mx::PortElementPtr> ports;
+            if (mx::PortElementPtr port = sibling->asA<mx::PortElement>()) {
+                ports.push_back(port);
+            } else if (mx::InterfaceElementPtr owner = sibling->asA<mx::InterfaceElement>()) {
+                for (const mx::InputPtr& input : owner->getInputs()) {
+                    ports.push_back(input);
+                }
+            }
+            for (const mx::PortElementPtr& port : ports) {
+                if (port->getNodeName() == name || port->getNodeGraphString() == name) {
+                    Disconnect(port);
+                }
+            }
+        }
+        graph->removeChild(name);
+    });
+}
+
+bool Document::renameNode(const std::string& path, const std::string& newName,
+                          std::string& newPath, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr element = EditableElement(document, path);
+        const std::string oldName = element->getName();
+        if (newName == oldName) {
+            newPath = path;
+            return;
+        }
+        if (newName.empty() || mx::createValidName(newName) != newName) {
+            throw Refusal("\"" + newName + "\" is not a valid MaterialX name (letters, digits and _ only)");
+        }
+        mx::ElementPtr graph = element->getParent();
+        if (graph->getChild(newName)) {
+            throw Refusal("There is already a " + newName + " here");
+        }
+        element->setName(newName);
+        // Connections in the same graph that refer to it by name.
+        for (const mx::ElementPtr& sibling : graph->getChildren()) {
+            std::vector<mx::PortElementPtr> ports;
+            if (mx::PortElementPtr port = sibling->asA<mx::PortElement>()) {
+                ports.push_back(port);
+            } else if (mx::InterfaceElementPtr owner = sibling->asA<mx::InterfaceElement>()) {
+                for (const mx::InputPtr& input : owner->getInputs()) {
+                    ports.push_back(input);
+                }
+            }
+            for (const mx::PortElementPtr& port : ports) {
+                if (port->getNodeName() == oldName) {
+                    port->setNodeName(newName);
+                }
+                if (port->getNodeGraphString() == oldName) {
+                    port->setNodeGraphString(newName);
+                }
+            }
+        }
+        // Material assignments in looks refer to materials by name.
+        if (graph == document) {
+            for (const mx::ElementPtr& e : document->traverseTree()) {
+                if (e->getCategory() == "materialassign" && e->getAttribute("material") == oldName) {
+                    e->setAttribute("material", newName);
+                }
+            }
+        }
+        newPath = element->getNamePath();
+    });
+}
+
+bool Document::setPosition(const std::string& path, float x, float y, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr element = EditableElement(document, path);
+        // Three decimals: a thousandth of a node is far below a pixel, and
+        // shorter numbers keep the file tidy.
+        auto format = [](float value) {
+            std::ostringstream stream;
+            stream.setf(std::ios::fixed);
+            stream.precision(3);
+            stream << value;
+            std::string text = stream.str();
+            // "1.500" → "1.5", "2.000" → "2".
+            text.erase(text.find_last_not_of('0') + 1);
+            if (!text.empty() && text.back() == '.') {
+                text.pop_back();
+            }
+            return text == "-0" ? std::string("0") : text;
+        };
+        element->setAttribute(mx::Element::XPOS_ATTRIBUTE, format(x));
+        element->setAttribute(mx::Element::YPOS_ATTRIBUTE, format(y));
+    });
 }
 
 std::string Document::documentVersion() const {

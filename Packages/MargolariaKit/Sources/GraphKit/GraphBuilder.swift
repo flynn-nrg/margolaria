@@ -9,7 +9,14 @@
 // counted, not listed: a `standard_surface` has 42 inputs, and the examples
 // set about 8. They appear as one "+N more inputs" row.
 //
-// Positions are all zero here; GraphAutoLayout places the nodes.
+// Nodes with a saved position (`xpos`/`ypos`) are placed there; the
+// others get position zero, and `positioned` says which are which, so that
+// GraphAutoLayout only places the rest (see `layout()`).
+//
+// Units: MaterialX's Graph Editor stores positions in node sizes (its nodes
+// are 138 × 116 points). Our nodes are 220 points wide, so one unit is 220
+// points across and 220 × 116 / 138 ≈ 185 down: a layout keeps its
+// proportions in both editors (PLAN.md §8.1).
 //
 // Introduces (SWIFT): `filter`, dictionary lookups returning optionals,
 // `enumerated()`, `firstIndex(where:)`, `map`/`flatMap` on an optional,
@@ -31,6 +38,27 @@ public struct DocumentGraph: Sendable {
     /// The path of the graph level this was built from ("" for the document).
     public let graphPath: String
 
+    /// The nodes whose position came from the document.
+    public let positioned: Set<Int>
+
+    /// Canvas points per MaterialX position unit (see the file comment).
+    public static let pointsPerUnit = CGSize(width: GraphLayout.nodeWidth, height: GraphLayout.nodeWidth * 116 / 138)
+
+    /// Converts a canvas position to MaterialX units, for `xpos`/`ypos`.
+    public static func units(fromPoints point: CGPoint) -> CGPoint {
+        CGPoint(x: point.x / pointsPerUnit.width, y: point.y / pointsPerUnit.height)
+    }
+
+    /// Places every node without a saved position with GraphAutoLayout,
+    /// leaving the others where the document put them.
+    public mutating func layout() {
+        var laidOut: GraphModel = model
+        GraphAutoLayout.apply(to: &laidOut)
+        for id in model.nodes.indices where !positioned.contains(id) {
+            model.nodes[id].position = laidOut.nodes[id].position
+        }
+    }
+
     /// The canvas node for the element at `path`, if it is on this level.
     public func nodeIndex(forPath path: String) -> Int? {
         elementPaths.firstIndex(of: path)
@@ -47,6 +75,7 @@ public enum GraphBuilder {
         // source a connection can name.
         var nodeIndex: [String: Int] = [:]
         var interfaceIndex: [String: Int] = [:]
+        var positioned: Set<Int> = []
 
         // 1. A nodegraph's interface inputs: small nodes with one output.
         for input in graph.interfaceInputs {
@@ -68,14 +97,22 @@ public enum GraphBuilder {
             // true. A connected input is always authored; checking both
             // states the rule plainly.
             let shown: [MXPort] = node.inputs.filter { $0.isAuthored || $0.connection != nil }
+            var position: CGPoint = .zero
+            if let saved = node.position {
+                position = CGPoint(x: saved.x * DocumentGraph.pointsPerUnit.width,
+                                   y: saved.y * DocumentGraph.pointsPerUnit.height)
+                positioned.insert(id)
+            }
             nodes.append(GraphNode(id: id, title: node.name,
                                    category: node.isNodeGraph ? .nodeGraph : NodeCategory(nodeGroup: node.nodeGroup),
-                                   position: .zero,
+                                   position: position,
                                    inputs: shown.map { port(for: $0) },
                                    outputs: node.outputs.map { GraphPort(name: $0.name, type: PortType($0.type)) },
                                    hasThumbnail: false,
-                                   subtitle: node.category,
-                                   collapsedInputCount: node.inputs.count - shown.count))
+                                   // Included nodes say so, after their category.
+                                   subtitle: node.isIncluded ? node.category + " · included" : node.category,
+                                   collapsedInputCount: node.inputs.count - shown.count,
+                                   isLocked: node.isIncluded))
             paths.append(node.path)
         }
 
@@ -141,7 +178,8 @@ public enum GraphBuilder {
             connect(output.connection, to: PortReference(node: firstOutput + offset, index: 0))
         }
 
-        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, graphPath: graph.path)
+        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, graphPath: graph.path,
+                             positioned: positioned)
     }
 
     /// The canvas row for an input: its name, type and, unless connected,

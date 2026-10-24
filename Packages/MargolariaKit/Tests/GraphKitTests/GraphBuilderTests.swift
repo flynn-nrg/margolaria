@@ -153,3 +153,81 @@ struct GraphAutoLayoutTests {
         }
     }
 }
+
+@Suite("Editing on the canvas")
+@MainActor
+struct CanvasEditingTests {
+    @Test("A drag reports the moved nodes once, when the button is released")
+    func moveReported() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 20))
+        controller.zoom = 1
+        controller.offset = .zero
+        var reports: [[Int: CGPoint]] = []
+        controller.onNodesMoved = { reports.append($0) }
+
+        let frame: CGRect = GraphLayout.frame(of: controller.model.nodes[3])
+        let start = CGPoint(x: frame.midX, y: frame.midY)
+        controller.mouseDown(at: start, extend: false)
+        controller.mouseDragged(to: CGPoint(x: start.x + 10, y: start.y))
+        controller.mouseDragged(to: CGPoint(x: start.x + 25, y: start.y + 5))
+        #expect(reports.isEmpty, "nothing until the button is released")
+        controller.mouseUp()
+        #expect(reports.count == 1)
+        #expect(reports.first?[3] == controller.model.nodes[3].position)
+
+        // A click without movement reports nothing.
+        controller.mouseDown(at: CGPoint(x: frame.midX + 25, y: frame.midY + 5), extend: false)
+        controller.mouseUp()
+        #expect(reports.count == 1)
+    }
+
+    @Test("Locked nodes don't move and aren't deleted")
+    func locked() {
+        var model: GraphModel = .synthetic(nodeCount: 10)
+        model.nodes[2].isLocked = true
+        let controller = GraphCanvasController(model: model)
+        controller.zoom = 1
+        controller.offset = .zero
+        var deleted: Set<Int>? = nil
+        controller.onDeleteNodes = { deleted = $0 }
+
+        controller.selection = [2]
+        controller.deleteSelection()
+        #expect(deleted == nil, "only a locked node selected: nothing to delete")
+        controller.selection = [1, 2]
+        controller.deleteSelection()
+        #expect(deleted == [1])
+
+        let before: CGPoint = controller.model.nodes[2].position
+        let frame: CGRect = GraphLayout.frame(of: controller.model.nodes[2])
+        controller.selection = []
+        controller.mouseDown(at: CGPoint(x: frame.midX, y: frame.midY), extend: false)
+        controller.mouseDragged(to: CGPoint(x: frame.midX + 40, y: frame.midY))
+        controller.mouseUp()
+        #expect(controller.model.nodes[2].position == before)
+    }
+
+    @Test("Saved positions are used, in Graph Editor units; auto-layout places the rest")
+    func savedPositions() throws {
+        let xml = """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <open_pbr_surface name="SR" type="surfaceshader" xpos="2" ypos="1" />
+              <surfacematerial name="M" type="material">
+                <input name="surfaceshader" type="surfaceshader" nodename="SR" />
+              </surfacematerial>
+            </materialx>
+            """
+        let document = try MXDocument(xml: xml)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        var graph: DocumentGraph = GraphBuilder.build(try document.graph())
+        #expect(graph.positioned == [0])
+        graph.layout()
+        // One unit is one of our nodes across, and proportionally down.
+        #expect(graph.model.nodes[0].position == CGPoint(x: 2 * GraphLayout.nodeWidth,
+                                                         y: DocumentGraph.pointsPerUnit.height))
+        #expect(DocumentGraph.units(fromPoints: graph.model.nodes[0].position) == CGPoint(x: 2, y: 1))
+        // The material had no position: placed by the auto-layout.
+        #expect(graph.model.nodes[1].position != .zero)
+    }
+}

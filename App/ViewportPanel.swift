@@ -57,11 +57,13 @@ struct ViewportPanel: View {
                     // A new viewport (and Storm renderer) when the document
                     // is read again (Revert, or a change on disk): the
                     // renderer reads the file once, when it is created.
+                    // Edits don't reach it yet; M2c renders the edited
+                    // document instead of the file.
                     //
                     // SWIFT: `.id(_:)` gives the view an identity; when the
                     // value changes, SwiftUI throws the old view and its
                     // `@State` away and builds a new one.
-                    .id(ObjectIdentifier(document.content))
+                    .id(document.loadGeneration)
             } else {
                 ContentUnavailableView(materials.isEmpty ? "No Materials" : "Not Saved Yet",
                                        systemImage: "circle.lefthalf.filled",

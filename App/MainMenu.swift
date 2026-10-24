@@ -96,6 +96,9 @@ enum MainMenu {
                                   Item("Cut", #selector(NSText.cut(_:)), "x"),
                                   Item("Copy", #selector(NSText.copy(_:)), "c"),
                                   Item("Paste", #selector(NSText.paste(_:)), "v"),
+                                  // On the canvas: deletes the selected nodes
+                                  // (GraphEventView.delete(_:)).
+                                  Item("Delete", #selector(NSText.delete(_:))),
                                   Item("Select All", #selector(NSText.selectAll(_:)), "a")))
         // Find, for the XML panel. Text views handle these through one action,
         // performTextFinderAction:, told which command by the item's tag.
