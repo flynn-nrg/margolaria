@@ -46,6 +46,9 @@ public enum MXError: Error, Sendable {
     case shaderGenerationFailed(String)
     /// There is no element (of the expected kind) at a path.
     case notFound(String)
+    /// An edit was refused: the message says why (an included element, a
+    /// type mismatch, a loop, an invalid name, ...).
+    case editRefused(String)
 }
 
 // SWIFT: An `extension` adds members to an existing type, here our own enum,
@@ -83,6 +86,8 @@ extension MXError: CustomStringConvertible {
         case .shaderGenerationFailed(let message):
             return "Could not generate a shader: \(message)"
         case .notFound(let message):
+            return message
+        case .editRefused(let message):
             return message
         }
     }

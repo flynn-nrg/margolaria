@@ -132,6 +132,10 @@ struct NodeInfo {
     /// without a nodedef. The canvas colours node headers by it.
     std::string nodeGroup;
     bool isNodeGraph = false;
+    /// True for an element that came from an `xi:include`d file. Such
+    /// elements are read-only: saving writes the include back as a
+    /// reference, so changes to them would be lost.
+    bool isIncluded = false;
     /// `xpos`/`ypos`, as written by MaterialX's Graph Editor. Most files
     /// don't have them; the app lays those out itself.
     bool hasPosition = false;
@@ -212,8 +216,22 @@ public:
     /// `errorMessage`.
     static Document readFromFile(const std::string& path, std::string& errorMessage);
 
+    /// Parses MaterialX XML, finding `xi:include`d files in `searchFolder`.
+    /// On failure, returns an empty Document and sets `errorMessage`.
+    static Document readFromXmlStringInFolder(const std::string& xml, const std::string& searchFolder,
+                                              std::string& errorMessage);
+
     /// True when this handle refers to a document.
     bool isLoaded() const;
+
+    /// An independent copy: same contents, data library and file
+    /// locations, sharing nothing with this one. Undo keeps these.
+    Document copy() const;
+
+    /// Compares two documents element by element, ignoring formatting
+    /// (MaterialX's Element::isEquivalent). On a difference, returns false
+    /// and describes the first one in `message`.
+    bool isEquivalent(const Document& other, std::string& message) const;
 
     /// Serialises the document back to MaterialX XML. Returns "" if not loaded.
     std::string writeToXmlString() const;
@@ -245,6 +263,66 @@ public:
 
     /// Every nodegraph in the document, in file order, at any depth.
     std::vector<ElementSummary> nodeGraphs() const;
+
+    /// True if the element at `path` came from an `xi:include`d file (see
+    /// NodeInfo::isIncluded). False for paths that don't exist.
+    bool isIncluded(const std::string& path) const;
+
+    // --- Edits -------------------------------------------------------------
+    //
+    // Every edit names the element by path. Each returns false and sets
+    // `errorMessage` when it is refused (an included element, a type
+    // mismatch, a cycle, an invalid name, a path that doesn't exist); the
+    // document is then unchanged. Undo is the caller's business (MXKit keeps
+    // copies, see copy()).
+
+    /// Sets an input of the node or nodegraph at `elementPath` to `value`
+    /// (MaterialX's text form, such as "0.8, 0.2, 0.1"), disconnecting it if
+    /// it was connected. An input the document doesn't set yet is added,
+    /// with its type from the nodedef.
+    bool setInputValue(const std::string& elementPath, const std::string& inputName,
+                       const std::string& value, std::string& errorMessage);
+
+    /// Removes an input from the document, so the node uses its nodedef's
+    /// default again (and any connection goes with it).
+    bool resetInput(const std::string& elementPath, const std::string& inputName, std::string& errorMessage);
+
+    /// Connects an input to the output of a node or nodegraph in the same
+    /// graph, called `sourceName`. `sourceOutput` names the output when the
+    /// source has several; "" for the only one. `targetPath` may also be
+    /// an <output> element, with `inputName` "". The types must match, and
+    /// the connection must not create a cycle.
+    bool connectInput(const std::string& targetPath, const std::string& inputName,
+                      const std::string& sourceName, const std::string& sourceOutput,
+                      std::string& errorMessage);
+
+    /// Inside a nodegraph, connects an input to one of the graph's own
+    /// inputs (`interfacename`).
+    bool connectInterface(const std::string& targetPath, const std::string& inputName,
+                          const std::string& interfaceName, std::string& errorMessage);
+
+    /// Removes an input's connection. If it has no value of its own, the
+    /// input is removed, so the node uses its default.
+    bool disconnectInput(const std::string& targetPath, const std::string& inputName, std::string& errorMessage);
+
+    /// Adds a node defined by the nodedef `nodeDefName` (such as
+    /// "ND_multiply_float") to the graph at `parentPath` ("" for the
+    /// document). The name is `nameHint`, made valid and unique. Sets
+    /// `newPath` to the new node's path.
+    bool addNode(const std::string& parentPath, const std::string& nodeDefName, const std::string& nameHint,
+                 std::string& newPath, std::string& errorMessage);
+
+    /// Removes the node or nodegraph at `path`, and disconnects everything
+    /// that was connected to it.
+    bool removeNode(const std::string& path, std::string& errorMessage);
+
+    /// Renames the node or nodegraph at `path`, updating the connections
+    /// and material assignments that refer to it. Sets `newPath`.
+    bool renameNode(const std::string& path, const std::string& newName,
+                    std::string& newPath, std::string& errorMessage);
+
+    /// Sets the `xpos`/`ypos` attributes of the element at `path`.
+    bool setPosition(const std::string& path, float x, float y, std::string& errorMessage);
 
     /// The `version` attribute of the root element, such as "1.39".
     std::string documentVersion() const;

@@ -92,11 +92,21 @@ public final class MXDocument {
     /// constant is a compile error ("cannot use mutating member on immutable
     /// value"), so the handle must be a variable. This is how C++ `const`
     /// correctness shows up in Swift.
-    private var handle: mxbridge.Document
+    ///
+    /// `internal` (no keyword) rather than `private`, so the edits in
+    /// MXEdit.swift, another file of this module, can use it. The app still
+    /// can't: it only sees `public` members.
+    var handle: mxbridge.Document
 
     /// The file the document was read from, or nil if it came from a string.
     /// Relative texture paths and xi:includes are resolved against its folder.
     public let fileURL: URL?
+
+    /// The MaterialX version written in the file (the root's `version`
+    /// attribute), before MaterialX upgraded the document in memory. Nil
+    /// if the document didn't come from a file. When it differs from
+    /// ``documentVersion``, saving writes the newer version.
+    public let fileVersion: String?
 
     /// Parses MaterialX XML.
     ///
@@ -114,15 +124,19 @@ public final class MXDocument {
         }
         self.handle = document
         self.fileURL = nil
+        self.fileVersion = nil
     }
 
-    /// Wraps a handle that was loaded some other way (see `read(from:)`).
+    /// Wraps a handle that was loaded some other way (`read(from:)`,
+    /// `copy()`).
     ///
-    /// SWIFT: `private init`: only code in this file can call it. Swift lets
-    /// a class have several initializers, distinguished by their labels.
-    private init(handle: mxbridge.Document, fileURL: URL) {
+    /// SWIFT: An `internal init` (no keyword): code in this module can call
+    /// it, the app can't. Swift lets a class have several initializers,
+    /// distinguished by their labels.
+    init(handle: mxbridge.Document, fileURL: URL?, fileVersion: String?) {
         self.handle = handle
         self.fileURL = fileURL
+        self.fileVersion = fileVersion
     }
 
     /// Reads a .mtlx file from disk.
@@ -140,7 +154,17 @@ public final class MXDocument {
         guard document.isLoaded() else {
             throw MXError.parseFailed(errorMessage.swiftString)
         }
-        return MXDocument(handle: document, fileURL: url)
+        return MXDocument(handle: document, fileURL: url, fileVersion: Self.versionWritten(in: url))
+    }
+
+    /// The `version` attribute of the root element as written in the file,
+    /// read straight from the text (MaterialX's own reading upgrades it).
+    private static func versionWritten(in url: URL) -> String? {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              let match = text.firstMatch(of: #/<materialx\b[^>]*\bversion\s*=\s*"([^"]*)"/#) else {
+            return nil
+        }
+        return String(match.1)
     }
 
     /// The document as MaterialX XML, ready to save.
@@ -174,9 +198,10 @@ public final class MXDocument {
     /// True once ``setDataLibrary(_:)`` has been called. Without a library no
     /// nodedef can be found, so checks that depend on nodedefs are skipped.
     ///
-    /// SWIFT: `public private(set)`: readable by everyone, settable only
-    /// inside this type.
-    public private(set) var hasDataLibrary: Bool = false
+    /// SWIFT: `public internal(set)`: readable by everyone, settable only
+    /// inside MXKit (`copy()` in MXEdit.swift sets it). `private(set)` would
+    /// mean "this file only": Swift's `private` is per file, not per type.
+    public internal(set) var hasDataLibrary: Bool = false
 
     /// Runs MaterialX's validation over the whole document.
     public func validate() -> MXValidationResult {

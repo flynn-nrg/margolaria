@@ -3,9 +3,10 @@
 // The graph canvas for one document (PLAN.md §4.1, region 3): a breadcrumb
 // bar showing which graph level is open, and the canvas below it.
 //
-// Read-only in M1: nodes can be selected, moved around and framed, but the
-// document doesn't change. Moved nodes go back to the automatic layout when
-// the level is opened again.
+// Editing (M2a): moving nodes saves their positions (`xpos`/`ypos`), and
+// Delete removes the selected nodes, each as one undoable step through
+// MaterialXDocument.edit. After every change the level is rebuilt from the
+// document, keeping the camera and the selection.
 //
 // Navigation: double-click a nodegraph to open it; U, or a breadcrumb, to go
 // back up. The sidebar opens levels and selects nodes through `level` and
@@ -80,10 +81,9 @@ struct GraphPanel: View {
         .onChange(of: levelPath, initial: true) {
             rebuild()
         }
-        // Revert, or another app changing the file, replaces the document's
-        // content; show the new one. `ObjectIdentifier` is the object's
-        // identity, so this fires when `content` is a different MXDocument.
-        .onChange(of: ObjectIdentifier(document.content)) {
+        // Every change to the document (edit, undo, redo, reading the file
+        // again) bumps its revision; show the new state.
+        .onChange(of: document.revision) {
             rebuild()
         }
         .onChange(of: focus) {
@@ -113,7 +113,12 @@ struct GraphPanel: View {
             return
         }
         var graph: DocumentGraph = GraphBuilder.build(mxGraph)
-        GraphAutoLayout.apply(to: &graph.model)
+        graph.layout()
+
+        // Rebuilding the level that is already shown (after an edit): keep
+        // the camera and, by path, the selection. Opening another level
+        // frames it instead.
+        let previous: GraphLevel? = level?.graph.graphPath == levelPath ? level : nil
 
         let newLevel = GraphLevel(graph: graph)
         // Double-clicking a nodegraph opens it.
@@ -132,10 +137,70 @@ struct GraphPanel: View {
         newLevel.controller.onNavigateUp = {
             levelPath = BreadcrumbBar.parent(of: levelPath)
         }
-        newLevel.controller.frame(.all)
+        newLevel.controller.onNodesMoved = { [weak newLevel] moved in
+            guard let newLevel else {
+                return
+            }
+            saveMove(of: moved, in: newLevel)
+        }
+        newLevel.controller.onDeleteNodes = { [weak newLevel] ids in
+            guard let newLevel else {
+                return
+            }
+            delete(ids, in: newLevel)
+        }
+
+        if let previous {
+            newLevel.controller.zoom = previous.controller.zoom
+            newLevel.controller.offset = previous.controller.offset
+            let selectedPaths: [String] = previous.controller.selection.map { previous.graph.elementPaths[$0] }
+            newLevel.controller.selection = Set(selectedPaths.compactMap { graph.nodeIndex(forPath: $0) })
+        } else {
+            newLevel.controller.frame(.all)
+        }
         level = newLevel
         failure = nil
         applyFocus()
+    }
+
+    /// Saves moved nodes' positions in the document, as one "Move" step.
+    ///
+    /// The first move in a level whose nodes were placed by auto-layout
+    /// also saves every other node's position: otherwise the auto-layout
+    /// could rearrange them after the next edit, around the moved ones.
+    private func saveMove(of moved: [Int: CGPoint], in level: GraphLevel) {
+        let model: GraphModel = level.controller.model
+        var positions: [String: CGPoint] = [:]
+        for node in model.nodes where !node.isLocked {
+            let isMoved: Bool = moved[node.id] != nil
+            if isMoved || !level.graph.positioned.contains(node.id) {
+                positions[level.graph.elementPaths[node.id]] = DocumentGraph.units(fromPoints: node.position)
+            }
+        }
+        document.edit(moved.count == 1 ? "Move" : "Move \(moved.count) Nodes") { content in
+            for (path, position) in positions {
+                try content.setPosition(position, of: path)
+            }
+        }
+    }
+
+    /// Deletes nodes from the document, as one step. A nodegraph's own
+    /// inputs and outputs (shown at the graph's edges) aren't nodes, and
+    /// are left alone.
+    private func delete(_ ids: Set<Int>, in level: GraphLevel) {
+        let nodes: [GraphNode] = ids.map { level.graph.model.nodes[$0] }.filter { $0.category != .graphInterface }
+        guard !nodes.isEmpty else {
+            NSSound.beep()
+            return
+        }
+        let name: String = nodes.count == 1 ? "Delete \(nodes[0].title)" : "Delete \(nodes.count) Nodes"
+        let paths: [String] = nodes.map { level.graph.elementPaths[$0.id] }
+        level.controller.selection = []
+        document.edit(name) { content in
+            for path in paths {
+                try content.removeNode(at: path)
+            }
+        }
     }
 
     /// Selects and frames `focus`, if it is on the level shown.

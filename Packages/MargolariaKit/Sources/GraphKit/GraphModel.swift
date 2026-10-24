@@ -165,6 +165,9 @@ public struct GraphNode: Identifiable, Sendable {
     /// How many more inputs the node has that aren't shown: those that use
     /// their default value. Drawn as one "+N more inputs" row.
     public var collapsedInputCount: Int = 0
+    /// True for a node that can't be changed (it comes from an included
+    /// file): it can be selected, but not moved or deleted.
+    public var isLocked: Bool = false
 }
 
 /// Identifies one port: which node, which side, which row.
