@@ -16,10 +16,11 @@
 import SwiftUI
 import MXKit
 
-/// What the main area shows (PLAN.md §4.1: Graph / Split / Text; Split
-/// comes with the bottom panel in M1d).
+/// What the main area shows (PLAN.md §4.1): the canvas, the canvas with
+/// the bottom panel (XML, Issues) under it, or the bottom panel alone.
 enum ViewMode: String, CaseIterable, Identifiable {
     case graph = "Graph"
+    case split = "Split"
     case text = "Text"
 
     var id: String { rawValue }
@@ -51,8 +52,14 @@ struct ContentView: View {
     /// and it's optional because nothing may be selected.
     @State private var selection: MXElementSummary.ID?
 
-    /// Graph or XML text.
-    @State private var viewMode: ViewMode = .graph
+    /// Graph, Split or Text.
+    @State private var viewMode: ViewMode = .split
+
+    /// The bottom panel's tab.
+    @State private var bottomTab: BottomTab = .xml
+
+    /// The node selected on the canvas (one only), for the XML panel.
+    @State private var canvasSelection: String? = nil
 
     /// The graph level the canvas shows: "" for the document's top level,
     /// or a nodegraph's path. GraphPanel changes it too (double-click, U).
@@ -85,12 +92,18 @@ struct ContentView: View {
             // SWIFT: `HSplitView` puts its children side by side with a
             // draggable divider (AppKit's NSSplitView).
             HSplitView {
-                Group {
-                    switch viewMode {
-                    case .graph:
-                        GraphPanel(document: document, levelPath: $graphPath, focus: $focus)
-                    case .text:
-                        XMLTextView(xml: document.xml)
+                // SWIFT: `VSplitView` stacks its children with draggable
+                // dividers between them.
+                VSplitView {
+                    if viewMode != .text {
+                        GraphPanel(document: document, levelPath: $graphPath, focus: $focus,
+                                   selectedPath: $canvasSelection)
+                            .frame(minHeight: 200, maxHeight: .infinity)
+                    }
+                    if viewMode != .graph {
+                        BottomPanel(document: document, tab: $bottomTab, selectedPath: canvasSelection,
+                                    onSelectIssue: show)
+                            .frame(minHeight: 120, idealHeight: 260, maxHeight: .infinity)
                     }
                 }
                 .frame(minWidth: 300, maxWidth: .infinity)
@@ -110,10 +123,19 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                .help("Show the graph or the XML")
+                .help("The graph, the graph with the XML and Issues panel, or the panel alone")
             }
             ToolbarItem(placement: .status) {
-                IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
+                // Clicking the badge opens the Issues tab.
+                Button {
+                    if viewMode == .graph {
+                        viewMode = .split
+                    }
+                    bottomTab = .issues
+                } label: {
+                    IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
+                }
+                .buttonStyle(.plain)
             }
             ToolbarItem(placement: .primaryAction) {
                 // SWIFT: `Toggle` bound to a Bool; `.toggleStyle(.button)`
@@ -132,7 +154,9 @@ struct ContentView: View {
                   let element = document.elements.first(where: { $0.path == path }) else {
                 return
             }
-            viewMode = .graph
+            if viewMode == .text {
+                viewMode = .split
+            }
             if element.type == "material" {
                 // Materials also go to the preview.
                 previewMaterial = element.name
@@ -148,6 +172,16 @@ struct ContentView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             LibraryStatusBar(documentVersion: document.content.documentVersion)
         }
+    }
+
+    /// Shows an issue's element: opens its graph level and selects its node.
+    private func show(_ issue: MXIssue) {
+        let location = document.content.canvasLocation(of: issue.elementPath)
+        if viewMode == .text {
+            viewMode = .split
+        }
+        graphPath = location.graphPath
+        focus = location.nodePath
     }
 }
 
@@ -199,24 +233,6 @@ private struct ElementRow: View {
         default:
             // Everything else at the top level is a node.
             return "circle.grid.cross"
-        }
-    }
-}
-
-/// The document's XML, selectable, in a monospaced font.
-private struct XMLTextView: View {
-    let xml: String
-
-    var body: some View {
-        // Scrolls in both directions, because MaterialX lines can be long.
-        ScrollView([.horizontal, .vertical]) {
-            Text(xml)
-                .font(.system(.body, design: .monospaced))
-                .textSelection(.enabled)
-                // SWIFT: `.infinity` lets the text take all available width,
-                // then aligns it to the top left instead of centring it.
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding()
         }
     }
 }

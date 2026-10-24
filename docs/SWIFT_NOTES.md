@@ -47,6 +47,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `for … where` | Loops only over elements for which the condition holds | `continue` at the top of the loop | `MXIssue.swift` |
 | `try?` | Turns a thrown error into `nil` | Ignoring an error return | `MXIssue.swift` |
 | String indices | Strings are sliced with `String.Index` values (`path[..<slash]`), not integers, because characters vary in size | — | `GraphPanel.swift` (`parent(of:)`) |
+| Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLText.swift` |
+| `popLast()`, `compactMap` | Remove-and-return the last element (nil if empty); `map` that drops nils | `pop_back` with a check | `MXXMLText.swift` |
 | `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
 
 ## Functions and closures
@@ -110,7 +112,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Sendable` | Safe to share between threads; checked by the compiler | `MXError.swift` |
 | `@unchecked Sendable` | "I checked this by hand." Always explain why. | `MXLibrary.swift` |
 | `Task { @MainActor in }` | Schedule work to run later on the main thread | `dispatch_async(dispatch_get_main_queue(), ^{})` | `ViewportView.swift` |
-| Global/static non-`Sendable` values | `static let x: SomeClass` is rejected: any thread could reach it. Make it an instance property instead | — | `SwatchRenderer.swift`, `SwatchRendererTests.swift` |
+| Global/static non-`Sendable` values | `static let x: SomeClass` is rejected: any thread could reach it. Make it an instance property, a computed `static var` (cheap values such as regex literals), or, if it is truly thread-safe, `nonisolated(unsafe)` with a comment | — | `SwatchRenderer.swift`, `MXXMLText.swift`, `LayerGraphView.swift` |
 | `@MainActor` on a type | Every property and method runs on the main thread; callers from elsewhere must `await` | "Main thread only" in the docs, but checked | `GraphCanvasController.swift`, `GraphCanvasControllerTests.swift` (suite) |
 | `@MainActor` in a function type | `@MainActor (T) -> Void`: the closure runs on the main actor, so it may touch main-actor state | — | `GraphBenchmark.swift` (`Scenario`) |
 | `MainActor.assumeIsolated { }` | "I know I'm on the main thread" (e.g. in a main-run-loop Timer); checked at run time, traps if wrong | `assert([NSThread isMainThread])` | `GraphBenchmark.swift` |
@@ -145,6 +147,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.onChange(of:initial:)` | Run code when a value changes (and, with `initial: true`, on appear) | KVO observer | `GraphPanel.swift` |
 | `ContentUnavailableView` | The standard "nothing to show" placeholder | — | `GraphPanel.swift` |
 | `.id(_:)` | Gives a view an identity; changing it discards the view and its `@State` and builds a new one | — | `ViewportPanel.swift`, `GraphPanel.swift` |
+| `NSViewRepresentable` coordinator | `makeCoordinator()`: an object that lives as long as the AppKit view, for state the AppKit side remembers between updates | A view controller's ivars | `XMLTextView.swift` |
+| `VSplitView`, `.contextMenu` | Views stacked with draggable dividers; a right-click menu on a view | `NSSplitView`; `menuForEvent:` | `ContentView.swift`, `BottomPanel.swift` |
 | `HSplitView`, `Toggle` as a button | Side-by-side views with a draggable divider; a toolbar button that stays pressed | `NSSplitView`; a toggle `NSButton` | `ContentView.swift` |
 
 ## Swift ↔ C++

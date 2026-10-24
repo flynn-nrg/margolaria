@@ -94,6 +94,19 @@ int Library::nodeDefinitionCount() const {
 
 // --- Document --------------------------------------------------------------
 
+namespace {
+
+/// How documents are read. Comments are kept, as <!-- --> "comment"
+/// elements in the document, so writing it back keeps them; by default
+/// MaterialX drops them. The graph and element lists skip these elements.
+mx::XmlReadOptions ReadOptions() {
+    mx::XmlReadOptions options;
+    options.readComments = true;
+    return options;
+}
+
+} // namespace
+
 Document::Document() = default;
 
 Document Document::readFromXmlString(const std::string& xml, std::string& errorMessage) {
@@ -104,7 +117,8 @@ Document Document::readFromXmlString(const std::string& xml, std::string& errorM
         // Parses the XML into the document. This also upgrades older files
         // (for example v1.38) to the current version in memory. Throws
         // mx::ExceptionParseError on malformed XML.
-        mx::readFromXmlString(impl->document, xml);
+        const mx::XmlReadOptions options = ReadOptions();
+        mx::readFromXmlString(impl->document, xml, mx::FileSearchPath(), &options);
 
         Document document;
         document._impl = impl;
@@ -127,7 +141,8 @@ Document Document::readFromFile(const std::string& path, std::string& errorMessa
         // own file's path (see PortInfo::sourceUri).
         mx::FilePath filePath(path);
         mx::FileSearchPath searchPath(filePath.getParentPath());
-        mx::readFromXmlFile(impl->document, filePath, searchPath);
+        const mx::XmlReadOptions options = ReadOptions();
+        mx::readFromXmlFile(impl->document, filePath, searchPath, &options);
 
         Document document;
         document._impl = impl;
@@ -263,6 +278,10 @@ std::vector<ElementSummary> Document::topLevelElements() const {
         return result;
     }
     for (const mx::ElementPtr& element : _impl->document->getChildren()) {
+        // Comments kept for writing back are not elements to show.
+        if (element->isA<mx::CommentElement>()) {
+            continue;
+        }
         ElementSummary summary;
         summary.name = element->getName();
         summary.category = element->getCategory();
