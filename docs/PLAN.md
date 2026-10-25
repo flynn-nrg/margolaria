@@ -240,6 +240,12 @@ M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app work
 
 **Not in M2** (as PLAN §8 says): nodegraph creation and promote-to-interface (M4), backdrops (M4), two-way XML editing (M4), per-node thumbnails (M3), OCIO colour pickers (M3).
 
+### 8.2 Notes for M3 (previews & colour)
+
+Found while testing M2c's live viewport (2026-10-25), left until the lighting is controlled:
+
+- **Check the viewport against a reference.** Under the M1c lighting (OpenUSD's outdoor dome at full intensity, sRGB output without tone mapping), some examples look wrong: SimpleHair looks almost like glass, gold is more reflective than expected, and it isn't clear whether the Disney examples render correctly yet. Once M3 has a neutral studio environment (`TODO(M3)` in `MGStormRenderer.mm`) and the OCIO view transform, compare these with MaterialXView on the same files, and tell our lighting apart from Storm's approximations (hair BSDFs are made for curves, not a sphere).
+
 ## 9. Open questions
 
 1. Does SwiftUsd expose the MaterialX C++ API to Swift directly, or only link it internally for Hydra? (M0a.) This decides whether we build MaterialX ourselves.
