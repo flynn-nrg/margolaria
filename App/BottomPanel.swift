@@ -47,7 +47,15 @@ struct BottomPanel: View {
             .padding(.vertical, 5)
             .background(.bar)
             Divider()
+            // Fill the rest of the panel, whatever the tab shows. The XML
+            // view fills by itself, but the "No Issues" placeholder only
+            // takes the height it needs, and the VStack would then centre
+            // everything, moving the tabs down.
+            //
+            // SWIFT: `maxWidth: .infinity` lets a view grow to all the
+            // space offered; content smaller than that is centred inside.
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 

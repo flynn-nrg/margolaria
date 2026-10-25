@@ -10,7 +10,7 @@
 //
 // Introduces (SWIFT): failable initializers (`init?`), assigning `self` in
 // an enum's initializer, the `if let x` shorthand, `_` in patterns,
-// `private extension`, `.map` over a C++ vector, `CGPoint`/`CGFloat`.
+// an `extension` shared within the module, `.map` over a C++ vector, `CGPoint`/`CGFloat`.
 
 import CoreGraphics
 import Foundation
@@ -112,6 +112,20 @@ public struct MXPort: Hashable, Sendable {
     public let uiFolder: String?
     /// True for inputs that can only be set, never connected.
     public let isUniform: Bool
+    /// The nodedef's default value, such as "0.8, 0.8, 0.8", whether or not
+    /// the document sets the input. Nil without a nodedef or a default.
+    public let defaultValue: String?
+    /// The colour space the value is in: the port's own `colorspace`, an
+    /// ancestor's, or the nodedef's. Nil means the document's working
+    /// space (lin_rec709 unless the document says otherwise).
+    public let activeColorSpace: String?
+    /// How the inspector shows the input: label, ranges, choices, help.
+    public let ui: MXPortUI
+
+    /// The kind of value, which decides the inspector's widget.
+    public var valueType: MXValueType {
+        MXValueType(type)
+    }
 
     /// Converts the bridge's C++ struct.
     init(_ port: mxbridge.PortInfo) {
@@ -124,6 +138,9 @@ public struct MXPort: Hashable, Sendable {
         fileURL = Self.resolveFile(port.resolvedFilename.swiftString, from: port.sourceUri.swiftString)
         uiFolder = port.uiFolder.swiftString.nonEmpty
         isUniform = port.isUniform
+        defaultValue = port.defaultValue.swiftString.nonEmpty
+        activeColorSpace = port.activeColorSpace.swiftString.nonEmpty
+        ui = MXPortUI(port)
     }
 
     /// Turns a filename value into a file URL: absolute paths as they are,
@@ -169,6 +186,9 @@ public struct MXNode: Identifiable, Hashable, Sendable {
     /// The nodedef's `nodegroup`, such as "pbr", "texture2d" or "math". Nil
     /// without a nodedef. The canvas colours node headers by it.
     public let nodeGroup: String?
+    /// What the node does: its nodedef's `doc`, or a nodegraph's own. Nil
+    /// if there is none.
+    public let documentation: String?
     /// True for a nodegraph shown as a node.
     public let isNodeGraph: Bool
     /// True if the node came from an `xi:include`d file: read-only, because
@@ -194,6 +214,7 @@ public struct MXNode: Identifiable, Hashable, Sendable {
         path = node.path.swiftString
         nodeDefName = node.nodeDefName.swiftString.nonEmpty
         nodeGroup = node.nodeGroup.swiftString.nonEmpty
+        documentation = node.doc.swiftString.nonEmpty
         isNodeGraph = node.isNodeGraph
         isIncluded = node.isIncluded
         // SWIFT: The ternary operator works as in C. `CGFloat(...)` converts
@@ -230,9 +251,10 @@ public struct MXGraph: Hashable, Sendable {
     }
 }
 
-// SWIFT: A `private extension` adds members that only this file can see. A
-// small helper for the conversions above, not worth exposing to the app.
-private extension String {
+// SWIFT: An `extension` without an access level gives its members the
+// default, `internal`: visible throughout MXKit (MXValue.swift uses it too),
+// but not to the app. A small helper, not worth exposing.
+extension String {
     /// The string itself, or nil when it's empty. MaterialX uses "" for
     /// "not set"; Swift has optionals for that.
     var nonEmpty: String? {

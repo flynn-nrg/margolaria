@@ -222,6 +222,26 @@ struct MXEditTests {
         #expect(try document.xmlString().contains(#"<xi:include href="shared.mtlx""#))
     }
 
+    @Test("A nodegraph implementing a nodedef doesn't take values of its own")
+    func functionalNodeGraph() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodedef name="ND_tint" node="tint">
+                <input name="amount" type="float" value="0.5" />
+                <output name="out" type="float" />
+              </nodedef>
+              <nodegraph name="NG_tint" nodedef="ND_tint">
+                <output name="out" type="float" interfacename="amount" />
+              </nodegraph>
+            </materialx>
+            """)
+        // Its defaults belong to the nodedef, which M4 edits.
+        #expect(throws: MXError.self) {
+            try document.setValue("0.7", ofInput: "amount", on: "NG_tint")
+        }
+    }
+
     @Test("The file's version is remembered when MaterialX upgrades it")
     func fileVersion() throws {
         let url: URL = FileManager.default.temporaryDirectory.appending(path: "old-\(UUID().uuidString).mtlx")

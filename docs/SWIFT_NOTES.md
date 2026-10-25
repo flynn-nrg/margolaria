@@ -38,6 +38,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Wrapping arithmetic `&+`, `&*` | Plain `+` traps on overflow; `&+` wraps around like unsigned C arithmetic | C unsigned `+` | `GraphModel.swift` (`SeededRandom`) |
 | `Set` algebra | `union`, `symmetricDifference`, `contains`; sets are values like arrays | `std::set` + `<algorithm>` | `GraphCanvasController.swift`, `LayerGraphView.swift` |
 | Enum as a state machine | Each case carries the data that state needs (`.movingNodes(start:original:)`) | A tagged union with a `switch` | `GraphCanvasController.swift` (`DragState`) |
+| `if case` / `guard case` | Matches one enum case and binds its values, without a full `switch` | — | `ContentView.swift` (`IssuesBadge`), `MXInspectableTests.swift` |
 | Multi-pattern `case` | `case .a(let x), .b(let x):` binds the same name in each pattern | Fall-through `case` labels | `GraphCanvasController.swift` (`mouseDown`) |
 | Option sets | Bit flags as a set: `flags.contains(.shift)` | `if (flags & NSEventModifierFlagShift)` | `GraphEventView.swift` |
 | Failable initializer `init?` | An initializer that can return `nil`; the result is optional | ObjC `-init` returning nil | `MXGraph.swift` (`MXConnection`) |
@@ -50,6 +51,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLText.swift` |
 | `popLast()`, `compactMap` | Remove-and-return the last element (nil if empty); `map` that drops nils | `pop_back` with a check | `MXXMLText.swift` |
 | `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
+| `ClosedRange` | `0...1`: a range including both ends; SwiftUI sliders take one | — | `MXValue.swift` (`sliderRange`) |
+| `zip` | Pairs two sequences element by element into tuples | Python `zip` | `MXValue.swift` (`MXPortUI`) |
+| `Double` vs `Float`; `String(Float(x))` | 64- and 32-bit floats, never converted implicitly. `String(_:)` on a Float prints the shortest text that reads back as the same Float | `double`/`float`; `%g` with round-trip precision | `MXValue.swift` (`MXValueText`) |
 
 ## Functions and closures
 
@@ -82,6 +86,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Concept | In one line | Closest thing you know | First appears |
 |---|---|---|---|
 | Protocols | A set of requirements a type promises to meet | Go interfaces, ObjC protocols | `MXError.swift` (`Error`) |
+| Extending a generic type | `extension Array { ... }` adds members to arrays of every element type; `Element` names that type inside | A member template on `std::vector` (not possible in C++) | `MXValue.swift` |
 | Extensions | Add members or conformances to any type, including Apple's and C++ ones | ObjC categories | `MXError.swift`, `CxxString.swift` |
 | `Identifiable`, `Hashable`, `Equatable` | Standard protocols; the compiler writes `==` and `hash` for simple structs | `operator==` defaulted | `MXDocument.swift` |
 | Associated types | A type placeholder inside a protocol, filled in by each conforming type | Template parameter | (was `Snapshot` in `MaterialXFileDocument.swift`, removed in M1a) |

@@ -74,6 +74,9 @@ struct GraphPanel: View {
                 ContentUnavailableView(failure == nil ? "No Nodes" : "Can't Show This Graph",
                                        systemImage: "circle.grid.cross",
                                        description: Text(failure ?? "This level of the document has no nodes."))
+                    // Fill the panel, so the breadcrumb bar stays at the
+                    // top (see BottomPanel).
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         // SWIFT: `.onChange(of:initial:)` runs the closure when the value
