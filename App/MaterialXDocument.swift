@@ -47,9 +47,6 @@ final class MaterialXDocument: NSDocument {
     /// that show the document rebuild when it changes.
     private(set) var revision: Int = 0
 
-    /// Counts reads of the file only. The viewport reads the file itself,
-    /// so it reloads on these (until M2c feeds it the edited document).
-    private(set) var loadGeneration: Int = 0
 
     /// True once the user agreed to save an upgraded document in the
     /// current MaterialX version (see `confirmUpgrade`).
@@ -78,6 +75,12 @@ final class MaterialXDocument: NSDocument {
 
     /// The XML text as MaterialX writes it (after upgrading and normalising).
     private(set) var xml: String = ""
+
+    /// The document as the viewport reads it (M2c): self-contained, with
+    /// includes inline and absolute texture paths (MXKit's
+    /// `previewXMLString()`). Changes with every edit, so the viewport
+    /// shows unsaved changes. Empty if MaterialX could not write it.
+    private(set) var previewXML: String = ""
 
     /// Problems found by validation and Margolaria's checks. Empty when the
     /// document is fine, or when the data libraries could not be loaded
@@ -124,7 +127,6 @@ final class MaterialXDocument: NSDocument {
     override func read(from url: URL, ofType typeName: String) throws {
         let document: MXDocument = try MXDocument.read(from: url)
         load(document)
-        loadGeneration += 1
         upgradeConfirmed = false
     }
 
@@ -323,6 +325,7 @@ final class MaterialXDocument: NSDocument {
         // SWIFT: `(try? x) ?? y`: `try?` turns a thrown error into `nil`, and
         // `??` ("nil-coalescing") substitutes `y` when the left side is nil.
         xml = (try? document.xmlString()) ?? "<!-- MaterialX could not write this document -->"
+        previewXML = (try? document.previewXMLString()) ?? ""
     }
 
     /// An empty MaterialX document, for File > New.

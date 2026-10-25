@@ -1,7 +1,9 @@
 // ViewportView.swift
 //
-// The 3D viewport: a SwiftUI view showing a .mtlx material on a sphere,
+// The 3D viewport: a SwiftUI view showing a MaterialX material on a sphere,
 // rendered by Hydra Storm (MGStormRenderer). Drag to orbit, scroll to zoom.
+// It shows a .mtlx file, or a document's text; when the text changes (an
+// edit, M2c), the same renderer shows the new version.
 // Frames are rendered at twice the size and scaled down (Downsampler.swift),
 // which smooths the edges.
 //
@@ -15,19 +17,34 @@
 // `override`, `init` rules for subclasses (`super.init`, `required init?`),
 // `fatalError`, `Result`, `enum` with associated values as view state,
 // `.task(id:)`, `[weak self]` capture lists, `===` identity comparison,
-// `Task.sleep(for:)`, `Date` arithmetic, bridging a String to NSString.
+// `Task.sleep(for:)`, `Date` arithmetic, bridging a String to NSString, an
+// `init` that calls another (`self.init`), `.overlay(alignment:)`.
 
 import AppKit
 import MetalKit
 import SwiftUI
 
-/// Shows the first material in a .mtlx file on a sphere, rendered with Storm.
+/// What a viewport shows: a .mtlx file, or a MaterialX document as text.
+///
+/// SWIFT: `Hashable` lets a `Source` be compared and used as `.task(id:)`;
+/// the compiler writes `==` and hashing for enums whose associated values
+/// are all Hashable.
+public enum ViewportSource: Hashable, Sendable {
+    /// A file on disk, read once when the viewport appears (the M0b spike).
+    case file(URL)
+    /// MaterialX XML, as MXKit's `previewXMLString()` writes it (M2c).
+    /// When the text changes, the viewport shows the new version, keeping
+    /// its camera and renderer.
+    case text(String)
+}
+
+/// Shows a material on a sphere, rendered with Storm.
 public struct ViewportView: View {
-    /// The .mtlx file to show.
-    public let fileURL: URL
+    /// What to show.
+    public let source: ViewportSource
 
     /// The MaterialX name of the material to show, such as "M_BrushedCopper",
-    /// or nil for the file's first material.
+    /// or nil for the first material.
     public let materialName: String?
 
     /// What the viewport currently shows.
@@ -47,23 +64,45 @@ public struct ViewportView: View {
     /// recreated every time SwiftUI re-evaluates `body`.
     @State private var content: Content = .loading
 
+    /// Why the last change of text couldn't be shown, if it couldn't. The
+    /// viewport keeps showing the version before.
+    @State private var updateError: String? = nil
+
     /// SWIFT: A `public` struct gets no public memberwise initializer for
     /// free; the automatic one is `internal`. Code in other modules (the app)
     /// needs this explicit `public init`.
-    public init(fileURL: URL, materialName: String? = nil) {
-        self.fileURL = fileURL
+    public init(source: ViewportSource, materialName: String? = nil) {
+        self.source = source
         self.materialName = materialName
+    }
+
+    /// Shows a .mtlx file (the M0b spike).
+    public init(fileURL: URL, materialName: String? = nil) {
+        self.init(source: .file(fileURL), materialName: materialName)
     }
 
     public var body: some View {
         // SWIFT: `Group` is an invisible container, needed here so the
-        // `.task` modifier below applies to whichever branch is shown.
+        // modifiers below apply to whichever branch is shown.
         Group {
             switch content {
             case .loading:
                 ProgressView()
             case .ready(let renderer):
-                StormView(renderer: renderer, materialName: materialName)
+                StormView(renderer: renderer, text: text, materialName: materialName) { error in
+                    updateError = error
+                }
+                // A short note along the bottom when an edit can't be shown.
+                .overlay(alignment: .bottom) {
+                    if let updateError {
+                        Text("Preview not updated: \(updateError)")
+                            .font(.caption)
+                            .lineLimit(2)
+                            .padding(6)
+                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                            .padding(8)
+                    }
+                }
             case .failed(let message):
                 Text(message)
                     .foregroundStyle(.secondary)
@@ -71,11 +110,36 @@ public struct ViewportView: View {
             }
         }
         // SWIFT: `.task(id:)` runs the closure when the view appears, and
-        // again whenever `id` changes (a different file). It runs on the main
-        // actor, because SwiftUI views are `@MainActor`.
+        // again whenever `id` changes. It runs on the main actor, because
+        // SwiftUI views are `@MainActor`. Text changes don't make a new
+        // renderer (StormView updates the one it has), so the id is the
+        // file, or nothing for text.
         .task(id: fileURL) {
             content = makeContent()
         }
+        // Text that couldn't make a renderer (no material yet) may be able
+        // to now.
+        .onChange(of: text) {
+            if case .failed = content {
+                content = makeContent()
+            }
+        }
+    }
+
+    /// The file shown, for `.file`; nil for text.
+    private var fileURL: URL? {
+        if case .file(let url) = source {
+            return url
+        }
+        return nil
+    }
+
+    /// The text shown, for `.text`; nil for a file.
+    private var text: String? {
+        if case .text(let text) = source {
+            return text
+        }
+        return nil
     }
 
     /// Creates the renderer, or describes why it couldn't be created.
@@ -85,8 +149,12 @@ public struct ViewportView: View {
         // failure through `NSError **`; Swift turns that into `throws`
         // automatically. Inside `catch`, the error is available as `error`.
         do {
-            let renderer = try MGStormRenderer(materialXFile: fileURL)
-            return .ready(renderer)
+            switch source {
+            case .file(let url):
+                return .ready(try MGStormRenderer(materialXFile: url))
+            case .text(let text):
+                return .ready(try MGStormRenderer(materialXString: text))
+            }
         } catch {
             return .failed(error.localizedDescription)
         }
@@ -101,10 +169,16 @@ public struct ViewportView: View {
 /// long-lived; this struct is re-created freely, like any SwiftUI view.
 private struct StormView: NSViewRepresentable {
     let renderer: MGStormRenderer
+    /// The document text, for a renderer made from text; nil for a file.
+    let text: String?
     let materialName: String?
+    /// Told whether the latest text could be shown: nil if so, otherwise why not.
+    let onUpdate: (String?) -> Void
 
     func makeNSView(context: Context) -> StormMTKView {
         let view = StormMTKView(renderer: renderer)
+        // The renderer was made from this text already.
+        view.shownText = text
         view.bindMaterial(named: materialName)
         return view
     }
@@ -115,6 +189,16 @@ private struct StormView: NSViewRepresentable {
         // values, which a plain class doesn't support.
         if view.renderer !== renderer {
             view.renderer = renderer
+            view.shownText = text
+        }
+        if let text, text != view.shownText {
+            let error: String? = view.show(text)
+            // SWIFT: SwiftUI forbids changing state while it is updating
+            // views (this method). A `Task` on the main actor runs the
+            // callback just after, which is allowed.
+            Task { @MainActor in
+                onUpdate(error)
+            }
         }
         view.bindMaterial(named: materialName)
     }
@@ -186,6 +270,23 @@ final class StormMTKView: MTKView {
     /// `fatalError` is Swift's `abort()` with a message.
     required init(coder: NSCoder) {
         fatalError("StormMTKView is not used in nibs or storyboards")
+    }
+
+    /// The text the renderer last showed, for a renderer made from text.
+    var shownText: String? = nil
+
+    /// Shows a new version of the document: updates the renderer and
+    /// redraws. Returns nil, or why the text couldn't be shown (the old
+    /// version stays).
+    func show(_ text: String) -> String? {
+        shownText = text
+        do {
+            try renderer.updateMaterialXString(text)
+        } catch {
+            return error.localizedDescription
+        }
+        needsDisplay = true
+        return nil
     }
 
     /// Binds the material called `name` (a MaterialX name, such as

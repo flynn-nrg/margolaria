@@ -170,7 +170,8 @@ let package = Package(
         // be checked without running the app.
         .testTarget(
             name: "ViewportKitTests",
-            dependencies: ["ViewportKit"],
+            // MXKit too: the M2c tests render the text MXKit writes for previews.
+            dependencies: ["ViewportKit", "MXKit"],
             resources: [.copy("Fixtures")],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),

@@ -15,6 +15,7 @@
 import CoreGraphics
 import Foundation
 import Testing
+import MXKit
 import ViewportKit
 
 /// The examples, as in MXKitTests/MXCorpusTests.swift (test targets can't
@@ -62,6 +63,36 @@ extension StormRendererTests {
             let difference: Int = abs(Int(centre.r) - Int(corner.r)) + abs(Int(centre.g) - Int(corner.g))
                 + abs(Int(centre.b) - Int(corner.b))
             #expect(difference > 6, "\(path): the sphere looks like the background \(corner)")
+        }
+    }
+}
+
+extension StormUpdateTests {
+    /// M2c renders the document from MXKit's preview text instead of the
+    /// file. For every example, both must show the same materials, and the
+    /// same image (within rounding): includes inlined and texture paths
+    /// made absolute correctly.
+    @Test("Every example renders the same from its preview text as from its file",
+          .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
+          arguments: Examples.files)
+    func previewTextMatchesFile(_ url: URL) throws {
+        let fromFile = try MGStormRenderer(materialXFile: url)
+        let text: String = try MXDocument.read(from: url).previewXMLString()
+        let fromText = try MGStormRenderer(materialXString: text)
+        #expect(fromText.materialPaths == fromFile.materialPaths)
+
+        for path in fromFile.materialPaths where fromText.materialPaths.contains(path) {
+            #expect(fromFile.bindMaterial(atPath: path))
+            #expect(fromText.bindMaterial(atPath: path))
+            let a: CGImage = try #require(fromFile.snapshot(width: 96, height: 96))
+            let b: CGImage = try #require(fromText.snapshot(width: 96, height: 96))
+            // A few points across the sphere.
+            for (x, y) in [(48, 48), (35, 35), (60, 40), (48, 65)] {
+                let p = Fixtures.pixel(a, x: x, y: y)
+                let q = Fixtures.pixel(b, x: x, y: y)
+                let difference: Int = abs(Int(p.r) - Int(q.r)) + abs(Int(p.g) - Int(q.g)) + abs(Int(p.b) - Int(q.b))
+                #expect(difference <= 6, "\(path) at (\(x), \(y)): file \(p), text \(q)")
+            }
         }
     }
 }

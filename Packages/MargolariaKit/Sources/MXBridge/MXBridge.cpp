@@ -594,6 +594,43 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
 
 } // namespace
 
+std::string Document::writeForPreview() const {
+    if (!_impl) {
+        return {};
+    }
+    try {
+        // A copy, so the document itself keeps its relative paths.
+        mx::DocumentPtr preview = _impl->document->copy();
+        preview->setSourceUri(_impl->document->getSourceUri());
+
+        for (const mx::ElementPtr& element : preview->traverseTree()) {
+            mx::ValueElementPtr value = element->asA<mx::ValueElement>();
+            if (!value || value->getType() != mx::FILENAME_TYPE_STRING || !value->hasValueString()) {
+                continue;
+            }
+            // Applies `fileprefix` from this element or any ancestor.
+            mx::FilePath file(value->getResolvedValueString());
+            const std::string source = ResolvedSourceUri(value);
+            if (!file.isEmpty() && !file.isAbsolute() && !source.empty()) {
+                file = (mx::FilePath(source).getParentPath() / file).getNormalized();
+            }
+            value->setValueString(file.asString());
+        }
+        // The prefixes are applied now; leaving them would apply them twice.
+        for (const mx::ElementPtr& element : preview->traverseTree()) {
+            element->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+        }
+        preview->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+
+        mx::XmlWriteOptions options;
+        // Write included elements in place, not as references to their files.
+        options.writeXIncludeEnable = false;
+        return mx::writeToXmlString(preview, &options);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 bool Document::graph(const std::string& path, GraphInfo& graph, std::string& errorMessage) const {
     if (!_impl) {
         errorMessage = "No document loaded";

@@ -222,6 +222,47 @@ struct MXEditTests {
         #expect(try document.xmlString().contains(#"<xi:include href="shared.mtlx""#))
     }
 
+    @Test("The preview text is self-contained: includes inline, absolute file paths")
+    func previewText() throws {
+        let folder: URL = FileManager.default.temporaryDirectory.appending(path: "MXEditTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder.appending(path: "lib"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // An included file in a subfolder, with a texture relative to it.
+        try """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <image name="shared_tex" type="color3">
+                <input name="file" type="filename" value="wood.png" />
+              </image>
+            </materialx>
+            """.write(to: folder.appending(path: "lib/shared.mtlx"), atomically: true, encoding: .utf8)
+        // The main file's own texture uses a `fileprefix`.
+        try """
+            <?xml version="1.0"?>
+            <materialx version="1.39" xmlns:xi="http://www.w3.org/2001/XInclude">
+              <xi:include href="lib/shared.mtlx" />
+              <image name="own_tex" type="float" fileprefix="textures/">
+                <input name="file" type="filename" value="rough.png" />
+              </image>
+            </materialx>
+            """.write(to: folder.appending(path: "main.mtlx"), atomically: true, encoding: .utf8)
+
+        let document = try MXDocument.read(from: folder.appending(path: "main.mtlx"))
+        let preview: String = try document.previewXMLString()
+        let root: String = folder.standardizedFileURL.path(percentEncoded: false)
+        // SWIFT: A path built by hand ends in "/" when `root` already does;
+        // strip it so the expected text has exactly one slash.
+        let base: String = root.hasSuffix("/") ? String(root.dropLast()) : root
+
+        #expect(!preview.contains("xi:include"), "included elements are written inline")
+        #expect(preview.contains("shared_tex"))
+        #expect(preview.contains("\(base)/lib/wood.png"), "relative to the included file's folder")
+        #expect(preview.contains("\(base)/textures/rough.png"), "with the prefix applied")
+        #expect(!preview.contains("fileprefix"))
+        // The document itself is unchanged: saving keeps the include.
+        #expect(try document.xmlString().contains("xi:include"))
+    }
+
     @Test("A nodegraph implementing a nodedef doesn't take values of its own")
     func functionalNodeGraph() throws {
         let document = try MXDocument(xml: """
