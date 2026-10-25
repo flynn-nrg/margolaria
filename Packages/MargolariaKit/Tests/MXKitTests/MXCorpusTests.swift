@@ -170,6 +170,89 @@ struct MXCorpusTests {
         print("Differing: \(differing.prefix(8).joined(separator: ", "))\(differing.count > 8 ? ", ..." : "")")
     }
 
+    /// M2b's exit criterion, for MXKit: every input the inspector can edit,
+    /// in every example, takes a new value, which then reads back; putting
+    /// back the copy taken before (what undo does) restores the document.
+    @Test("Every input can be edited and undone (M2b exit criterion)", arguments: Corpus.files)
+    func editsEveryInput(_ file: String) throws {
+        let library = try MXLibrary.bundled.get()
+        let document = try MXDocument.read(from: Corpus.examplesFolder.appending(path: file))
+        document.setDataLibrary(library)
+        let original: MXDocument = document.copy()
+
+        var levels: [MXGraph] = [try document.graph()]
+        for nodeGraph in document.nodeGraphs {
+            levels.append(try document.graph(at: nodeGraph.path))
+        }
+        for level in levels {
+            // A nodegraph's own inputs are among its inputs as a node, in
+            // the level above.
+            // A nodegraph that implements a nodedef gets its inputs from the
+            // nodedef, and the inspector leaves them alone (M4 edits them).
+            var owners: [(path: String, inputs: [MXPort])] = []
+            for node in level.nodes where !node.isIncluded && !(node.isNodeGraph && node.nodeDefName != nil) {
+                owners.append((node.path, node.inputs))
+            }
+            for owner in owners {
+                // Connected inputs are rewired in M2d, not given values.
+                for input in owner.inputs where input.connection == nil {
+                    guard let value = Self.changedValue(for: input) else {
+                        continue
+                    }
+                    try document.setValue(value, ofInput: input.name, on: owner.path)
+                    let edited: MXPort? = try Self.input(input.name, of: owner.path, in: document)
+                    #expect(edited?.value == value, "\(owner.path).\(input.name) (\(input.type)) reads back")
+                    #expect(edited?.isAuthored == true)
+                }
+            }
+        }
+
+        document.restore(from: original)
+        if let difference = document.difference(from: original) {
+            Issue.record("\(file) after undo: \(difference)")
+        }
+    }
+
+    /// A value different from `input`'s current one, as the inspector would
+    /// set it; nil for types the inspector doesn't edit as values (shaders,
+    /// arrays, custom types).
+    static func changedValue(for input: MXPort) -> String? {
+        let type: MXValueType = input.valueType
+        switch type {
+        case .float, .integer, .color, .vector, .matrix:
+            // SWIFT: `!` force-unwraps; safe because these types all have a
+            // component count (see MXValueType.componentCount).
+            let count: Int = type.componentCount!
+            var numbers: [Double] = MXValueText.numbers(input.value ?? "") ?? Array(repeating: 0, count: count)
+            numbers[0] += type == .integer ? 1 : 0.25
+            return MXValueText.text(numbers, as: type)
+        case .boolean:
+            return MXValueText.text(!(MXValueText.boolean(input.value ?? "") ?? false))
+        case .string:
+            // An enum takes another of its values; free text gets a suffix.
+            if let other = input.ui.enumOptions.first(where: { $0.value != input.value }) {
+                return other.value
+            }
+            return (input.value ?? "") + "_edited"
+        case .filename:
+            return "textures/edited.png"
+        case .other:
+            return nil
+        }
+    }
+
+    /// The input `name` of the element at `path`, read from the document again.
+    static func input(_ name: String, of path: String, in document: MXDocument) throws -> MXPort? {
+        switch try document.inspectable(at: path) {
+        case .node(let node):
+            return node.inputs.first(where: { $0.name == name })
+        case .graphInput, .graphOutput, nil:
+            // A nodegraph is listed as a node in its parent; `path` here
+            // is always a node or a nodegraph.
+            return nil
+        }
+    }
+
     @Test("Margolaria's own checks find nothing (nodedefs, textures)", arguments: Corpus.files)
     func lintIsClean(_ file: String) throws {
         let library = try MXLibrary.bundled.get()

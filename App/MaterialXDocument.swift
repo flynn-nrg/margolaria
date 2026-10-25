@@ -11,12 +11,14 @@
 // Editing (M2): every change goes through `edit(_:change:)`, which keeps a
 // copy of the whole document first and registers it with NSDocument's undo
 // manager. Undo puts the copy back; NSDocument then handles the "Edited"
-// state, autosave and Revert To by itself (PLAN.md §8.1).
+// state, autosave and Revert To by itself (PLAN.md §8.1). A slider drag
+// is many edits but one undo step (M2b, `continuing:`).
 //
 // Introduces (SWIFT): subclassing an AppKit class (`NSDocument`) and
 // overriding its methods, `override class var`, `@Observable` on an AppKit
 // subclass, `NSHostingController` (SwiftUI inside AppKit), `LocalizedError`,
-// `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets.
+// `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets, labelled
+// tuples, `Optional.map`.
 
 import AppKit
 import MXKit
@@ -52,6 +54,24 @@ final class MaterialXDocument: NSDocument {
     /// True once the user agreed to save an upgraded document in the
     /// current MaterialX version (see `confirmUpgrade`).
     private var upgradeConfirmed: Bool = false
+
+    /// True while the upgrade question is on screen. Edits that arrive
+    /// meanwhile (a slider still moving) are dropped, not asked about again.
+    @ObservationIgnored private var askingToUpgrade: Bool = false
+
+    /// The continuous edit in progress, such as a slider drag: its key and
+    /// when it last changed the document. Edits with the same key join its
+    /// undo step (see `edit(_:continuing:change:)`).
+    ///
+    /// SWIFT: A *tuple* with labelled parts, `(key: String, time: Date)`,
+    /// is a small anonymous struct; `continuation?.key` reads one part.
+    /// `@ObservationIgnored`: no view shows it.
+    @ObservationIgnored private var continuation: (key: String, time: Date)? = nil
+
+    /// How long a continuous edit may pause and still be the same undo
+    /// step. Colour wells never say when the user lets go, so a pause is
+    /// how their drags end; sliders end theirs explicitly.
+    private static let continuationPause: TimeInterval = 1.0
 
     /// The document's top-level elements, for the sidebar.
     private(set) var elements: [MXElementSummary] = []
@@ -155,28 +175,63 @@ final class MaterialXDocument: NSDocument {
     /// file) is only changed once the user agrees to saving it in the new
     /// version: autosave will write it soon after.
     ///
+    /// With `continuing`, the edit is part of a continuous change, such as
+    /// dragging a slider (PLAN.md §4.2: "value scrubs coalesced into one
+    /// step"). Consecutive edits with the same key, each within a second of
+    /// the last, are one undo step: the first keeps the copy, the others
+    /// only change the document. Any other edit, an undo, or
+    /// `endContinuousEdit()` ends it.
+    ///
     /// SWIFT: `@escaping`: the closure may be called after this method
     /// returns (when the user answers the upgrade question), so Swift must
     /// keep it alive. Closures passed as parameters are non-escaping by
     /// default, which lets the compiler avoid that cost.
-    func edit(_ name: String, change: @escaping (MXDocument) throws -> Void) {
+    func edit(_ name: String, continuing key: String? = nil, change: @escaping (MXDocument) throws -> Void) {
+        guard !askingToUpgrade else {
+            return
+        }
         guard upgradeConfirmed || !needsUpgrade else {
             confirmUpgrade { [weak self] in
-                self?.edit(name, change: change)
+                self?.edit(name, continuing: key, change: change)
             }
             return
         }
+
+        let now = Date()
+        // SWIFT: `if let key, let continuation, ...` unwraps both optionals
+        // and checks the rest in one condition. The commas work like `&&`:
+        // evaluation stops at the first that fails.
+        var continues: Bool = false
+        if let key, let continuation, continuation.key == key,
+           now.timeIntervalSince(continuation.time) < Self.continuationPause {
+            continues = true
+        }
+
+        // A copy even when continuing: if this step is refused, only this
+        // step is taken back.
         let before: MXDocument = content.copy()
         do {
             try change(content)
         } catch {
             content.restore(from: before)
+            continuation = nil
             contentChanged()
             presentError(error)
             return
         }
-        registerUndo(restoring: before, name: name)
+        if !continues {
+            registerUndo(restoring: before, name: name)
+        }
+        // SWIFT: `key.map { ... }` on an optional: nil stays nil, a value
+        // becomes the tuple. The same as `key == nil ? nil : (key!, now)`.
+        continuation = key.map { (key: $0, time: now) }
         contentChanged()
+    }
+
+    /// Ends the continuous edit in progress, if any: the next edit is a new
+    /// undo step even with the same key. Sliders call it when released.
+    func endContinuousEdit() {
+        continuation = nil
     }
 
     /// Registers an undo step that puts `snapshot` back.
@@ -191,6 +246,8 @@ final class MaterialXDocument: NSDocument {
             return
         }
         undoManager.registerUndo(withTarget: self) { document in
+            // Whatever was being dragged, the next change is a new step.
+            document.continuation = nil
             let current: MXDocument = document.content.copy()
             document.content.restore(from: snapshot)
             document.registerUndo(restoring: current, name: name)
@@ -219,9 +276,11 @@ final class MaterialXDocument: NSDocument {
         alert.addButton(withTitle: "Upgrade and Edit")
         alert.addButton(withTitle: "Duplicate")
         alert.addButton(withTitle: "Cancel")
+        askingToUpgrade = true
         // SWIFT: A trailing closure called when the sheet is dismissed, with
         // the button pressed. `[weak self]`: the window might close first.
         let handler: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            self?.askingToUpgrade = false
             switch response {
             case .alertFirstButtonReturn:
                 self?.upgradeConfirmed = true

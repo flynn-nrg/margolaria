@@ -10,6 +10,7 @@
 #include "MXBridge.h"
 
 #include <MaterialXCore/Document.h>
+#include <MaterialXCore/Util.h>
 #include <MaterialXFormat/File.h>
 #include <MaterialXFormat/Util.h>
 #include <MaterialXFormat/XmlIo.h>
@@ -405,6 +406,48 @@ bool IsIncluded(const mx::ElementPtr& element) {
     return false;
 }
 
+/// Splits a comma-separated list ("OPAQUE, MASK, BLEND"), trimming spaces.
+std::vector<std::string> SplitList(const std::string& list) {
+    std::vector<std::string> items;
+    for (const std::string& item : mx::splitString(list, ",")) {
+        items.push_back(mx::trimSpaces(item));
+    }
+    return items;
+}
+
+/// Copies the inspector's metadata attributes of `element` (an input, in a
+/// nodedef or a document) into `info`, for each field `info` doesn't
+/// already have. Called with the document's input first, then the
+/// nodedef's, so the document's attributes win.
+void MergeUIMetadata(const mx::ElementPtr& element, PortInfo& info) {
+    // Fills `field` from attribute `name` if it is still empty.
+    auto fill = [&](std::string& field, const char* name) {
+        if (field.empty()) {
+            field = element->getAttribute(name);
+        }
+    };
+    fill(info.uiName, "uiname");
+    fill(info.uiMin, "uimin");
+    fill(info.uiMax, "uimax");
+    fill(info.uiSoftMin, "uisoftmin");
+    fill(info.uiSoftMax, "uisoftmax");
+    fill(info.uiStep, "uistep");
+    fill(info.doc, "doc");
+    fill(info.defaultGeomProp, "defaultgeomprop");
+    fill(info.unit, "unit");
+    fill(info.unitType, "unittype");
+    if (info.uiFolder.empty()) {
+        info.uiFolder = element->getAttribute("uifolder");
+    }
+    // The names and their values go together: take both from one element.
+    if (info.enumNames.empty() && element->hasAttribute("enum")) {
+        info.enumNames = SplitList(element->getAttribute("enum"));
+        info.enumValues = element->hasAttribute("enumvalues") ? SplitList(element->getAttribute("enumvalues"))
+                                                             : std::vector<std::string>();
+    }
+    info.isAdvanced = info.isAdvanced || element->getAttribute("uiadvanced") == "true";
+}
+
 /// An input or output element that exists in the document.
 PortInfo DescribePort(const mx::PortElementPtr& port) {
     PortInfo info;
@@ -426,6 +469,9 @@ PortInfo DescribePort(const mx::PortElementPtr& port) {
     }
     info.sourceUri = ResolvedSourceUri(port);
     info.isUniform = port->getIsUniform();
+    // Searches the port, then its ancestors, up to the document.
+    info.activeColorSpace = port->getActiveColorSpace();
+    MergeUIMetadata(port, info);
     return info;
 }
 
@@ -438,6 +484,15 @@ PortInfo DescribeDefaultInput(const mx::InputPtr& definition) {
     info.isAuthored = false;
     info.isUniform = definition->getIsUniform();
     return info;
+}
+
+/// The colour space of a nodedef-only input on `element`: the nodedef's
+/// own for that input, if it says, or the one `element` is in.
+std::string DefaultColorSpace(const mx::InputPtr& definition, const mx::ElementPtr& element) {
+    if (!definition->getColorSpace().empty()) {
+        return definition->getColorSpace();
+    }
+    return element->getActiveColorSpace();
 }
 
 /// The inputs of `element` (a node or nodegraph) merged with those of its
@@ -453,8 +508,12 @@ std::vector<PortInfo> MergeInputs(const mx::InterfaceElementPtr& element, const 
                 info = DescribePort(authored);
             } else {
                 info = DescribeDefaultInput(definition);
+                info.activeColorSpace = DefaultColorSpace(definition, element);
             }
-            info.uiFolder = definition->getAttribute("uifolder");
+            info.defaultValue = definition->getValueString();
+            // The document's input may override the nodedef's metadata
+            // (DescribePort read it already); the nodedef fills the rest.
+            MergeUIMetadata(definition, info);
             info.isUniform = info.isUniform || definition->getIsUniform();
             listed.insert(info.name);
             inputs.push_back(std::move(info));
@@ -483,6 +542,7 @@ NodeInfo DescribeNode(const mx::NodePtr& node) {
     if (nodeDef) {
         info.nodeDefName = nodeDef->getName();
         info.nodeGroup = nodeDef->getNodeGroup();
+        info.doc = nodeDef->getDocString();
     }
     info.inputs = MergeInputs(node, nodeDef);
 
@@ -518,6 +578,9 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     if (nodeDef) {
         info.nodeDefName = nodeDef->getName();
         info.nodeGroup = nodeDef->getNodeGroup();
+        info.doc = nodeDef->getDocString();
+    } else {
+        info.doc = graph->getDocString();
     }
     info.inputs = MergeInputs(graph, nodeDef);
 
@@ -666,6 +729,13 @@ mx::PortElementPtr Port(const mx::ElementPtr& element, const std::string& inputN
     if (!input && create) {
         if (mx::NodePtr node = element->asA<mx::Node>()) {
             input = node->addInputFromNodeDef(inputName);
+        } else if (mx::NodeGraphPtr graph = element->asA<mx::NodeGraph>()) {
+            // A nodegraph that implements a nodedef takes its inputs and
+            // their defaults from the nodedef; they are changed there (M4).
+            if (mx::NodeDefPtr nodeDef = graph->getNodeDef()) {
+                throw Refusal("The inputs of " + graph->getName() + " are defined by " + nodeDef->getName() +
+                              " and are changed there");
+            }
         }
     }
     if (!input) {

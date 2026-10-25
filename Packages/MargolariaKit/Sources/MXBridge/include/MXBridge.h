@@ -113,6 +113,44 @@ struct PortInfo {
     std::string uiFolder;
     /// `uniform="true"`: can't be connected, only set.
     bool isUniform = false;
+
+    // The inspector's metadata (M2b). It comes from the nodedef's input,
+    // overridden by attributes on the document's own input (a nodegraph's
+    // interface inputs carry their own). Empty when not set; values are in
+    // MaterialX's text form for the port's type ("0, 0, 0" for a color3).
+
+    /// The nodedef's default value, whether or not the document sets the
+    /// input. Empty for inputs without a nodedef, or without a default.
+    std::string defaultValue;
+    /// `uiname`: the label to show instead of the name ("Base Color").
+    std::string uiName;
+    /// `uimin`/`uimax`: the hard limits of the value.
+    std::string uiMin;
+    std::string uiMax;
+    /// `uisoftmin`/`uisoftmax`: the slider's usual range, inside the limits.
+    std::string uiSoftMin;
+    std::string uiSoftMax;
+    /// `uistep`: the slider's increment.
+    std::string uiStep;
+    /// `enum`: the names of the allowed values, such as {"OPAQUE", "MASK"}.
+    std::vector<std::string> enumNames;
+    /// `enumvalues`: the value stored for each name, in the same order
+    /// ({"0", "1"} for an integer). Empty when the names are the values.
+    std::vector<std::string> enumValues;
+    /// `doc`: a sentence describing the input.
+    std::string doc;
+    /// `uiadvanced="true"`: an input most users can leave alone.
+    bool isAdvanced = false;
+    /// `defaultgeomprop`: an unconnected input reads this geometric
+    /// property ("UV0", "Nworld", ...) instead of a value.
+    std::string defaultGeomProp;
+    /// The colour space the value is in: the port's own `colorspace`, or
+    /// the nearest ancestor's, or the nodedef's. Empty means the document's
+    /// working space, usually lin_rec709.
+    std::string activeColorSpace;
+    /// `unit` and `unittype` ("meter", "distance"), for distance and angle inputs.
+    std::string unit;
+    std::string unitType;
 };
 
 /// One node in a graph, or one nodegraph shown as a node in its parent graph.
@@ -131,6 +169,8 @@ struct NodeInfo {
     /// The nodedef's `nodegroup`: "pbr", "texture2d", "math", ... Empty
     /// without a nodedef. The canvas colours node headers by it.
     std::string nodeGroup;
+    /// The nodedef's `doc` attribute: what the node does. Empty without one.
+    std::string doc;
     bool isNodeGraph = false;
     /// True for an element that came from an `xi:include`d file. Such
     /// elements are read-only: saving writes the include back as a
