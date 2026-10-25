@@ -4,13 +4,13 @@
 // picker above the Storm viewport from ViewportKit, which shows the chosen
 // material on a sphere. Drag to orbit, scroll to zoom.
 //
-// Storm reads the .mtlx file itself (through OpenUSD's UsdMtlx plugin), so
-// the preview needs a file on disk: an untitled document shows a message
-// instead. Until editing arrives (M2) the file on disk and the document are
-// the same.
+// The viewport shows the document as it is in memory (M2c), edits included,
+// saved or not: after each edit it gets the new text (`previewXML`), and
+// Storm shows the change in the next frame. Values update while a slider
+// is dragged: an update costs about 3 ms on top of a 10 ms frame
+// (StormUpdateTests), so no throttling is needed.
 //
-// Introduces (SWIFT): `Picker` with an optional selection, `.id(_:)` to
-// force a view to be recreated.
+// Introduces (SWIFT): `Picker` with an optional selection.
 
 import MXKit
 import SwiftUI
@@ -52,24 +52,11 @@ struct ViewportPanel: View {
             .background(.bar)
             Divider()
 
-            if let fileURL = document.content.fileURL, !materials.isEmpty {
-                ViewportView(fileURL: fileURL, materialName: materialName)
-                    // A new viewport (and Storm renderer) when the document
-                    // is read again (Revert, or a change on disk): the
-                    // renderer reads the file once, when it is created.
-                    // Edits don't reach it yet; M2c renders the edited
-                    // document instead of the file.
-                    //
-                    // SWIFT: `.id(_:)` gives the view an identity; when the
-                    // value changes, SwiftUI throws the old view and its
-                    // `@State` away and builds a new one.
-                    .id(document.loadGeneration)
+            if !materials.isEmpty, !document.previewXML.isEmpty {
+                ViewportView(source: .text(document.previewXML), materialName: materialName)
             } else {
-                ContentUnavailableView(materials.isEmpty ? "No Materials" : "Not Saved Yet",
-                                       systemImage: "circle.lefthalf.filled",
-                                       description: Text(materials.isEmpty
-                                                         ? "The preview shows the document's materials on a sphere."
-                                                         : "Save the document to preview it."))
+                ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",
+                                       description: Text("The preview shows the document's materials on a sphere."))
             }
         }
         // Show the first material until one is chosen, and again if the

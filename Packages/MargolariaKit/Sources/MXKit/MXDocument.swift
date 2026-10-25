@@ -181,6 +181,20 @@ public final class MXDocument {
         return xml
     }
 
+    /// The document as XML for a renderer that reads it from memory, such
+    /// as the viewport (M2c): included files written inline, and texture
+    /// paths made absolute, so the text means the same wherever it is read.
+    /// Not for saving: the file would lose its includes and relative paths.
+    ///
+    /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
+    public func previewXMLString() throws -> String {
+        let xml = handle.writeForPreview().swiftString
+        guard !xml.isEmpty else {
+            throw MXError.writeFailed
+        }
+        return xml
+    }
+
     /// Makes `library`'s node definitions visible to this document.
     ///
     /// Call this before ``validate()``; without it, every node is reported as

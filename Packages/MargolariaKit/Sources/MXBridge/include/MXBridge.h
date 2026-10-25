@@ -276,6 +276,14 @@ public:
     /// Serialises the document back to MaterialX XML. Returns "" if not loaded.
     std::string writeToXmlString() const;
 
+    /// The document as XML for a renderer that reads it from memory (the
+    /// viewport, M2c): self-contained, so it doesn't depend on where it is
+    /// read from. Included files are written inline rather than as
+    /// `xi:include`, and every filename is made absolute, with `fileprefix`
+    /// applied, against the folder of the file the element came from.
+    /// Returns "" if not loaded.
+    std::string writeForPreview() const;
+
     /// Makes the standard libraries' nodedefs visible to this document, so
     /// validation and nodedef lookups work. The library is referenced, not
     /// copied into the document, so it is not written out when saving.

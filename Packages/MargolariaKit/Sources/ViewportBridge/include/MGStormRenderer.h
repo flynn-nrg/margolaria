@@ -1,6 +1,7 @@
 // MGStormRenderer.h
 //
-// Renders a .mtlx material on a preview sphere with Hydra Storm on Metal.
+// Renders a MaterialX material (from a .mtlx file, or from XML text) on a
+// preview sphere with Hydra Storm on Metal.
 // This is the only code in ViewportKit that touches OpenUSD; ViewportKit
 // (Swift) imports this header and sees an ordinary Objective-C class.
 //
@@ -30,7 +31,7 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// A Hydra Storm renderer for one material on a preview sphere.
 ///
 /// It owns an in-memory USD stage containing a sphere, two lights and a
-/// reference to the .mtlx file. OpenUSD's UsdMtlx plugin translates the
+/// reference to the .mtlx file (or to MaterialX text, kept in a temporary file). OpenUSD's UsdMtlx plugin translates the
 /// MaterialX document into UsdShade prims; one of its materials is bound to
 /// the sphere (the first, unless bindMaterialAtPath: picks another).
 ///
@@ -43,6 +44,15 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 - (nullable instancetype)initWithMaterialXFile:(NSURL *)fileURL
                                          error:(NSError **)error NS_DESIGNATED_INITIALIZER;
 
+/// Builds the stage and the Storm engine for a MaterialX document given as
+/// XML text, such as a document being edited (M2c). The text must stand on
+/// its own: no `xi:include`, absolute texture paths (MXKit's
+/// `previewXMLString()` writes it so). It is kept in a temporary file of
+/// the renderer's own, deleted with the renderer. Returns nil and sets
+/// `error` if it can't be read or contains no material.
+- (nullable instancetype)initWithMaterialXString:(NSString *)xml
+                                           error:(NSError **)error NS_DESIGNATED_INITIALIZER;
+
 - (instancetype)init NS_UNAVAILABLE;
 
 /// The Metal device Storm renders with.
@@ -54,7 +64,8 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 
 /// The USD path of the material bound to the sphere, for example
 /// "/World/MaterialX/Materials/M_BrushedCopper". The first material in the
-/// file, until bindMaterialAtPath: chooses another.
+/// file, until bindMaterialAtPath: chooses another. Empty if an update
+/// left no material to show.
 @property (nonatomic, readonly) NSString *boundMaterialPath;
 
 /// The USD paths of every material in the file, in file order. The last
@@ -64,6 +75,13 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// Binds the material at `path` (one of materialPaths) to the sphere.
 /// Returns NO, and changes nothing, if there is no material there.
 - (BOOL)bindMaterialAtPath:(NSString *)path;
+
+/// Replaces the document shown with `xml` (a renderer made from text
+/// only). The next render shows the change. The bound material stays bound
+/// if it still exists; otherwise the first material is bound, or none.
+/// Returns NO and sets `error`, keeping what was shown, if the text can't
+/// be read.
+- (BOOL)updateMaterialXString:(NSString *)xml error:(NSError **)error;
 
 /// The name of the Hydra renderer in use ("GL" for Storm, whatever its backend).
 @property (nonatomic, readonly) NSString *rendererName;

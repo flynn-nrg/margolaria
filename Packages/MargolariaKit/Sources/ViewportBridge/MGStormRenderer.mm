@@ -11,6 +11,19 @@
 //   USD stage ──UsdImaging──▶ Hydra scene ──Storm──▶ HgiMetal ──▶ colour AOV (id<MTLTexture>)
 //                 ▲
 //   .mtlx file ──UsdMtlx (file-format plugin) turns MaterialX into UsdShade prims
+//   or XML text
+//
+// From a file, the stage references the file. From text (the app's edited
+// document, M2c), the renderer writes the text to a private temporary file
+// and references that; updating rewrites the file and reads it again into
+// the layer, and USD tells UsdImaging and Storm what changed, so the next frame shows
+// it.
+//
+// Why a file and not a layer in memory: for a nodedef defined in the
+// document itself (SimpleHair's `simple_hair`), UsdMtlx records the
+// document's file as the shader's source, and Hydra reads the nodedef and
+// its implementation from there when it builds the shader. An anonymous
+// layer has no file, so such materials fell back to Storm's plain grey.
 //
 // Storm generates Metal shaders from the MaterialX node graph itself (through
 // MaterialX's MslShaderGenerator), so nothing here deals with shaders.
@@ -29,6 +42,7 @@
 #include <pxr/base/gf/rotation.h>
 #include <pxr/base/gf/rect2i.h>
 #include <pxr/base/gf/vec3d.h>
+#include <pxr/base/tf/errorMark.h>
 #include <pxr/imaging/cameraUtil/framing.h>
 #include <pxr/imaging/hd/driver.h>
 #include <pxr/imaging/hd/tokens.h>
@@ -39,6 +53,7 @@
 #include <pxr/imaging/hgi/tokens.h>
 #include <pxr/imaging/hgiMetal/hgi.h>
 #include <pxr/imaging/hgiMetal/texture.h>
+#include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
 #include <pxr/usd/usdGeom/metrics.h>
@@ -202,6 +217,47 @@ void AddLights(const UsdStageRefPtr &stage) {
     dome.CreateTextureFileAttr(VtValue(SdfAssetPath(HdxPackageDefaultDomeLightTexture().GetString())));
 }
 
+/// Writes `xml` to the file at `path`, replacing it. On failure, returns
+/// false with the reason in `message`.
+bool WriteText(const std::string &xml, NSString *path, std::string &message) {
+    NSError *error = nil;
+    NSString *text = [[NSString alloc] initWithBytes:xml.data() length:xml.size() encoding:NSUTF8StringEncoding];
+    if (text == nil || ![text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:&error]) {
+        message = error ? error.localizedDescription.UTF8String : "The text is not UTF-8";
+        return false;
+    }
+    return true;
+}
+
+/// Reads the file at `path` again, through the UsdMtlx plugin, and puts its
+/// contents into `layer`. On failure, returns false and describes the
+/// problem in `message`; the layer keeps what it had.
+///
+/// `layer->Reload()` would be the obvious call, but UsdMtlx can't reload a
+/// layer in place ("Failed to define UsdPrim </MaterialX>"). So the file is
+/// read into a fresh layer, the same way as the first time, and copied
+/// across. TransferContent compares the two and sends USD's change notices
+/// for what differs only, so a changed value reaches Storm as a value change.
+bool ReloadMaterialX(const SdfLayerRefPtr &layer, NSString *path, std::string &message) {
+    // OpenUSD reports problems by posting TfErrors rather than throwing.
+    // A TfErrorMark collects those posted while it exists.
+    TfErrorMark mark;
+    SdfLayerRefPtr fresh = SdfLayer::OpenAsAnonymous(path.fileSystemRepresentation);
+    if (fresh && mark.IsClean()) {
+        layer->TransferContent(fresh);
+        return true;
+    }
+    for (const TfError &error : mark) {
+        message += error.GetCommentary() + "\n";
+    }
+    // Handled here: don't let them be reported again as unhandled.
+    mark.Clear();
+    if (message.empty()) {
+        message = "UsdMtlx could not read the document";
+    }
+    return false;
+}
+
 /// Every UsdShadeMaterial at or below `root`, in stage order (for UsdMtlx,
 /// the MaterialX document's order).
 std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
@@ -224,6 +280,10 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     HgiUniquePtr _hgi;
     std::unique_ptr<UsdImagingGLEngine> _engine;
     UsdStageRefPtr _stage;
+    // When made from text: the temporary file holding it, and its layer.
+    // Nil and null when made from a file.
+    NSString *_textFile;
+    SdfLayerRefPtr _materialLayer;
     NSString *_boundMaterialPath;
     NSArray<NSString *> *_materialPaths;
 }
@@ -233,33 +293,93 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     if (self == nil) {
         return nil;
     }
-
     // OpenUSD reports most problems through its own diagnostics (TfError),
     // but a C++ exception must never reach Swift, so catch everything here.
     try {
-        // --- The stage ----------------------------------------------------
-        _stage = UsdStage::CreateInMemory();
-        UsdGeomSetStageUpAxis(_stage, UsdGeomTokens->y);
+        // Opening a .mtlx as a USD layer goes through the UsdMtlx
+        // file-format plugin, which ships in SwiftUsd.
+        [self createStageWithMaterialX:fileURL.path.fileSystemRepresentation];
+    } catch (const std::exception &exception) {
+        if (error != nullptr) {
+            *error = MakeError(@(exception.what()));
+        }
+        return nil;
+    }
+    return [self finishSettingUpForName:fileURL.lastPathComponent error:error] ? self : nil;
+}
 
-        // Reference the MaterialX document. Opening a .mtlx as a USD layer
-        // goes through the UsdMtlx file-format plugin, which ships in SwiftUsd.
-        const std::string mtlxPath = fileURL.path.fileSystemRepresentation;
-        UsdPrim materialXRoot = _stage->DefinePrim(SdfPath(kMaterialXRootPath));
-        materialXRoot.GetReferences().AddReference(mtlxPath, SdfPath("/MaterialX"));
-
-        const std::vector<UsdShadeMaterial> materials = FindMaterials(materialXRoot);
-        if (materials.empty()) {
+- (nullable instancetype)initWithMaterialXString:(NSString *)xml error:(NSError **)error {
+    self = [super init];
+    if (self == nil) {
+        return nil;
+    }
+    // A file of our own, deleted in dealloc. The name only needs to be
+    // unique; UsdMtlx picks its file format from the ".mtlx" extension.
+    NSString *name = [NSString stringWithFormat:@"Margolaria-preview-%@.mtlx", NSUUID.UUID.UUIDString];
+    _textFile = [NSTemporaryDirectory() stringByAppendingPathComponent:name];
+    try {
+        std::string message;
+        if (!WriteText(xml.UTF8String, _textFile, message)) {
             if (error != nullptr) {
-                *error = MakeError([NSString stringWithFormat:@"No material found in %@",
-                                                              fileURL.lastPathComponent]);
+                *error = MakeError(@(message.c_str()));
             }
             return nil;
         }
-        NSMutableArray<NSString *> *paths = [NSMutableArray array];
-        for (const UsdShadeMaterial &material : materials) {
-            [paths addObject:@(material.GetPath().GetString().c_str())];
+        [self createStageWithMaterialX:_textFile.fileSystemRepresentation];
+        // The stage opened the file as a layer when it was referenced; keep
+        // a handle to reload it.
+        _materialLayer = SdfLayer::Find(_textFile.fileSystemRepresentation);
+        if (!_materialLayer) {
+            if (error != nullptr) {
+                *error = MakeError(@"UsdMtlx could not read the document");
+            }
+            return nil;
         }
-        _materialPaths = [paths copy];
+    } catch (const std::exception &exception) {
+        if (error != nullptr) {
+            *error = MakeError(@(exception.what()));
+        }
+        return nil;
+    }
+    return [self finishSettingUpForName:@"the document" error:error] ? self : nil;
+}
+
+- (void)dealloc {
+    if (_textFile != nil) {
+        [NSFileManager.defaultManager removeItemAtPath:_textFile error:nil];
+    }
+}
+
+/// Creates the stage, referencing the MaterialX file at `materialXPath`
+/// under /World/MaterialX. May throw.
+- (void)createStageWithMaterialX:(const std::string &)materialXPath {
+    _stage = UsdStage::CreateInMemory();
+    UsdGeomSetStageUpAxis(_stage, UsdGeomTokens->y);
+    UsdPrim materialXRoot = _stage->DefinePrim(SdfPath(kMaterialXRootPath));
+    materialXRoot.GetReferences().AddReference(materialXPath, SdfPath("/MaterialX"));
+}
+
+/// The rest of initialisation, the same for files and text: the sphere
+/// with the first material bound, the lights, and the Storm engine.
+/// `name` describes the source in error messages. Returns NO, with `error`
+/// set, on failure.
+///
+/// It returns a BOOL, not `self`, on purpose: under ARC, an object returned
+/// by a method outside the `init` family is autoreleased, so `return [self
+/// finish...]` from an initializer would free the renderer only when an
+/// autorelease pool drains, possibly on another thread after OpenUSD's
+/// global state is gone at exit (a crash in ~UsdImagingGLEngine).
+- (BOOL)finishSettingUpForName:(NSString *)name error:(NSError **)error {
+    try {
+        UsdPrim materialXRoot = _stage->GetPrimAtPath(SdfPath(kMaterialXRootPath));
+        const std::vector<UsdShadeMaterial> materials = FindMaterials(materialXRoot);
+        if (materials.empty()) {
+            if (error != nullptr) {
+                *error = MakeError([NSString stringWithFormat:@"No material found in %@", name]);
+            }
+            return NO;
+        }
+        [self listMaterials:materials];
 
         // The preview sphere, with the first material bound to it.
         UsdGeomMesh sphere = DefineSphereMesh(_stage, SdfPath(kSpherePath));
@@ -276,7 +396,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
             if (error != nullptr) {
                 *error = MakeError(@"Metal is not available");
             }
-            return nil;
+            return NO;
         }
 
         // An HdDriver hands our Hgi to Hydra, so Storm renders with it
@@ -307,13 +427,61 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         if (error != nullptr) {
             *error = MakeError(@(exception.what()));
         }
-        return nil;
+        return NO;
     }
 
     _azimuth = 30.0;
     _elevation = 15.0;
     _distance = 5.0;
-    return self;
+    return YES;
+}
+
+/// Sets materialPaths from `materials`.
+- (void)listMaterials:(const std::vector<UsdShadeMaterial> &)materials {
+    NSMutableArray<NSString *> *paths = [NSMutableArray array];
+    for (const UsdShadeMaterial &material : materials) {
+        [paths addObject:@(material.GetPath().GetString().c_str())];
+    }
+    _materialPaths = [paths copy];
+}
+
+- (BOOL)updateMaterialXString:(NSString *)xml error:(NSError **)error {
+    if (!_materialLayer) {
+        if (error != nullptr) {
+            *error = MakeError(@"This renderer shows a file; it can't be updated from text");
+        }
+        return NO;
+    }
+    try {
+        std::string message;
+        if (!WriteText(xml.UTF8String, _textFile, message) || !ReloadMaterialX(_materialLayer, _textFile, message)) {
+            if (error != nullptr) {
+                *error = MakeError(@(message.c_str()));
+            }
+            return NO;
+        }
+        // Materials may have been added, removed or renamed.
+        UsdPrim materialXRoot = _stage->GetPrimAtPath(SdfPath(kMaterialXRootPath));
+        const std::vector<UsdShadeMaterial> materials = FindMaterials(materialXRoot);
+        [self listMaterials:materials];
+        if (![_materialPaths containsObject:_boundMaterialPath]) {
+            UsdPrim sphere = _stage->GetPrimAtPath(SdfPath(kSpherePath));
+            if (materials.empty()) {
+                // Nothing to show: Storm draws the sphere in its fallback grey.
+                UsdShadeMaterialBindingAPI(sphere).UnbindDirectBinding();
+                _boundMaterialPath = @"";
+            } else {
+                UsdShadeMaterialBindingAPI(sphere).Bind(materials.front());
+                _boundMaterialPath = _materialPaths.firstObject;
+            }
+        }
+        return YES;
+    } catch (const std::exception &exception) {
+        if (error != nullptr) {
+            *error = MakeError(@(exception.what()));
+        }
+        return NO;
+    }
 }
 
 - (id<MTLDevice>)device {

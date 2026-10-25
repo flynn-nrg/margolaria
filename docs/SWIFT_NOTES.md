@@ -155,7 +155,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@Binding` | A property that refers to state another view owns; `$state` passes one | A pointer to the owner's field | `GraphPanel.swift` |
 | `.onChange(of:initial:)` | Run code when a value changes (and, with `initial: true`, on appear) | KVO observer | `GraphPanel.swift` |
 | `ContentUnavailableView` | The standard "nothing to show" placeholder | — | `GraphPanel.swift` |
-| `.id(_:)` | Gives a view an identity; changing it discards the view and its `@State` and builds a new one | — | `ViewportPanel.swift`, `GraphPanel.swift` |
+| `.id(_:)` | Gives a view an identity; changing it discards the view and its `@State` and builds a new one | — | `GraphPanel.swift` |
 | `NSViewRepresentable` coordinator | `makeCoordinator()`: an object that lives as long as the AppKit view, for state the AppKit side remembers between updates | A view controller's ivars | `XMLTextView.swift` |
 | `VSplitView`, `.contextMenu` | Views stacked with draggable dividers; a right-click menu on a view | `NSSplitView`; `menuForEvent:` | `ContentView.swift`, `BottomPanel.swift` |
 | `HSplitView`, `Toggle` as a button | Side-by-side views with a draggable divider; a toolbar button that stays pressed | `NSSplitView`; a toggle `NSButton` | `ContentView.swift` |

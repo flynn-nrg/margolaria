@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is next; its plan is §8.1.
+Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save) and M2b (inspector) are done; M2c (live viewport) is under review.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -224,7 +224,7 @@ M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app work
 | Undo manager | NSDocument's `undoManager`, so Edit > Undo, the "Edited" dot and autosave all work | M1a chose NSDocument for this |
 | Positions | Saved as `xpos`/`ypos` in the Graph Editor's units: one unit is one node (its nodes are 138 × 116 points, MaterialX `Graph.cpp`), y down. Ours are 220 points wide, so one unit is 220 × 185 points here (`DocumentGraph.pointsPerUnit`, M2a). The first move in a level saves every node's position. | Layouts made in either editor keep their proportions in the other. Auto-layout only places nodes without positions. |
 | Included elements | Elements from `xi:include`d files are **read-only** in M2 (shown with a badge) | MaterialX writes includes back as `xi:include`, so edits to included elements would be silently lost on save |
-| Live viewport | Storm reads the edited document from memory with `UsdMtlxRead(document, stage)`, not from the file on disk | M1c's viewport rereads the file; an editor must show unsaved edits |
+| Live viewport | Storm shows the edited document, not the file on disk. **Changed in M2c** from `UsdMtlxRead(document, stage)`: MXKit writes a self-contained copy (`previewXMLString()`: includes inline, texture paths absolute), the renderer keeps it in a temporary file of its own, and each edit rewrites the file, reads it into a fresh layer and `TransferContent`s it into the referenced one, so USD notifies Storm of only what changed. A file, not a layer in memory, because Hydra rereads document-defined nodedefs (SimpleHair) from the document's file. A value change costs about 3 ms on top of a 10 ms frame, so it isn't throttled. | M1c's viewport rereads the file; an editor must show unsaved edits. `UsdMtlxRead` would need an `mx::Document` passed between our two bridges. |
 | Round-trip check | The corpus test writes each example, reads it back, and compares with `Element::isEquivalent`; byte differences are counted and reported | M2's exit criterion: "byte-equivalent or semantically equal" |
 | Version upgrades | A v1.38 file is upgraded on read; saving asks before writing it as 1.39 | Saving silently changes the file's version otherwise |
 
