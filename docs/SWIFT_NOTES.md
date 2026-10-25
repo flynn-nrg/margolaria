@@ -159,6 +159,12 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `NSViewRepresentable` coordinator | `makeCoordinator()`: an object that lives as long as the AppKit view, for state the AppKit side remembers between updates | A view controller's ivars | `XMLTextView.swift` |
 | `VSplitView`, `.contextMenu` | Views stacked with draggable dividers; a right-click menu on a view | `NSSplitView`; `menuForEvent:` | `ContentView.swift`, `BottomPanel.swift` |
 | `HSplitView`, `Toggle` as a button | Side-by-side views with a draggable divider; a toolbar button that stays pressed | `NSSplitView`; a toggle `NSButton` | `ContentView.swift` |
+| `@FocusState` | State kept in step with keyboard focus; `.focused($isFocused)` connects a field to it | `InspectorFields.swift` (`CommitTextField`) |
+| `Binding(get:set:)` | A binding made of two closures instead of stored state: reading reads the document, writing makes an edit | `InspectorFields.swift` (`ScalarEditor`) |
+| `Slider(onEditingChanged:)` | Reports when a drag starts (true) and ends (false); used to make a drag one undo step | `InspectorFields.swift` |
+| `ColorPicker` with `CGColor` | A colour well bound to a Core Graphics colour; convert it to a known `CGColorSpace` before reading components | `InspectorFields.swift` (`ColorSpaceMapping`) |
+| `DisclosureGroup` | A collapsible section with a triangle; `isExpanded:` binds whether it is open | `InspectorPanel.swift` |
+| `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
 
 ## Swift ↔ C++
 

@@ -4,9 +4,9 @@
 // elements, the graph canvas (or the XML) in the main area, the issue count
 // in the toolbar and library information along the bottom.
 //
-// On its way to the real interface (docs/PLAN.md §4): the viewport sits to
-// the right of the canvas; M1d adds the bottom panel (XML, Issues) and the
-// final layout.
+// The layout of docs/PLAN.md §4.1: the canvas with the bottom panel (XML,
+// Issues) under it, and on the right the viewport above the inspector
+// (M2b). The toolbar shows or hides each of the right-hand panels.
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
@@ -71,8 +71,11 @@ struct ContentView: View {
     /// The material shown in the viewport (its MaterialX name).
     @State private var previewMaterial: String? = nil
 
-    /// Whether the viewport column is shown.
+    /// Whether the viewport is shown, at the top of the right-hand column.
     @State private var showsViewport: Bool = true
+
+    /// Whether the inspector is shown, under the viewport.
+    @State private var showsInspector: Bool = true
 
     var body: some View {
         // A two-column layout: sidebar on the left, detail on the right.
@@ -107,9 +110,24 @@ struct ContentView: View {
                     }
                 }
                 .frame(minWidth: 300, maxWidth: .infinity)
-                if showsViewport {
-                    ViewportPanel(document: document, materialName: $previewMaterial)
-                        .frame(minWidth: 240, idealWidth: 360, maxWidth: 800)
+                // The right-hand column (PLAN.md §4.1): the viewport above
+                // the inspector, either of them hidden from the toolbar.
+                if showsViewport || showsInspector {
+                    VSplitView {
+                        if showsViewport {
+                            ViewportPanel(document: document, materialName: $previewMaterial)
+                                .frame(minHeight: 160, idealHeight: 320, maxHeight: .infinity)
+                        }
+                        if showsInspector {
+                            // Clicking a connection, or renaming, shows that
+                            // node on the canvas, selected.
+                            InspectorPanel(document: document, selectedPath: canvasSelection) { path in
+                                focus = path
+                            }
+                            .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(minWidth: 300, idealWidth: 380, maxWidth: 800)
                 }
             }
         }
@@ -145,6 +163,13 @@ struct ContentView: View {
                 }
                 .toggleStyle(.button)
                 .help("Show or hide the 3D preview")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Toggle(isOn: $showsInspector) {
+                    Label("Inspector", systemImage: "sidebar.right")
+                }
+                .toggleStyle(.button)
+                .help("Show or hide the inspector")
             }
         }
         // Clicking in the sidebar opens a nodegraph, or selects a top-level
