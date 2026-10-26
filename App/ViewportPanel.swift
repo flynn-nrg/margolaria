@@ -34,13 +34,19 @@ struct ViewportPanel: View {
             HStack {
                 // SWIFT: The selection is a `String?`, so each row's tag must
                 // be a `String?` too; `Optional(name)` makes one.
-                Picker("Material", selection: $materialName) {
-                    ForEach(materials) { material in
-                        Text(material.name).tag(Optional(material.name))
+                if materials.isEmpty {
+                    // An empty menu would just be a blank button.
+                    Text("No material")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Material", selection: $materialName) {
+                        ForEach(materials) { material in
+                            Text(material.name).tag(Optional(material.name))
+                        }
                     }
+                    .labelsHidden()
+                    .disabled(materials.count < 2)
                 }
-                .labelsHidden()
-                .disabled(materials.count < 2)
                 Spacer()
                 Text("Storm")
                     .font(.caption)
@@ -57,6 +63,9 @@ struct ViewportPanel: View {
             } else {
                 ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",
                                        description: Text("The preview shows the document's materials on a sphere."))
+                    // Fill the panel, so the material bar stays at the top
+                    // (as GraphPanel does for an empty level).
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         // Show the first material until one is chosen, and again if the

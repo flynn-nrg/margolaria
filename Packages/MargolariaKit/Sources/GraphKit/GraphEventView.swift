@@ -13,7 +13,8 @@
 //   - pan: two-finger scroll on a trackpad, middle-button drag, or
 //     Space + drag;
 //   - zoom around the pointer: pinch, mouse wheel, or ⌥-scroll.
-// The right button is kept free for the add-node menu (M2).
+// Tab asks the app for its node search (M2e). The right button is kept
+// free for a context menu.
 //
 // Introduces (SWIFT): `open class` vs `final class`, `isFlipped` override as
 // a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option
@@ -91,7 +92,8 @@ public class GraphEventView: NSView {
     }
 
     /// Keyboard shortcuts, as in MaterialX's Graph Editor (PLAN.md §4.2):
-    /// A frames everything, F the selection, U leaves a nodegraph.
+    /// A frames everything, F the selection, U leaves a nodegraph; Tab adds
+    /// a node (M2e).
     public override func keyDown(with event: NSEvent) {
         // Only plain keys; ⌘A and friends go to the menus.
         let modifiers: NSEvent.ModifierFlags = event.modifierFlags.intersection([.command, .option, .control])
@@ -110,6 +112,9 @@ public class GraphEventView: NSView {
             controller.frame(.selection)
         case "u":
             controller.onNavigateUp?()
+        case "\t":
+            // Tab: add a node where the pointer is (M2e).
+            controller.onRequestNodeSearch?(pointerLocation())
         case "\u{1B}":
             // Escape: abandon a wire or cut being dragged.
             controller.cancelDrag()
@@ -120,6 +125,15 @@ public class GraphEventView: NSView {
             // Unhandled keys go up the responder chain (and beep at its end).
             super.keyDown(with: event)
         }
+    }
+
+    /// Where the pointer is in this view, or the view's centre if it is
+    /// outside. Key events don't carry a location, so ask the window.
+    private func pointerLocation() -> CGPoint {
+        // SWIFT/AppKit: `mouseLocationOutsideOfEventStream` is the pointer's
+        // position in window coordinates, right now.
+        let point: CGPoint = convert(window?.mouseLocationOutsideOfEventStream ?? .zero, from: nil)
+        return bounds.contains(point) ? point : CGPoint(x: bounds.midX, y: bounds.midY)
     }
 
     /// Edit > Delete. AppKit finds this method through the responder chain

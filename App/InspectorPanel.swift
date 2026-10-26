@@ -3,8 +3,8 @@
 // The inspector (PLAN.md §4.1, region 5; M2b): the element selected on the
 // canvas, with every input, grouped by the nodedef's `uifolder`.
 //
-// For a node: its name (editable, to rename it), category, nodedef and
-// description, then its inputs. Inputs the document sets are marked with a
+// For a node: its name (editable, to rename it), category, nodedef, type
+// variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
 // dot; the others show the nodedef's default, dimmed, and setting one adds
 // it to the document. Connected inputs show where they come from, and a
 // click shows that node on the canvas. Inputs the nodedef calls advanced
@@ -159,6 +159,15 @@ private struct NodeHeader: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)
+            if let kind = variantKind, let current = node.nodeDefName {
+                // The type variants (M2e): "float", "color3 (in2: float)", ...
+                Picker("Type", selection: Binding(get: { current }, set: { changeType(to: $0, in: kind) })) {
+                    ForEach(kind.variants) { variant in
+                        Text(kind.label(for: variant)).tag(variant.name)
+                    }
+                }
+                .help("The node's type variant. Inputs and connections that don't fit the new type are removed.")
+            }
             if let documentation = node.documentation {
                 Text(documentation)
                     .font(.caption)
@@ -185,6 +194,29 @@ private struct NodeHeader: View {
             return "\(node.category) · \(nodeDef)"
         }
         return node.isNodeGraph ? "nodegraph" : "\(node.category) · no nodedef found"
+    }
+
+    /// The node's kind in the library, when it has other type variants to
+    /// choose from and can be changed: not included, not a nodegraph, and
+    /// resolved to one of the kind's nodedefs.
+    private var variantKind: MXNodeKind? {
+        guard !node.isIncluded, !node.isNodeGraph, let current = node.nodeDefName,
+              let kind = document.catalog.kind(named: node.category),
+              kind.variants.count > 1, kind.variant(named: current) != nil else {
+            return nil
+        }
+        return kind
+    }
+
+    /// Changes the node to the variant `nodeDef`, as one undo step.
+    private func changeType(to nodeDef: String, in kind: MXNodeKind) {
+        guard nodeDef != node.nodeDefName, let variant = kind.variant(named: nodeDef) else {
+            return
+        }
+        let path: String = node.path
+        document.edit("Change \(node.name) to \(kind.label(for: variant))") { content in
+            try content.changeNodeDef(of: path, to: nodeDef)
+        }
     }
 
     /// Renames the node, and keeps it selected under its new name.

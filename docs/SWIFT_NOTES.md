@@ -46,6 +46,10 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Set.insert(_:).inserted` | `insert` returns whether the element was new | `std::set::insert(...).second` | `GraphWiring.swift` |
 | `dict[key, default: v]` | Reads a dictionary value, or `v` if the key is missing, without an optional | `map.value(key, v)` in Qt | `GraphWiring.swift` |
 | `(0...n).map`, `indices.dropFirst()` | Map over a range of integers; every index but the first | A `for` loop filling a vector | `GraphLayout.swift` (`wirePoints`), `GraphWiring.swift` |
+| `Dictionary(grouping:by:)` | Builds a dictionary from each key to the array of elements with that key, in order | Go: a `map[K][]V` filled in a loop | `MXNodeCatalog.swift` |
+| Comparing tuples | `(a1, b1) < (a2, b2)` compares element by element: a sort key with tie-breakers in one expression | `std::tie(a1, b1) < std::tie(a2, b2)` | `MXNodeCatalog.swift` (`search`, `MXNodeKind.init`) |
+| `lazy` sequences | `xs.lazy.map(f).first` computes values only as they are asked for, so it stops at the first | C++20 range views | `MXNodeCatalog.swift` |
+| `firstIndex(of:)`, `allSatisfy`, `min(by:)` | Position of a value (or nil); true if every element passes; the smallest by a comparison | `std::find`, `std::all_of`, `std::min_element` | `MXNodeCatalog.swift` |
 | Option sets | Bit flags as a set: `flags.contains(.shift)` | `if (flags & NSEventModifierFlagShift)` | `GraphEventView.swift` |
 | Failable initializer `init?` | An initializer that can return `nil`; the result is optional | ObjC `-init` returning nil | `MXGraph.swift` (`MXConnection`) |
 | Assigning `self` in an enum's `init` | `self = .node(name, output: nil)` picks the case | — | `MXGraph.swift` (`MXConnection`) |
@@ -105,6 +109,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Subclassing `CALayer` | Override `draw(in:)`; also `init(layer:)`, which Core Animation uses to copy layers | ObjC `CALayer` subclass | `LayerGraphView.swift` (`NodeLayer`) |
 | Subclassing AppKit classes | `override func read(from:ofType:)`; `override class var` for class properties AppKit asks the type | ObjC subclassing | `MaterialXDocument.swift` |
 | `UndoManager.registerUndo(withTarget:)` | Stores a closure to call on Undo; registering during an undo becomes the redo | `-registerUndoWithTarget:handler:` | `MaterialXDocument.swift` |
+| `Codable` | Declaring `Codable` on a struct of Codable properties makes the compiler write its encoding and decoding (JSON, property lists) | Go's `encoding/json` struct tags, without the tags | `LibraryPanel.swift` (`NodeDefinitionDrag`) |
+| `addObserver(_:selector:name:object:)` | Calls an `@objc` method of the observer for each matching notification; `object: nil` means from any sender | `-addObserver:selector:name:object:` | `MargolariaApp.swift` (colour panel) |
 | `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
 
 ## Modules and access
@@ -172,6 +178,14 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Slider(onEditingChanged:)` | Reports when a drag starts (true) and ends (false); used to make a drag one undo step | `InspectorFields.swift` |
 | `ColorPicker` with `CGColor` | A colour well bound to a Core Graphics colour; convert it to a known `CGColorSpace` before reading components | `InspectorFields.swift` (`ColorSpaceMapping`) |
 | `DisclosureGroup` | A collapsible section with a triangle; `isExpanded:` binds whether it is open | `InspectorPanel.swift` |
+| `Transferable`, `.draggable`, `.dropDestination` | A value that can be dragged (or copied); a view that starts the drag; a view that accepts drops of that type, with the drop location | `LibraryPanel.swift`, `GraphPanel.swift` |
+| `UTType(exportedAs:)` | A data type of our own for the pasteboard, also declared in Info.plist; `CodableRepresentation` carries a Codable value under it | `LibraryPanel.swift` |
+| `Section(isExpanded:)` | A list section the user can fold, with its open state in a binding | `LibraryPanel.swift` |
+| `.contextMenu(forSelectionType:primaryAction:)` | A list's row menu, plus the action for double-click and Return on the selected rows | `LibraryPanel.swift` |
+| `.popover(attachmentAnchor:)` | A popover pointing at a rectangle in the view (`.rect(.rect(r))`), not the whole view | `GraphPanel.swift` (node search) |
+| `.onKeyPress` | Sees a key before the view does; `.handled` stops it, `.ignored` passes it on | `NodeSearchPopup.swift` |
+| `ScrollViewReader` | A proxy that scrolls a `ScrollView` to the child with a given `.id` | `NodeSearchPopup.swift` |
+| `.allowsHitTesting(false)` | Clicks go through the view to whatever is under it | `GraphPanel.swift` (empty-canvas hint) |
 | `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
 
 ## Swift ↔ C++

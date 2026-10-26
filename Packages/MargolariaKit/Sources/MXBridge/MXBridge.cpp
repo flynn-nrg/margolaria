@@ -693,6 +693,62 @@ std::vector<ElementSummary> Document::nodeGraphs() const {
     return result;
 }
 
+namespace {
+
+/// The inputs or outputs of a nodedef, for NodeDefSummary.
+template <typename Port>
+std::vector<NodeDefPort> DescribeNodeDefPorts(const std::vector<std::shared_ptr<Port>>& ports) {
+    std::vector<NodeDefPort> result;
+    for (const auto& port : ports) {
+        NodeDefPort info;
+        info.name = port->getName();
+        info.type = port->getType();
+        info.isUniform = port->getIsUniform();
+        result.push_back(std::move(info));
+    }
+    return result;
+}
+
+} // namespace
+
+std::vector<NodeDefSummary> Document::nodeDefinitions() const {
+    std::vector<NodeDefSummary> result;
+    if (!_impl) {
+        return result;
+    }
+    std::set<std::string> seen;
+    auto add = [&](const std::vector<mx::NodeDefPtr>& nodeDefs) {
+        for (const mx::NodeDefPtr& nodeDef : nodeDefs) {
+            // An older version kept for old files (ND_UsdUVTexture 2.2 next
+            // to ND_UsdUVTexture_23): new nodes use the default version.
+            if (nodeDef->hasVersionString() && !nodeDef->getDefaultVersion()) {
+                continue;
+            }
+            if (!seen.insert(nodeDef->getName()).second) {
+                continue;
+            }
+            NodeDefSummary info;
+            info.name = nodeDef->getName();
+            info.node = nodeDef->getNodeString();
+            info.type = nodeDef->getType();
+            info.nodeGroup = nodeDef->getNodeGroup();
+            info.doc = nodeDef->getDocString();
+            // getNodeDefs() on a document with a data library lists the
+            // library's too; their own document tells them apart.
+            info.isFromDocument = nodeDef->getDocument() == _impl->document;
+            // The active ports include inherited ones (`inherit="..."`).
+            info.inputs = DescribeNodeDefPorts(nodeDef->getActiveInputs());
+            info.outputs = DescribeNodeDefPorts(nodeDef->getActiveOutputs());
+            result.push_back(std::move(info));
+        }
+    };
+    add(_impl->document->getNodeDefs());
+    if (mx::ConstDocumentPtr library = _impl->document->getDataLibrary()) {
+        add(library->getNodeDefs());
+    }
+    return result;
+}
+
 Document Document::copy() const {
     Document result;
     if (_impl) {
@@ -884,6 +940,34 @@ bool Reaches(const mx::ElementPtr& graph, const std::string& from, const std::st
     return false;
 }
 
+/// The nodedef called `name`: the document's own, or the data library's.
+mx::NodeDefPtr FindNodeDef(const mx::DocumentPtr& document, const std::string& name) {
+    mx::NodeDefPtr nodeDef = document->getNodeDef(name);
+    if (!nodeDef && document->getDataLibrary()) {
+        nodeDef = document->getDataLibrary()->getNodeDef(name);
+    }
+    if (!nodeDef) {
+        throw Refusal("No nodedef " + name);
+    }
+    return nodeDef;
+}
+
+/// Every port in `graph` that can refer to a sibling by name: its <output>
+/// elements, and the inputs of its nodes and nodegraphs.
+std::vector<mx::PortElementPtr> SiblingPorts(const mx::ElementPtr& graph) {
+    std::vector<mx::PortElementPtr> ports;
+    for (const mx::ElementPtr& sibling : graph->getChildren()) {
+        if (mx::PortElementPtr port = sibling->asA<mx::PortElement>()) {
+            ports.push_back(port);
+        } else if (mx::InterfaceElementPtr owner = sibling->asA<mx::InterfaceElement>()) {
+            for (const mx::InputPtr& input : owner->getInputs()) {
+                ports.push_back(input);
+            }
+        }
+    }
+    return ports;
+}
+
 /// Runs an edit on `document`, turning any exception into `false` and a
 /// message. Every edit function below is one call to this, with the edit
 /// as a lambda.
@@ -1036,17 +1120,52 @@ bool Document::addNode(const std::string& parentPath, const std::string& nodeDef
         if (!graph) {
             throw Refusal(parentPath + " is not a graph");
         }
-        // The document's own nodedefs first, then the data library's.
-        mx::NodeDefPtr nodeDef = document->getNodeDef(nodeDefName);
-        if (!nodeDef && document->getDataLibrary()) {
-            nodeDef = document->getDataLibrary()->getNodeDef(nodeDefName);
-        }
-        if (!nodeDef) {
-            throw Refusal("No nodedef " + nodeDefName);
-        }
+        mx::NodeDefPtr nodeDef = FindNodeDef(document, nodeDefName);
         const std::string name = graph->createValidChildName(nameHint.empty() ? nodeDef->getNodeString() : nameHint);
         mx::NodePtr node = graph->addNodeInstance(nodeDef, name);
         newPath = node->getNamePath();
+    });
+}
+
+bool Document::changeNodeDef(const std::string& path, const std::string& nodeDefName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodePtr node = EditableElement(document, path)->asA<mx::Node>();
+        if (!node) {
+            throw Refusal(path + " is not a node");
+        }
+        mx::NodeDefPtr nodeDef = FindNodeDef(document, nodeDefName);
+        if (nodeDef->getNodeString() != node->getCategory()) {
+            throw Refusal(nodeDefName + " defines " + nodeDef->getNodeString() + " nodes, not " +
+                          node->getCategory());
+        }
+        // Inputs: keep those the new variant has with the same type.
+        for (const mx::InputPtr& input : node->getInputs()) {
+            mx::InputPtr definition = nodeDef->getActiveInput(input->getName());
+            if (!definition || definition->getType() != input->getType()) {
+                node->removeInput(input->getName());
+            }
+        }
+        node->setType(nodeDef->getType());
+        node->setNodeDefString(nodeDef->getName());
+
+        // Connections from the node's outputs: each must still find an
+        // output of its own type.
+        const std::vector<mx::OutputPtr> outputs = nodeDef->getActiveOutputs();
+        for (const mx::PortElementPtr& port : SiblingPorts(node->getParent())) {
+            if (port->getNodeName() != node->getName()) {
+                continue;
+            }
+            const std::string outputName = port->getOutputString();
+            mx::OutputPtr output;
+            if (!outputName.empty()) {
+                output = nodeDef->getActiveOutput(outputName);
+            } else if (outputs.size() == 1) {
+                output = outputs[0];
+            }
+            if (!output || output->getType() != port->getType()) {
+                Disconnect(port);
+            }
+        }
     });
 }
 
@@ -1059,19 +1178,9 @@ bool Document::removeNode(const std::string& path, std::string& errorMessage) {
         const std::string name = element->getName();
         mx::ElementPtr graph = element->getParent();
         // Disconnect everything in the same graph that reads from it.
-        for (const mx::ElementPtr& sibling : graph->getChildren()) {
-            std::vector<mx::PortElementPtr> ports;
-            if (mx::PortElementPtr port = sibling->asA<mx::PortElement>()) {
-                ports.push_back(port);
-            } else if (mx::InterfaceElementPtr owner = sibling->asA<mx::InterfaceElement>()) {
-                for (const mx::InputPtr& input : owner->getInputs()) {
-                    ports.push_back(input);
-                }
-            }
-            for (const mx::PortElementPtr& port : ports) {
-                if (port->getNodeName() == name || port->getNodeGraphString() == name) {
-                    Disconnect(port);
-                }
+        for (const mx::PortElementPtr& port : SiblingPorts(graph)) {
+            if (port->getNodeName() == name || port->getNodeGraphString() == name) {
+                Disconnect(port);
             }
         }
         graph->removeChild(name);
@@ -1096,22 +1205,12 @@ bool Document::renameNode(const std::string& path, const std::string& newName,
         }
         element->setName(newName);
         // Connections in the same graph that refer to it by name.
-        for (const mx::ElementPtr& sibling : graph->getChildren()) {
-            std::vector<mx::PortElementPtr> ports;
-            if (mx::PortElementPtr port = sibling->asA<mx::PortElement>()) {
-                ports.push_back(port);
-            } else if (mx::InterfaceElementPtr owner = sibling->asA<mx::InterfaceElement>()) {
-                for (const mx::InputPtr& input : owner->getInputs()) {
-                    ports.push_back(input);
-                }
+        for (const mx::PortElementPtr& port : SiblingPorts(graph)) {
+            if (port->getNodeName() == oldName) {
+                port->setNodeName(newName);
             }
-            for (const mx::PortElementPtr& port : ports) {
-                if (port->getNodeName() == oldName) {
-                    port->setNodeName(newName);
-                }
-                if (port->getNodeGraphString() == oldName) {
-                    port->setNodeGraphString(newName);
-                }
+            if (port->getNodeGraphString() == oldName) {
+                port->setNodeGraphString(newName);
             }
         }
         // Material assignments in looks refer to materials by name.

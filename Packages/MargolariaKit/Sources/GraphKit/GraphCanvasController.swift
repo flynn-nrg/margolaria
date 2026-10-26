@@ -211,6 +211,12 @@ public final class GraphCanvasController {
     /// expanded, only the set ones).
     @ObservationIgnored public var onToggleInputs: (@MainActor (Int) -> Void)? = nil
 
+    /// Called when the user asks to add a node (the Tab key, M2e), with the
+    /// point in the view where it should go: under the pointer, or the
+    /// view's centre if the pointer is elsewhere. The app shows its node
+    /// search there.
+    @ObservationIgnored public var onRequestNodeSearch: (@MainActor (CGPoint) -> Void)? = nil
+
     /// The size of the view showing the canvas, kept up to date by the view.
     /// Framing needs it; until the view has been laid out it is zero.
     @ObservationIgnored public var viewSize: CGSize = .zero {
@@ -729,6 +735,14 @@ public final class GraphCanvasController {
         zoom = min(max(fit, Self.zoomRange.lowerBound), maximumZoom)
         offset = CGPoint(x: (size.width - bounds.width * zoom) / 2 - bounds.minX * zoom,
                          y: (size.height - bounds.height * zoom) / 2 - bounds.minY * zoom)
+    }
+
+    /// Where a new node placed at `viewPoint` goes, in graph coordinates:
+    /// its header centred on the point, as if the user had just picked it
+    /// up there. (A node's position is its top-left corner.)
+    public func newNodePosition(atView viewPoint: CGPoint) -> CGPoint {
+        let point: CGPoint = graphPoint(fromView: viewPoint)
+        return CGPoint(x: point.x - GraphLayout.nodeWidth / 2, y: point.y - GraphLayout.headerHeight / 2)
     }
 
     /// A double-click at `viewPoint`: opens the node there, if any.

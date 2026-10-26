@@ -140,6 +140,15 @@ extension MXDocument {
         return newPath.swiftString
     }
 
+    /// Changes the node at `path` to another type variant, the nodedef
+    /// `nodeDef` (see MXNodeKind's variants). Inputs and downstream
+    /// connections whose types still fit are kept; the others go.
+    public func changeNodeDef(of path: String, to nodeDef: String) throws {
+        try perform { error in
+            handle.changeNodeDef(std.string(path), std.string(nodeDef), &error)
+        }
+    }
+
     /// Removes a node or nodegraph, disconnecting everything that used it.
     public func removeNode(at path: String) throws {
         try perform { error in
