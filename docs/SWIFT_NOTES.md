@@ -186,6 +186,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.onKeyPress` | Sees a key before the view does; `.handled` stops it, `.ignored` passes it on | `NodeSearchPopup.swift` |
 | `ScrollViewReader` | A proxy that scrolls a `ScrollView` to the child with a given `.id` | `NodeSearchPopup.swift` |
 | `.allowsHitTesting(false)` | Clicks go through the view to whatever is under it | `GraphPanel.swift` (empty-canvas hint) |
+| `.keyboardShortcut(.defaultAction)` / `.cancelAction` | Return (or Escape) presses the button; the default one is drawn highlighted | `TemplateSheet.swift` |
+| `.buttonStyle(.plain)` | A button without the standard look, drawing only its label: for rows that show their own selection | `TemplateSheet.swift` |
 | `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
 
 ## Swift ↔ C++
@@ -198,6 +200,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | C++ classes are structs | Copying a Swift value copies the C++ object (copy constructor) | `MXBridge.h` |
 | `const` ↔ `mutating` | Non-const C++ methods are `mutating`, so they need a `var` | `MXDocument.swift` |
 | C++ exceptions | Can't be caught in Swift; one that escapes terminates the process. Catch them in C++. | `MXBridge.cpp` |
+| `CGContext` drawing | Core Graphics' C API with Swift names: `CGContext(data:width:...)`, `context.fill(rect)`, `makeImage()` | `CGBitmapContextCreate`, `CGContextFillRect` | `BuildFromNothingTests.swift` |
 | Objective-C classes | Import as Swift classes: `-initWithX:error:` becomes `init(x:) throws`, `nullable` becomes `?` | `MGStormRenderer.h`, `Snapshot.swift` |
 | Out-parameter structs | A C++ `T&` parameter is an `inout` argument: pass a `var` with `&` | `MXDocument.swift` (`generateMSL`) |
 

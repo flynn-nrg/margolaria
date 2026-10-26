@@ -102,7 +102,16 @@ final class MaterialXDocument: NSDocument {
     /// be validated, and the UI says so instead of claiming the document is valid.
     private(set) var libraryLoaded: Bool = false
 
+    /// True for a new document (File > New) until the user has picked
+    /// what it starts from (ContentView's template sheet). Documents read
+    /// from a file never ask.
+    private(set) var isChoosingTemplate: Bool = false
+
     /// Creates a new, untitled document (File > New).
+    ///
+    /// AppKit also calls this before reading a file (Open, Duplicate,
+    /// restoring an autosaved untitled document); `read(from:ofType:)`
+    /// then clears `isChoosingTemplate` again.
     ///
     /// SWIFT: `override init()`: NSDocument's own initializer is replaced,
     /// and `super.init()` must be called, after this class's properties have
@@ -110,6 +119,7 @@ final class MaterialXDocument: NSDocument {
     override init() {
         super.init()
         load(content)
+        isChoosingTemplate = true
     }
 
     // MARK: NSDocument configuration
@@ -139,6 +149,7 @@ final class MaterialXDocument: NSDocument {
         let document: MXDocument = try MXDocument.read(from: url)
         load(document)
         upgradeConfirmed = false
+        isChoosingTemplate = false
     }
 
     /// The file's contents when saving: MaterialX's XML.
@@ -152,6 +163,33 @@ final class MaterialXDocument: NSDocument {
     /// UTF-8 code units, with no copy of its own.
     override func data(ofType typeName: String) throws -> Data {
         Data(try content.xmlString().utf8)
+    }
+
+    /// Starts the new document from `template` (the template sheet).
+    /// Not an edit: there is nothing to undo back to, and an untitled
+    /// document no one changes further still closes without asking.
+    func start(from template: MXDocumentTemplate) {
+        isChoosingTemplate = false
+        // The templates are constants that the tests read, so this only
+        // fails if one is broken; then the document stays empty.
+        guard template != .empty, let document = try? template.makeDocument() else {
+            return
+        }
+        load(document)
+    }
+
+    /// The template sheet's "Open…": the user wanted an existing file,
+    /// not a new one. Closes this untitled document (nothing in it to
+    /// lose) and shows the Open dialog.
+    func openExistingInstead() {
+        isChoosingTemplate = false
+        close()
+        // SWIFT: `Task { @MainActor in ... }` runs the closure on the main
+        // thread *later*, after this button's action has returned and the
+        // window has gone, like `dispatch_async(dispatch_get_main_queue())`.
+        Task { @MainActor in
+            NSDocumentController.shared.openDocument(nil)
+        }
     }
 
     // MARK: Windows

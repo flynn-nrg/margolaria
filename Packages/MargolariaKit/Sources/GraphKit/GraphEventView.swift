@@ -114,7 +114,7 @@ public class GraphEventView: NSView {
             controller.onNavigateUp?()
         case "\t":
             // Tab: add a node where the pointer is (M2e).
-            controller.onRequestNodeSearch?(pointerLocation())
+            controller.requestNodeSearch(at: pointerLocation())
         case "\u{1B}":
             // Escape: abandon a wire or cut being dragged.
             controller.cancelDrag()

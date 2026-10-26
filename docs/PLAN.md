@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save), M2b (inspector), M2c (live viewport) and M2d (wiring) are done; M2e1 (node library) is under review.
+Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save), M2b (inspector), M2c (live viewport), M2d (wiring) and M2e1 (node library) are done; M2e2 (building from nothing) is under review.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -230,6 +230,8 @@ M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app work
 | Wiring rules (M2d) | The canvas dims what a dragged wire can't connect to, by MaterialX's rules: same type, no loops, a `uniform` input takes only a value or a graph input, an `<output>` can't take a graph input (`interfacename` is for inputs only), included nodes are locked. The bridge checks the same rules again. ⌥-drag draws a line that cuts the wires it crosses. A wire dropped on a node connects straight away if only one input fits, and asks with a menu if several do. | Users see what will connect before letting go, rather than getting an error after |
 | Node library (M2e) | Each node (`multiply`) is listed once, with its nodedefs as type variants. A new node starts as the plain colour variant if there is one (then float, vector3, ...; among equals the shortest nodedef name, so `ND_multiply_color3`, not `ND_multiply_color3FA`); the inspector's Type menu changes it. Superseded nodedef versions are left out. | The libraries hold ~800 nodedefs for ~300 nodes; listing every variant would bury the nodes |
 | Type variants (M2e) | Changing a node's variant keeps the inputs and downstream connections whose types still fit, removes the others, and writes `nodedef="..."` on the node, as MaterialX's `addNodeInstance` does for new nodes | Without the attribute, MaterialX picks the variant from the inputs present, so an `ND_multiply_color3FA` with no inputs set could read back as `ND_multiply_color3` |
+| Nodes at a wire's end (M2e) | A new wire dropped on empty canvas opens the node search, listing only the nodes with a port that can take it, each as the variant whose output is the wire's type where there is one (a float wire makes `ND_multiply_float`, into `in1`). The node goes beside the wire's end and is connected in the same undo step. A wire pulled off an input still disconnects; a `uniform` input opens nothing, as no node's output can feed it. | Building a graph is mostly "what comes next from here"; the search answers it without a trip to the library |
+| File > New (M2e) | A sheet offers an OpenPBR material, a Standard Surface material (each a shader feeding a `surfacematerial`) or an empty document, and "Open…", which closes the new document and shows the Open dialog (the app makes a new document at launch). Starting from a template isn't an undoable edit, so an untouched new document still closes without asking. | A material template renders at once; the empty document is one key away (Escape) |
 | Removing inputs (M2d) | Disconnecting or resetting a node's input removes it, *unless* MaterialX would then match the node to another nodedef: type variants (`ND_multiply_vector3FA` vs `ND_multiply_vector3`) and `separate3`'s output names depend on the inputs' types. Then the input stays, at its default value. | Found by the M2d corpus test: cutting a wire into `in2` of a vector3×float multiply turned `in2` into a vector3 |
 
 **PRs:**
@@ -251,6 +253,10 @@ M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app work
 Found while testing M2c's live viewport (2026-10-25), left until the lighting is controlled:
 
 - **Check the viewport against a reference.** Under the M1c lighting (OpenUSD's outdoor dome at full intensity, sRGB output without tone mapping), some examples look wrong: SimpleHair looks almost like glass, gold is more reflective than expected, and it isn't clear whether the Disney examples render correctly yet. Once M3 has a neutral studio environment (`TODO(M3)` in `MGStormRenderer.mm`) and the OCIO view transform, compare these with MaterialXView on the same files, and tell our lighting apart from Storm's approximations (hair BSDFs are made for curves, not a sphere).
+
+Found while testing M2e (2026-10-26):
+
+- **Colours picked outside the working space's gamut.** The colour panel's wheel covers Display P3, wider than lin_rec709, so a saturated pick converts to negative components (a bright green became `-0.04, 0.71, -0.004`). MaterialX accepts these, but renderers treat them inconsistently. Decide with the OCIO colour pickers: map into the gamut, clamp, or keep the values and say so in the inspector.
 
 ## 9. Open questions
 

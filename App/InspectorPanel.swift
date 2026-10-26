@@ -46,6 +46,13 @@ struct InspectorPanel: View {
                     InspectedElementView(document: document, element: element, onShow: onShow)
                         .padding(12)
                 }
+                // A new set of editors for each element. Otherwise SwiftUI
+                // reuses them, and a colour well connected to the colour
+                // panel stays connected while showing another node's colour:
+                // the panel keeps the old colour, and dragging in it would
+                // set the new node's input. A fresh well, clicked, connects
+                // and sends the panel its own colour.
+                .id(selectedPath)
             } else {
                 ContentUnavailableView("No Selection", systemImage: "slider.horizontal.3",
                                        description: Text("Select one node on the canvas to see its inputs."))

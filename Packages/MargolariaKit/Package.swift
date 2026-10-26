@@ -170,8 +170,10 @@ let package = Package(
         // be checked without running the app.
         .testTarget(
             name: "ViewportKitTests",
-            // MXKit too: the M2c tests render the text MXKit writes for previews.
-            dependencies: ["ViewportKit", "MXKit"],
+            // MXKit too: the M2c tests render the text MXKit writes for
+            // previews. GraphKit: the M2e test builds a material through
+            // the canvas's calls, then renders it.
+            dependencies: ["ViewportKit", "MXKit", "GraphKit"],
             resources: [.copy("Fixtures")],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),

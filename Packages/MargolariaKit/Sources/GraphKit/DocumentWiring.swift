@@ -10,6 +10,9 @@
 //   node or nodegraph      connect(input:on:to:)     connect(input: "", ...)
 //   the graph's input      connect(...toInterface:)  (refused by MaterialX)
 //
+// A node added at the end of a wire dropped on empty canvas (M2e) isn't
+// on the canvas yet, so it is named by path: `connect(newNode:...)`.
+//
 // Kept here rather than in the app so the corpus tests can rewire every
 // example the way the canvas does.
 //
@@ -51,6 +54,36 @@ extension DocumentGraph {
         case .output:
             // <output>s have no outputs on the canvas; nothing starts there.
             throw MXError.editRefused("\(elementName(of: source)) is an output; wires go into it, not out of it")
+        }
+    }
+
+    /// Connects the node just added at `path` to `wire`, the wire dropped
+    /// on empty canvas that asked for it (M2e). `port` is the new node's
+    /// input (for a wire from an output) or output (for a wire into an
+    /// input) that takes it; `outputCount` is how many outputs the new
+    /// node has, as an output is named only when there is a choice.
+    public func connect(newNode path: String, port: String, outputCount: Int, to wire: DanglingWire,
+                        in document: MXDocument) throws {
+        switch wire {
+        case .fromOutput(let output, _):
+            let source: Int = output.node
+            switch kinds[source] {
+            case .interfaceInput:
+                try document.connect(input: port, on: path, toInterface: elementName(of: source))
+            case .node:
+                let outputs: [GraphPort] = model.nodes[source].outputs
+                let name: String? = outputs.count > 1 ? outputs[output.index].name : nil
+                try document.connect(input: port, on: path, to: elementName(of: source), output: name)
+            case .output:
+                throw MXError.editRefused("\(elementName(of: source)) is an output; wires go into it, not out of it")
+            }
+        case .intoInput(let slot, _):
+            let input: String = kinds[slot.node] == .output ? "" : slot.name
+            // SWIFT: `split(separator:).last` is the last part of the path,
+            // the new node's name; `String(...)` copies the Substring.
+            let name = String(path.split(separator: "/").last ?? Substring(path))
+            try document.connect(input: input, on: elementPaths[slot.node], to: name,
+                                 output: outputCount > 1 ? port : nil)
         }
     }
 

@@ -6,7 +6,8 @@
 //
 // The layout of docs/PLAN.md §4.1: the canvas with the bottom panel (XML,
 // Issues) under it, and on the right the viewport above the inspector
-// (M2b). The toolbar shows or hides each of the right-hand panels.
+// (M2b). The toolbar shows or hides each of the right-hand panels. A new
+// document first asks what to start from (TemplateSheet, M2e).
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
@@ -228,6 +229,18 @@ struct ContentView: View {
             } else {
                 graphPath = ""
                 focus = element.path
+            }
+        }
+        // File > New: what to start from, before anything else.
+        .sheet(isPresented: Binding(get: { document.isChoosingTemplate }, set: { isOpen in
+            if !isOpen {
+                document.start(from: .empty)
+            }
+        })) {
+            TemplateSheet { template in
+                document.start(from: template)
+            } onOpen: {
+                document.openExistingInstead()
             }
         }
         // A thin bar along the bottom of the window.

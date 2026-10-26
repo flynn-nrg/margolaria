@@ -5,6 +5,10 @@
 // keys (or the mouse), and Return adds that node there; Escape closes it.
 // The results are MXNodeCatalog.search's, best first.
 //
+// Opened by a wire dropped on empty canvas, it lists only the nodes that
+// can take the wire, each as the variant that does, and shows which of
+// its ports the wire will go to.
+//
 // Introduces (SWIFT): `.onKeyPress`, `ScrollViewReader`.
 
 import MXKit
@@ -12,8 +16,10 @@ import SwiftUI
 
 struct NodeSearchPopup: View {
     let catalog: MXNodeCatalog
+    /// What the new node must offer to take a dropped wire; nil for none.
+    let need: MXConnectionNeed?
     /// Called with the node chosen.
-    let onChoose: (MXNodeKind) -> Void
+    let onChoose: (MXNodeMatch) -> Void
 
     @State private var query: String = ""
 
@@ -28,15 +34,15 @@ struct NodeSearchPopup: View {
     /// How many results to list; more than this means: type more.
     private static let maximumResults: Int = 30
 
-    private var results: [MXNodeKind] {
-        Array(catalog.search(query).prefix(Self.maximumResults))
+    private var results: [MXNodeMatch] {
+        Array(catalog.search(query, for: need).prefix(Self.maximumResults))
     }
 
     var body: some View {
         // `results` searches the catalog; compute it once per update.
-        let results: [MXNodeKind] = results
+        let results: [MXNodeMatch] = results
         VStack(alignment: .leading, spacing: 0) {
-            TextField("Add Node", text: $query, prompt: Text("Add a node…"))
+            TextField("Add Node", text: $query, prompt: Text(need == nil ? "Add a node…" : "Add a connected node…"))
                 .textFieldStyle(.plain)
                 .font(.title3)
                 .padding(8)
@@ -96,12 +102,13 @@ struct NodeSearchPopup: View {
         }
     }
 
-    /// One result: the node's name, and its group and type.
-    private func row(_ kind: MXNodeKind, isHighlighted: Bool) -> some View {
+    /// One result: the node's name, its group and type, and the port a
+    /// wire would go to ("math · float · in1").
+    private func row(_ match: MXNodeMatch, isHighlighted: Bool) -> some View {
         HStack {
-            Text(kind.node)
+            Text(match.kind.node)
             Spacer()
-            Text([kind.group, kind.defaultVariant.type].compactMap { $0 }.joined(separator: " · "))
+            Text([match.kind.group, match.variant.type, match.port].compactMap { $0 }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(isHighlighted ? .primary : .secondary)
         }
