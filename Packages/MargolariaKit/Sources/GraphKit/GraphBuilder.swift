@@ -7,7 +7,9 @@
 // What a node shows (PLAN.md §4.1): its outputs, then the inputs the
 // document sets or connects. Inputs left at their nodedef default are
 // counted, not listed: a `standard_surface` has 42 inputs, and the examples
-// set about 8. They appear as one "+N more inputs" row.
+// set about 8. They appear as one "+N more inputs" row; clicking it
+// expands the node (M2d), which the app remembers by path and passes back
+// in `expanded`.
 //
 // Nodes with a saved position (`xpos`/`ypos`) are placed there; the
 // others get position zero, and `positioned` says which are which, so that
@@ -26,6 +28,17 @@ import CoreGraphics
 import Foundation
 import MXKit
 
+/// What kind of MaterialX element a canvas node stands for. Wiring needs
+/// it: each kind is connected with a different edit.
+public enum ElementKind: Sendable {
+    /// One of a nodegraph's own inputs, drawn with one output.
+    case interfaceInput
+    /// A node, or a nodegraph shown as a node.
+    case node
+    /// An `<output>` element, drawn with one input.
+    case output
+}
+
 /// A canvas model built from a MaterialX graph, with the element behind each
 /// canvas node.
 public struct DocumentGraph: Sendable {
@@ -35,6 +48,8 @@ public struct DocumentGraph: Sendable {
     /// belongs to `model.nodes[i]`. Interface inputs and outputs are
     /// elements too ("NG_copper/roughness_out"), so every node has one.
     public let elementPaths: [String]
+    /// The kind of element behind each canvas node, by index.
+    public let kinds: [ElementKind]
     /// The path of the graph level this was built from ("" for the document).
     public let graphPath: String
 
@@ -67,9 +82,12 @@ public struct DocumentGraph: Sendable {
 
 /// Builds a ``DocumentGraph`` from an MXGraph.
 public enum GraphBuilder {
-    public static func build(_ graph: MXGraph) -> DocumentGraph {
+    /// Builds the canvas for `graph`. Nodes whose path is in `expanded`
+    /// show all their inputs, not only the set ones.
+    public static func build(_ graph: MXGraph, expanded: Set<String> = []) -> DocumentGraph {
         var nodes: [GraphNode] = []
         var paths: [String] = []
+        var kinds: [ElementKind] = []
 
         // Canvas indices by MaterialX name, one dictionary per kind of
         // source a connection can name.
@@ -87,16 +105,27 @@ public enum GraphBuilder {
                                    outputs: [GraphPort(name: displayValue(of: input) ?? input.type, type: PortType(input.type))],
                                    hasThumbnail: false, subtitle: "input"))
             paths.append(childPath(graph.path, input.name))
+            kinds.append(.interfaceInput)
         }
 
-        // 2. The nodes, nodegraphs included.
+        // 2. The nodes, nodegraphs included. `shownInputs` keeps each
+        // node's rows, for the wires below.
+        var shownInputs: [Int: [MXPort]] = [:]
         for node in graph.nodes {
             let id: Int = nodes.count
             nodeIndex[node.name] = id
-            // SWIFT: `filter` keeps the elements for which the closure is
-            // true. A connected input is always authored; checking both
-            // states the rule plainly.
-            let shown: [MXPort] = node.inputs.filter { $0.isAuthored || $0.connection != nil }
+            // SWIFT: A closure stored in a `let`, with its function type
+            // `(MXPort) -> Bool` written out, can be passed by name where a
+            // closure is expected: `filter(isSet)`. `filter` keeps the
+            // elements for which it is true. (A connected input is always
+            // authored; checking both states the rule plainly.)
+            let isSet: (MXPort) -> Bool = { $0.isAuthored || $0.connection != nil }
+            let unset: [MXPort] = node.inputs.filter { !isSet($0) }
+            // An expanded node shows every input, in the nodedef's order;
+            // only a node with something to hide can be expanded.
+            let isExpanded: Bool = expanded.contains(node.path) && !unset.isEmpty
+            let shown: [MXPort] = isExpanded ? node.inputs : node.inputs.filter(isSet)
+            shownInputs[id] = shown
             var position: CGPoint = .zero
             if let saved = node.position {
                 position = CGPoint(x: saved.x * DocumentGraph.pointsPerUnit.width,
@@ -111,9 +140,11 @@ public enum GraphBuilder {
                                    hasThumbnail: false,
                                    // Included nodes say so, after their category.
                                    subtitle: node.isIncluded ? node.category + " · included" : node.category,
-                                   collapsedInputCount: node.inputs.count - shown.count,
+                                   hiddenInputs: isExpanded ? [] : unset.map { port(for: $0) },
+                                   isExpanded: isExpanded,
                                    isLocked: node.isIncluded))
             paths.append(node.path)
+            kinds.append(.node)
         }
 
         // 3. The level's <output> elements: small nodes with one input.
@@ -124,6 +155,7 @@ public enum GraphBuilder {
                                    outputs: [],
                                    hasThumbnail: false, subtitle: "output"))
             paths.append(childPath(graph.path, output.name))
+            kinds.append(.output)
         }
 
         // 4. Wires. Inputs are visited in the order the nodes show them, so
@@ -163,10 +195,9 @@ public enum GraphBuilder {
         }
 
         for node in graph.nodes {
-            guard let id = nodeIndex[node.name] else {
+            guard let id = nodeIndex[node.name], let shown = shownInputs[id] else {
                 continue
             }
-            let shown: [MXPort] = node.inputs.filter { $0.isAuthored || $0.connection != nil }
             // SWIFT: `enumerated()` pairs each element with its position,
             // like Python's `enumerate`: `(offset, element)`.
             for (row, input) in shown.enumerated() {
@@ -178,15 +209,16 @@ public enum GraphBuilder {
             connect(output.connection, to: PortReference(node: firstOutput + offset, index: 0))
         }
 
-        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, graphPath: graph.path,
-                             positioned: positioned)
+        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, kinds: kinds,
+                             graphPath: graph.path, positioned: positioned)
     }
 
     /// The canvas row for an input: its name, type and, unless connected,
     /// its value.
     static func port(for input: MXPort) -> GraphPort {
         GraphPort(name: input.name, type: PortType(input.type),
-                  value: input.connection == nil ? displayValue(of: input) : nil)
+                  value: input.connection == nil ? displayValue(of: input) : nil,
+                  isUniform: input.isUniform)
     }
 
     /// The value as shown on a node: as written, except that file paths are

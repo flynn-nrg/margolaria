@@ -8,6 +8,12 @@
 // MaterialXDocument.edit. After every change the level is rebuilt from the
 // document, keeping the camera and the selection.
 //
+// Wiring (M2d): the canvas reports connections and disconnections
+// (GraphCanvasController.onConnect/onDisconnect), which DocumentGraph turns
+// into document edits, one undo step each. Clicking "+N more inputs"
+// expands a node; which nodes are expanded is view state, kept here by
+// path, not saved in the document.
+//
 // Navigation: double-click a nodegraph to open it; U, or a breadcrumb, to go
 // back up. The sidebar opens levels and selects nodes through `level` and
 // `focus` (see ContentView).
@@ -60,6 +66,9 @@ struct GraphPanel: View {
     /// Why the level couldn't be shown, if it couldn't.
     @State private var failure: String? = nil
 
+    /// The nodes showing all their inputs, by path.
+    @State private var expandedPaths: Set<String> = []
+
     var body: some View {
         VStack(spacing: 0) {
             BreadcrumbBar(path: $levelPath)
@@ -89,6 +98,11 @@ struct GraphPanel: View {
         .onChange(of: document.revision) {
             rebuild()
         }
+        // Expanding or collapsing a node's inputs is view state, not an
+        // edit, but the canvas is built from it all the same.
+        .onChange(of: expandedPaths) {
+            rebuild()
+        }
         .onChange(of: focus) {
             applyFocus()
         }
@@ -115,7 +129,7 @@ struct GraphPanel: View {
             failure = String(describing: error)
             return
         }
-        var graph: DocumentGraph = GraphBuilder.build(mxGraph)
+        var graph: DocumentGraph = GraphBuilder.build(mxGraph, expanded: expandedPaths)
         graph.layout()
 
         // Rebuilding the level that is already shown (after an edit): keep
@@ -151,6 +165,34 @@ struct GraphPanel: View {
                 return
             }
             delete(ids, in: newLevel)
+        }
+        newLevel.controller.onConnect = { [weak newLevel] connection in
+            guard let newLevel else {
+                return
+            }
+            document.edit(newLevel.graph.undoName(for: connection)) { content in
+                try newLevel.graph.connect(connection, in: content)
+            }
+        }
+        newLevel.controller.onDisconnect = { [weak newLevel] inputs in
+            guard let newLevel else {
+                return
+            }
+            document.edit(newLevel.graph.undoName(forDisconnecting: inputs)) { content in
+                try newLevel.graph.disconnect(inputs, in: content)
+            }
+        }
+        newLevel.controller.onToggleInputs = { [weak newLevel] id in
+            guard let newLevel else {
+                return
+            }
+            let path: String = newLevel.graph.elementPaths[id]
+            // SWIFT: `remove` returns the element it removed, or nil if it
+            // wasn't there; `== nil` then means "it wasn't expanded". The
+            // `.onChange(of: expandedPaths)` below rebuilds the canvas.
+            if expandedPaths.remove(path) == nil {
+                expandedPaths.insert(path)
+            }
         }
 
         if let previous {
@@ -234,7 +276,7 @@ private struct BreadcrumbBar: View {
                 crumb(parts[i], target: parts[0...i].joined(separator: "/"))
             }
             Spacer()
-            Text("Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Drag between pins to connect · ⌥-drag cuts wires · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

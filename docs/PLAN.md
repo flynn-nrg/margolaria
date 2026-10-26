@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save) and M2b (inspector) are done; M2c (live viewport) is under review.
+Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save), M2b (inspector) and M2c (live viewport) are done; M2d (wiring) is under review.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -227,6 +227,8 @@ M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app work
 | Live viewport | Storm shows the edited document, not the file on disk. **Changed in M2c** from `UsdMtlxRead(document, stage)`: MXKit writes a self-contained copy (`previewXMLString()`: includes inline, texture paths absolute), the renderer keeps it in a temporary file of its own, and each edit rewrites the file, reads it into a fresh layer and `TransferContent`s it into the referenced one, so USD notifies Storm of only what changed. A file, not a layer in memory, because Hydra rereads document-defined nodedefs (SimpleHair) from the document's file. A value change costs about 3 ms on top of a 10 ms frame, so it isn't throttled. | M1c's viewport rereads the file; an editor must show unsaved edits. `UsdMtlxRead` would need an `mx::Document` passed between our two bridges. |
 | Round-trip check | The corpus test writes each example, reads it back, and compares with `Element::isEquivalent`; byte differences are counted and reported | M2's exit criterion: "byte-equivalent or semantically equal" |
 | Version upgrades | A v1.38 file is upgraded on read; saving asks before writing it as 1.39 | Saving silently changes the file's version otherwise |
+| Wiring rules (M2d) | The canvas dims what a dragged wire can't connect to, by MaterialX's rules: same type, no loops, a `uniform` input takes only a value or a graph input, an `<output>` can't take a graph input (`interfacename` is for inputs only), included nodes are locked. The bridge checks the same rules again. ⌥-drag draws a line that cuts the wires it crosses. A wire dropped on a node connects straight away if only one input fits, and asks with a menu if several do. | Users see what will connect before letting go, rather than getting an error after |
+| Removing inputs (M2d) | Disconnecting or resetting a node's input removes it, *unless* MaterialX would then match the node to another nodedef: type variants (`ND_multiply_vector3FA` vs `ND_multiply_vector3`) and `separate3`'s output names depend on the inputs' types. Then the input stays, at its default value. | Found by the M2d corpus test: cutting a wire into `in2` of a vector3×float multiply turned `in2` into a vector3 |
 
 **PRs:**
 

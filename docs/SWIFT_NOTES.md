@@ -40,6 +40,12 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Enum as a state machine | Each case carries the data that state needs (`.movingNodes(start:original:)`) | A tagged union with a `switch` | `GraphCanvasController.swift` (`DragState`) |
 | `if case` / `guard case` | Matches one enum case and binds its values, without a full `switch` | — | `ContentView.swift` (`IssuesBadge`), `MXInspectableTests.swift` |
 | Multi-pattern `case` | `case .a(let x), .b(let x):` binds the same name in each pattern | Fall-through `case` labels | `GraphCanvasController.swift` (`mouseDown`) |
+| `case ... where` | A pattern with a condition; if it is false, the `switch` tries the next case | — | `GraphCanvasController.swift` (`mouseDown`) |
+| `switch` on a tuple, optional patterns | `switch (a, b)` matches both at once; `.x(let v)?` matches an optional holding `.x` | Nested `switch`es | `GraphCanvasController.swift` (`endWire`) |
+| `case .x(var v)` | Binds a mutable *copy* of the associated value; store it back with `state = .x(v)` | Copying a struct out of a union | `GraphCanvasController.swift` (`mouseDragged`) |
+| `Set.insert(_:).inserted` | `insert` returns whether the element was new | `std::set::insert(...).second` | `GraphWiring.swift` |
+| `dict[key, default: v]` | Reads a dictionary value, or `v` if the key is missing, without an optional | `map.value(key, v)` in Qt | `GraphWiring.swift` |
+| `(0...n).map`, `indices.dropFirst()` | Map over a range of integers; every index but the first | A `for` loop filling a vector | `GraphLayout.swift` (`wirePoints`), `GraphWiring.swift` |
 | Option sets | Bit flags as a set: `flags.contains(.shift)` | `if (flags & NSEventModifierFlagShift)` | `GraphEventView.swift` |
 | Failable initializer `init?` | An initializer that can return `nil`; the result is optional | ObjC `-init` returning nil | `MXGraph.swift` (`MXConnection`) |
 | Assigning `self` in an enum's `init` | `self = .node(name, output: nil)` picks the case | — | `MXGraph.swift` (`MXConnection`) |
@@ -70,6 +76,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `async` / `await`, `Task.yield()` | A function that can suspend without blocking its thread; `yield` lets other work (UI updates) run | Coroutines; Go's `runtime.Gosched()` | `SwatchSpikeApp.swift` |
 | `reduce` | Folds a collection into one value: `xs.reduce(0, +)` | `std::accumulate` | `GraphLayout.swift` |
 | `@objc` and `#selector` | Expose a method to the Objective-C runtime and name it for target/action, checked at compile time | `@selector(tick:)` | `GraphBenchmark.swift` |
+| A closure in a `let` | `let isSet: (MXPort) -> Bool = { ... }`, then `filter(isSet)`: a closure is a value, passed by name | A function pointer or `std::function` | `GraphBuilder.swift` |
+| `NSMenu.popUp(positioning:at:in:)` | Shows a menu built in code and returns once it closes, after the chosen item's action ran | `-popUpMenuPositioningItem:atLocation:inView:` | `GraphEventView.swift` |
 | `Selector(("name:"))` | A selector from its name, for actions with no Swift declaration | `NSSelectorFromString` | `MainMenu.swift` |
 | Variadic parameters | `_ items: Item...`: any number of arguments, seen as an array | C `...`, but typed | `MainMenu.swift` |
 | `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |

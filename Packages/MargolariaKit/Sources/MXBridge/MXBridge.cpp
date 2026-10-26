@@ -789,13 +789,61 @@ void ClearConnection(const mx::PortElementPtr& port) {
     port->removeAttribute(mx::ValueElement::INTERFACE_NAME_ATTRIBUTE);
 }
 
-/// Disconnects `port`; an input left with no value is removed, so the
-/// node goes back to its default.
+/// Removes a node's input, so the node uses its nodedef's default.
+///
+/// Unless that would change which nodedef MaterialX matches the node to:
+/// variants of a node are told apart by their inputs' types
+/// (`ND_multiply_vector3FA` takes a float `in2`, `ND_multiply_vector3` a
+/// vector3), and a `separate3`'s outputs are named after its input's type.
+/// Without the input, `getNodeDef()` may pick another variant, and the
+/// node's other inputs and outputs would change meaning. Then the input is
+/// put back where it was, with the nodedef's default as its value.
+void RemoveInput(const mx::NodePtr& node, const mx::InputPtr& input) {
+    const mx::NodeDefPtr before = node->getNodeDef();
+    const std::string name = input->getName();
+    const int index = node->getChildIndex(name);
+    node->removeChild(name);
+    if (!before || node->getNodeDef() == before) {
+        return;
+    }
+    // `input` still holds the removed element (shared_ptr), so its
+    // attributes can be copied back, then the value reset.
+    mx::InputPtr restored = node->addInput(name, input->getType());
+    restored->copyContentFrom(input);
+    node->setChildIndex(name, index);
+    mx::InputPtr definition = before->getActiveInput(name);
+    if (definition && definition->hasValueString()) {
+        restored->setValueString(definition->getValueString());
+    }
+}
+
+/// Disconnects `port`; a node's input left with no value is removed, so
+/// the node goes back to its default (see RemoveInput). A nodegraph's own
+/// inputs are its interface, so they stay, even without a value.
 void Disconnect(const mx::PortElementPtr& port) {
     ClearConnection(port);
-    if (port->isA<mx::Input>() && !port->hasValueString()) {
-        port->getParent()->removeChild(port->getName());
+    mx::NodePtr node = port->getParent()->asA<mx::Node>();
+    mx::InputPtr input = port->asA<mx::Input>();
+    if (node && input && !input->hasValueString()) {
+        RemoveInput(node, input);
     }
+}
+
+/// True if `port` is declared `uniform`, on itself or on its nodedef. A
+/// uniform input takes a value, or a nodegraph's input; never a node's
+/// output (MaterialX specification, "Inputs").
+bool IsUniform(const mx::PortElementPtr& port) {
+    mx::InputPtr input = port->asA<mx::Input>();
+    if (!input) {
+        return false;
+    }
+    if (input->getIsUniform()) {
+        return true;
+    }
+    mx::NodePtr node = input->getParent()->asA<mx::Node>();
+    mx::NodeDefPtr nodeDef = node ? node->getNodeDef() : nullptr;
+    mx::InputPtr definition = nodeDef ? nodeDef->getActiveInput(input->getName()) : nullptr;
+    return definition && definition->getIsUniform();
 }
 
 /// The names of the nodes and nodegraphs `name` reads from, in `graph`.
@@ -873,7 +921,13 @@ bool Document::resetInput(const std::string& elementPath, const std::string& inp
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
         mx::ElementPtr element = EditableElement(document, elementPath);
         mx::PortElementPtr port = Port(element, inputName, false);
-        element->removeChild(port->getName());
+        mx::NodePtr node = element->asA<mx::Node>();
+        mx::InputPtr input = port->asA<mx::Input>();
+        if (node && input) {
+            RemoveInput(node, input);
+        } else {
+            element->removeChild(port->getName());
+        }
     });
 }
 
@@ -917,6 +971,9 @@ bool Document::connectInput(const std::string& targetPath, const std::string& in
         if (port->getType() != sourceType) {
             throw Refusal("Can't connect " + sourceType + " to " + port->getType());
         }
+        if (IsUniform(port)) {
+            throw Refusal(inputName + " is uniform: it takes a value or one of the graph's inputs, not a node's output");
+        }
         // A node can't read from itself or from anything downstream of it.
         if (!target->isA<mx::Output>() && Reaches(graph, sourceName, target->getName())) {
             throw Refusal("Connecting " + sourceName + " to " + target->getName() + " would make a loop");
@@ -941,12 +998,19 @@ bool Document::connectInterface(const std::string& targetPath, const std::string
         mx::ElementPtr target = EditableElement(document, targetPath);
         mx::NodeGraphPtr graph = target->getParent()->asA<mx::NodeGraph>();
         mx::InputPtr interface = graph ? graph->getInput(interfaceName) : nullptr;
+        // A nodegraph that implements a nodedef has no inputs of its own:
+        // its interface is the nodedef's inputs.
+        if (!interface && graph && graph->getNodeDef()) {
+            interface = graph->getNodeDef()->getActiveInput(interfaceName);
+        }
         if (!interface) {
             throw Refusal("The graph around " + targetPath + " has no input " + interfaceName);
         }
         mx::PortElementPtr port = Port(target, inputName, true);
         mx::InputPtr input = port->asA<mx::Input>();
         if (!input) {
+            // MaterialX's validation: "Only input and token elements
+            // support interface names". An <output> can't pass one through.
             throw Refusal("Only inputs can use the graph's inputs");
         }
         if (input->getType() != interface->getType()) {

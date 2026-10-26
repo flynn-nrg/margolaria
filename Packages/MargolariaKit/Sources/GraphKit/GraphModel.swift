@@ -133,11 +133,15 @@ public struct GraphPort: Sendable {
     public var type: PortType
     /// For an unconnected input, its value as shown inline ("0.8, 0.2, 0.1").
     public var value: String?
+    /// For an input: declared `uniform`, so it takes a value or a
+    /// nodegraph's own input, never a node's output (see GraphWiring.swift).
+    public var isUniform: Bool
 
-    public init(name: String, type: PortType, value: String? = nil) {
+    public init(name: String, type: PortType, value: String? = nil, isUniform: Bool = false) {
         self.name = name
         self.type = type
         self.value = value
+        self.isUniform = isUniform
     }
 }
 
@@ -162,12 +166,22 @@ public struct GraphNode: Identifiable, Sendable {
     /// automatic memberwise initializer, so code written before they existed
     /// (the synthetic graph below) still compiles.
     public var subtitle: String? = nil
-    /// How many more inputs the node has that aren't shown: those that use
-    /// their default value. Drawn as one "+N more inputs" row.
-    public var collapsedInputCount: Int = 0
+    /// The inputs that aren't shown as rows: those that use their default
+    /// value. Drawn as one "+N more inputs" row; a wire dropped on the node
+    /// can still connect to them (M2d).
+    public var hiddenInputs: [GraphPort] = []
+    /// True when the node shows all its inputs because the user expanded
+    /// it; its last row then offers to show fewer.
+    public var isExpanded: Bool = false
     /// True for a node that can't be changed (it comes from an included
-    /// file): it can be selected, but not moved or deleted.
+    /// file): it can be selected, but not moved, deleted or rewired.
     public var isLocked: Bool = false
+
+    /// How many inputs the "+N more inputs" row stands for.
+    public var collapsedInputCount: Int { hiddenInputs.count }
+
+    /// True if the node ends with a row that shows more inputs, or fewer.
+    public var hasInputToggle: Bool { !hiddenInputs.isEmpty || isExpanded }
 }
 
 /// Identifies one port: which node, which side, which row.

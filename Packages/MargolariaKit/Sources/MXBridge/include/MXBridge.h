@@ -332,25 +332,29 @@ public:
                        const std::string& value, std::string& errorMessage);
 
     /// Removes an input from the document, so the node uses its nodedef's
-    /// default again (and any connection goes with it).
+    /// default again (and any connection goes with it). If removing it
+    /// would change which nodedef the node matches (type variants such as
+    /// `ND_multiply_vector3FA`), the input stays, set to the default.
     bool resetInput(const std::string& elementPath, const std::string& inputName, std::string& errorMessage);
 
     /// Connects an input to the output of a node or nodegraph in the same
     /// graph, called `sourceName`. `sourceOutput` names the output when the
     /// source has several; "" for the only one. `targetPath` may also be
-    /// an <output> element, with `inputName` "". The types must match, and
-    /// the connection must not create a cycle.
+    /// an <output> element, with `inputName` "". The types must match, the
+    /// connection must not create a cycle, and a `uniform` input can't be
+    /// connected to a node.
     bool connectInput(const std::string& targetPath, const std::string& inputName,
                       const std::string& sourceName, const std::string& sourceOutput,
                       std::string& errorMessage);
 
     /// Inside a nodegraph, connects an input to one of the graph's own
-    /// inputs (`interfacename`).
+    /// inputs (`interfacename`). Not an <output>: MaterialX allows
+    /// `interfacename` only on inputs.
     bool connectInterface(const std::string& targetPath, const std::string& inputName,
                           const std::string& interfaceName, std::string& errorMessage);
 
-    /// Removes an input's connection. If it has no value of its own, the
-    /// input is removed, so the node uses its default.
+    /// Removes an input's connection. If it is a node's input with no value
+    /// of its own, the input is removed, so the node uses its default.
     bool disconnectInput(const std::string& targetPath, const std::string& inputName, std::string& errorMessage);
 
     /// Adds a node defined by the nodedef `nodeDefName` (such as

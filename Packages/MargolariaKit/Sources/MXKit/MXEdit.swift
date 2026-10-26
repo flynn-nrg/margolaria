@@ -99,21 +99,27 @@ extension MXDocument {
 
     /// Connects input `input` of the node at `target` to the node or
     /// nodegraph `source` in the same graph (its output `output`, if it has
-    /// several). For an `<output>` element, `input` is "".
+    /// several). For an `<output>` element, `input` is "". Refused if the
+    /// types differ, if it would make a loop, or if the input is `uniform`
+    /// (those take a value or a graph's input, not a node's output).
     public func connect(input: String, on target: String, to source: String, output: String? = nil) throws {
         try perform { error in
             handle.connectInput(std.string(target), std.string(input), std.string(source), std.string(output ?? ""), &error)
         }
     }
 
-    /// Connects an input inside a nodegraph to one of the graph's own inputs.
+    /// Connects an input inside a nodegraph to one of the graph's own
+    /// inputs. Not an `<output>`: MaterialX allows `interfacename` only on
+    /// inputs.
     public func connect(input: String, on target: String, toInterface interface: String) throws {
         try perform { error in
             handle.connectInterface(std.string(target), std.string(input), std.string(interface), &error)
         }
     }
 
-    /// Disconnects an input (or an `<output>`, with `input` "").
+    /// Disconnects an input (or an `<output>`, with `input` ""). A node's
+    /// input with no value of its own is removed, so the node uses its
+    /// default; a nodegraph's own inputs are kept.
     public func disconnect(input: String, on target: String) throws {
         try perform { error in
             handle.disconnectInput(std.string(target), std.string(input), &error)

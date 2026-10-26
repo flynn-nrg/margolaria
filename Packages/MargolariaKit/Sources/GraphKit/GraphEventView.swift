@@ -7,13 +7,17 @@
 // Gestures:
 //   - click/drag on a node selects and moves it; drag on empty canvas draws
 //     a marquee (Shift adds to the selection); double-click opens a node;
+//   - drag from a pin draws a wire (M2d), ⌥-drag cuts wires, Escape
+//     abandons either; a wire dropped on a node may ask, with a menu,
+//     which input to connect;
 //   - pan: two-finger scroll on a trackpad, middle-button drag, or
 //     Space + drag;
 //   - zoom around the pointer: pinch, mouse wheel, or ⌥-scroll.
 // The right button is kept free for the add-node menu (M2).
 //
 // Introduces (SWIFT): `open class` vs `final class`, `isFlipped` override as
-// a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option sets.
+// a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option
+// sets, building an NSMenu in code with `#selector` actions.
 
 import AppKit
 
@@ -70,7 +74,8 @@ public class GraphEventView: NSView {
         }
         // SWIFT: `modifierFlags` is an *option set* (a bit mask with a Set-like
         // API): `.contains(.shift)` is `flags & NSEventModifierFlagShift`.
-        controller.mouseDown(at: location(of: event), extend: event.modifierFlags.contains(.shift))
+        controller.mouseDown(at: location(of: event), extend: event.modifierFlags.contains(.shift),
+                             cut: event.modifierFlags.contains(.option))
     }
 
     /// The view can take keyboard focus (be the *first responder*).
@@ -105,6 +110,9 @@ public class GraphEventView: NSView {
             controller.frame(.selection)
         case "u":
             controller.onNavigateUp?()
+        case "\u{1B}":
+            // Escape: abandon a wire or cut being dragged.
+            controller.cancelDrag()
         case "\u{7F}", String(Character(UnicodeScalar(NSDeleteFunctionKey)!)):
             // The Delete key (⌫, character 127) and Forward Delete (⌦).
             controller.deleteSelection()
@@ -144,7 +152,45 @@ public class GraphEventView: NSView {
             endPan()
             return
         }
-        controller.mouseUp()
+        if let menu = controller.mouseUp() {
+            showMenu(menu)
+        }
+    }
+
+    // MARK: Choosing an input
+
+    /// The item chosen from the last wire menu, set by `chooseItem(_:)`.
+    private var chosenItem: Int? = nil
+
+    /// Shows the menu of inputs a dropped wire could connect to, and
+    /// passes the choice (or nil) to the controller.
+    private func showMenu(_ wireMenu: WireMenu) {
+        let menu = NSMenu(title: wireMenu.title)
+        // A disabled first item works as a heading.
+        let heading = NSMenuItem(title: wireMenu.title, action: nil, keyEquivalent: "")
+        heading.isEnabled = false
+        menu.addItem(heading)
+        for (index, title) in wireMenu.items.enumerated() {
+            // SWIFT: `#selector(chooseItem(_:))` names an `@objc` method,
+            // checked by the compiler; AppKit calls it on `target` when the
+            // item is chosen. The item's `tag` says which one it was.
+            let item = NSMenuItem(title: title, action: #selector(chooseItem(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            menu.addItem(item)
+        }
+        // Without this, AppKit would enable items by asking the responder
+        // chain; these are always available.
+        menu.autoenablesItems = false
+        chosenItem = nil
+        // `popUp` runs the menu and returns once it closes, after calling
+        // the chosen item's action, if any.
+        menu.popUp(positioning: nil, at: wireMenu.location, in: self)
+        controller.chooseConnection(chosenItem)
+    }
+
+    @objc private func chooseItem(_ sender: NSMenuItem) {
+        chosenItem = sender.tag
     }
 
     // MARK: Panning with a mouse
