@@ -14,7 +14,7 @@
 //
 // Introduces (SWIFT): `@main` on a type with `static func main()`,
 // `@MainActor` on a function, `withExtendedLifetime`, `NSObject` subclasses
-// conforming to Objective-C protocols.
+// conforming to Objective-C protocols, selector-based notification observers.
 
 import AppKit
 
@@ -63,5 +63,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// requires `true` for new apps.
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         true
+    }
+
+    /// The name under which AppKit saves the colour panel's position.
+    private static let colorPanelFrameName: String = "MargolariaColorPanel"
+
+    /// True once the colour panel has been given a position.
+    private var colorPanelPlaced: Bool = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // The inspector's colour wells open AppKit's shared colour panel.
+        // The first time, it has no saved position and appears at the
+        // screen's origin, the bottom-left corner. Watch for it becoming
+        // visible and place it then.
+        //
+        // SWIFT: The selector-based `addObserver` calls an `@objc` method
+        // of `self`, on the thread that posts the notification (here the
+        // main thread: AppKit posts window notifications there).
+        NotificationCenter.default.addObserver(self, selector: #selector(windowOcclusionChanged(_:)),
+                                               name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+    }
+
+    /// Places the colour panel the first time it appears: where it was
+    /// left last time, or else beside the pointer, which is on the colour
+    /// well that opened it. Its position is saved from then on.
+    @objc private func windowOcclusionChanged(_ notification: Notification) {
+        // SWIFT: `as?` (a conditional cast) also filters: other windows'
+        // notifications give nil and return here.
+        guard !colorPanelPlaced, let panel = notification.object as? NSColorPanel, panel.isVisible else {
+            return
+        }
+        colorPanelPlaced = true
+        if !panel.setFrameUsingName(Self.colorPanelFrameName) {
+            panel.setFrame(Self.frameBesidePointer(size: panel.frame.size), display: true)
+        }
+        panel.setFrameAutosaveName(Self.colorPanelFrameName)
+    }
+
+    /// A frame of `size` to the left of the pointer, centred on it
+    /// vertically, kept on the pointer's screen. (Screen coordinates: y up.)
+    private static func frameBesidePointer(size: CGSize) -> CGRect {
+        let pointer: CGPoint = NSEvent.mouseLocation
+        let screen: NSScreen? = NSScreen.screens.first(where: { $0.frame.contains(pointer) }) ?? NSScreen.main
+        var frame = CGRect(x: pointer.x - size.width - 24, y: pointer.y - size.height / 2,
+                           width: size.width, height: size.height)
+        if let visible = screen?.visibleFrame {
+            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - size.width)
+            frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - size.height)
+        }
+        return frame
     }
 }

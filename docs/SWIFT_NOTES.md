@@ -110,6 +110,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Subclassing AppKit classes | `override func read(from:ofType:)`; `override class var` for class properties AppKit asks the type | ObjC subclassing | `MaterialXDocument.swift` |
 | `UndoManager.registerUndo(withTarget:)` | Stores a closure to call on Undo; registering during an undo becomes the redo | `-registerUndoWithTarget:handler:` | `MaterialXDocument.swift` |
 | `Codable` | Declaring `Codable` on a struct of Codable properties makes the compiler write its encoding and decoding (JSON, property lists) | Go's `encoding/json` struct tags, without the tags | `LibraryPanel.swift` (`NodeDefinitionDrag`) |
+| `addObserver(_:selector:name:object:)` | Calls an `@objc` method of the observer for each matching notification; `object: nil` means from any sender | `-addObserver:selector:name:object:` | `MargolariaApp.swift` (colour panel) |
 | `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
 
 ## Modules and access
