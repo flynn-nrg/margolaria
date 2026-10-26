@@ -8,7 +8,9 @@
 //
 // For each kind it picks the variant a new node starts as (colour first,
 // then float, ...), names the variants for the inspector's Type menu
-// ("color3", "color3 (in2: float)"), and searches by name.
+// ("color3", "color3 (in2: float)"), and searches by name. For a wire
+// dropped on empty canvas, it picks the variant that can take the wire,
+// and the port it goes to (`ND_multiply_float`'s in1 for a float wire).
 //
 // Introduces (SWIFT): `Dictionary(grouping:by:)`, comparing tuples in
 // `sorted`/`min(by:)`, `firstIndex(of:)` as a rank, `lazy` sequences,
@@ -172,6 +174,72 @@ public struct MXNodeKind: Hashable, Sendable, Identifiable {
     }
 }
 
+/// What a new node needs to connect to a wire dropped on empty canvas.
+public enum MXConnectionNeed: Hashable, Sendable {
+    /// An input of this type, for a wire from an output.
+    case input(String)
+    /// An output of this type, for a wire into an input.
+    case output(String)
+}
+
+/// A node to add, as the node search lists it: the variant to add, and,
+/// for a wire, the port the wire goes to.
+public struct MXNodeMatch: Hashable, Sendable, Identifiable {
+    public let kind: MXNodeKind
+    public let variant: MXNodeDefinition
+    /// The new node's input (or output) the wire connects to; nil when
+    /// there is no wire.
+    public let port: String?
+
+    public var id: String { kind.node }
+
+    public init(kind: MXNodeKind, variant: MXNodeDefinition, port: String? = nil) {
+        self.kind = kind
+        self.variant = variant
+        self.port = port
+    }
+}
+
+extension MXNodeKind {
+    /// The variant and port that can take a wire with `need`, or nil if no
+    /// variant can.
+    ///
+    /// For a wire from an output (`.input(type)`): variants with an input
+    /// of that type that isn't `uniform`, preferring those whose output is
+    /// the same type (a float wire into multiply makes `ND_multiply_float`,
+    /// not `ND_multiply_color3FA`'s float in2), then the usual order. For a
+    /// wire into an input (`.output(type)`): variants with an output of
+    /// that type, preferring the preferred types for their first input
+    /// (`ND_convert_float_color3` for a colour), then the plainest name.
+    /// The port is the first one of the type: in1 before in2.
+    public func match(for need: MXConnectionNeed) -> MXNodeMatch? {
+        // SWIFT: A tuple array of (variant, port, sort key) for the
+        // candidates; `min(by:)` compares the keys, which are tuples too.
+        let candidates: [(variant: MXNodeDefinition, port: String, key: (Int, Int, Int))]
+        switch need {
+        case .input(let type):
+            candidates = variants.compactMap { variant in
+                guard let input = variant.inputs.first(where: { $0.type == type && !$0.isUniform }) else {
+                    return nil
+                }
+                return (variant, input.name, (variant.type == type ? 0 : 1, Self.rank(of: variant.type), variant.name.count))
+            }
+        case .output(let type):
+            candidates = variants.compactMap { variant in
+                guard let output = variant.outputs.first(where: { $0.type == type }) else {
+                    return nil
+                }
+                let firstInput: String = variant.inputs.first?.type ?? ""
+                return (variant, output.name, (variant.type == type ? 0 : 1, Self.rank(of: firstInput), variant.name.count))
+            }
+        }
+        guard let best = candidates.min(by: { $0.key < $1.key }) else {
+            return nil
+        }
+        return MXNodeMatch(kind: self, variant: best.variant, port: best.port)
+    }
+}
+
 /// A group of kinds as the library shows it: one `nodegroup`.
 public struct MXNodeGroup: Hashable, Sendable, Identifiable {
     /// The `nodegroup` value, or "other" for kinds without one.
@@ -291,6 +359,20 @@ public struct MXNodeCatalog: Sendable {
             (a.rank, a.kind.node.count, a.kind.node) < (b.rank, b.kind.node.count, b.kind.node)
         }
         .map(\.kind)
+    }
+}
+
+extension MXNodeCatalog {
+    /// The node search's results for `text`: each matching kind as the
+    /// variant to add. With `need` (a wire dropped on empty canvas), only
+    /// the kinds that can take the wire, with the variant and port that do.
+    public func search(_ text: String, for need: MXConnectionNeed?) -> [MXNodeMatch] {
+        let kinds: [MXNodeKind] = search(text)
+        // SWIFT: `if let` on the optional parameter picks the branch.
+        if let need {
+            return kinds.compactMap { $0.match(for: need) }
+        }
+        return kinds.map { MXNodeMatch(kind: $0, variant: $0.defaultVariant) }
     }
 }
 

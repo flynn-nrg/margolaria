@@ -16,7 +16,9 @@
 //
 // Adding nodes (M2e): drop one from the Library tab onto the canvas, or
 // press Tab for a search popover under the pointer, or double-click one
-// in the library to add it in the middle. The new node is placed where it
+// in the library to add it in the middle. Dropping a new wire on empty
+// canvas opens the search too, listing only the nodes that can take the
+// wire; the node chosen is added there and connected, in one undo step. The new node is placed where it
 // was asked for and selected; like a move, adding saves the positions of
 // nodes placed by auto-layout, so they stay where they are. An empty
 // level shows the canvas, so a document can be built from nothing.
@@ -81,9 +83,9 @@ struct GraphPanel: View {
     /// The nodes showing all their inputs, by path.
     @State private var expandedPaths: Set<String> = []
 
-    /// Where the node search popover points (view coordinates), while it
-    /// is open (Tab).
-    @State private var searchPoint: CGPoint? = nil
+    /// The node search open on the canvas (Tab, or a wire dropped on empty
+    /// canvas): where it points, in view coordinates, and the wire, if any.
+    @State private var searchRequest: NodeSearchRequest? = nil
 
     /// A node to select once the level has been rebuilt: one just added.
     @State private var pendingSelection: String? = nil
@@ -123,14 +125,16 @@ struct GraphPanel: View {
                     // popover to a rectangle in this view, rather than to
                     // the whole view; here a 1-point one at the pointer.
                     .popover(isPresented: isSearching,
-                             attachmentAnchor: .rect(.rect(CGRect(origin: searchPoint ?? .zero,
+                             attachmentAnchor: .rect(.rect(CGRect(origin: searchRequest?.location ?? .zero,
                                                                   size: CGSize(width: 1, height: 1)))),
                              arrowEdge: .bottom) {
-                        NodeSearchPopup(catalog: document.catalog) { kind in
-                            if let point = searchPoint {
-                                addNode(kind.defaultVariant.name, atView: point, in: level)
+                        NodeSearchPopup(catalog: document.catalog, need: searchRequest.flatMap(need(of:))) { match in
+                            if let request = searchRequest {
+                                addNode(match.variant.name, atView: request.location, in: level,
+                                        connecting: request.wire, port: match.port)
                             }
-                            searchPoint = nil
+                            searchRequest = nil
+                            level.controller.endNodeSearch()
                         }
                     }
             } else {
@@ -251,8 +255,8 @@ struct GraphPanel: View {
                 try newLevel.graph.disconnect(inputs, in: content)
             }
         }
-        newLevel.controller.onRequestNodeSearch = { point in
-            searchPoint = point
+        newLevel.controller.onRequestNodeSearch = { request in
+            searchRequest = request
         }
         newLevel.controller.onToggleInputs = { [weak newLevel] id in
             guard let newLevel else {
@@ -285,30 +289,55 @@ struct GraphPanel: View {
     }
 
     /// Whether the node search is open, as a binding for `.popover`:
-    /// closing it (Escape, a click elsewhere) clears `searchPoint`.
+    /// closing it (Escape, a click elsewhere) clears `searchRequest`, and
+    /// the canvas stops drawing the dangling wire, if there was one.
     private var isSearching: Binding<Bool> {
         Binding {
-            searchPoint != nil
+            searchRequest != nil
         } set: { isOpen in
             if !isOpen {
-                searchPoint = nil
+                searchRequest = nil
+                level?.controller.endNodeSearch()
             }
         }
     }
 
-    /// Adds a node of the nodedef `nodeDef` with its header centred at
-    /// `point` (view coordinates), as one undo step, and selects it.
-    private func addNode(_ nodeDef: String, atView point: CGPoint, in level: GraphLevel) {
-        let position: CGPoint = DocumentGraph.units(fromPoints: level.controller.newNodePosition(atView: point))
+    /// What a new node needs to take the request's wire: an input of the
+    /// wire's type if it comes from an output, and the other way round.
+    /// Nil for a search with no wire (Tab).
+    private func need(of request: NodeSearchRequest) -> MXConnectionNeed? {
+        switch request.wire {
+        case .fromOutput(_, let type)?:
+            return .input(type.name)
+        case .intoInput(_, let type)?:
+            return .output(type.name)
+        case nil:
+            return nil
+        }
+    }
+
+    /// Adds a node of the nodedef `nodeDef` at `point` (view coordinates),
+    /// as one undo step, and selects it. With `wire`, the node goes beside
+    /// the wire's end and its `port` is connected to the wire.
+    private func addNode(_ nodeDef: String, atView point: CGPoint, in level: GraphLevel,
+                         connecting wire: DanglingWire? = nil, port: String? = nil) {
+        let position: CGPoint = DocumentGraph.units(fromPoints: level.controller.newNodePosition(atView: point,
+                                                                                                 for: wire))
         let positions: [String: CGPoint] = autoLayoutPositions(in: level)
         let parent: String = levelPath
-        let name: String = document.catalog.definition(named: nodeDef)?.node ?? nodeDef
+        let definition: MXNodeDefinition? = document.catalog.definition(named: nodeDef)
+        let name: String = definition?.node ?? nodeDef
+        let graph: DocumentGraph = level.graph
         document.edit("Add \(name)") { content in
             for (path, saved) in positions {
                 try content.setPosition(saved, of: path)
             }
             let path: String = try content.addNode(nodeDef: nodeDef, in: parent)
             try content.setPosition(position, of: path)
+            if let wire, let port {
+                try graph.connect(newNode: path, port: port, outputCount: definition?.outputs.count ?? 1,
+                                  to: wire, in: content)
+            }
             pendingSelection = path
         }
     }

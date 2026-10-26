@@ -16,6 +16,11 @@
 // (GraphWiring.swift has the rules). Dropping a wire on a node rather than
 // a row offers that node's compatible inputs, hidden ones included.
 //
+// Adding nodes (M2e): Tab, or a new wire dropped on empty canvas, asks the
+// app for its node search (onRequestNodeSearch). A dropped wire stays
+// drawn, dangling, until the app reports the search closed
+// (endNodeSearch), having added and connected a node or not.
+//
 // Introduces (SWIFT): `@Observable` classes, `@MainActor` on a type,
 // `Set`, `enum` state machines with associated values, `private(set)`,
 // matching several patterns in one `case`, a struct stored in an enum
@@ -71,6 +76,30 @@ public struct WireMenu: Equatable, Sendable {
     public let items: [String]
     /// Where to show it, in view coordinates.
     public let location: CGPoint
+}
+
+/// A wire dropped on empty canvas, for a new node to connect to (M2e).
+public enum DanglingWire: Equatable, Sendable {
+    /// Dragged from this output: the new node takes it on an input of
+    /// `type`.
+    case fromOutput(PortReference, type: PortType)
+    /// Dragged from this input: the new node feeds it from an output of
+    /// `type`.
+    case intoInput(InputSlot, type: PortType)
+}
+
+/// A request for the app's node search: Tab, or a wire dropped on empty
+/// canvas.
+public struct NodeSearchRequest: Equatable, Sendable {
+    /// Where to show the search and put the node, in view coordinates.
+    public let location: CGPoint
+    /// The wire the new node connects to, when the search came from one.
+    public let wire: DanglingWire?
+
+    public init(location: CGPoint, wire: DanglingWire? = nil) {
+        self.location = location
+        self.wire = wire
+    }
 }
 
 /// Pan, zoom, selection and interaction for one canvas.
@@ -144,6 +173,9 @@ public final class GraphCanvasController {
         /// A wire was dropped on a node with several inputs (or outputs) it
         /// could connect to; the view is showing a menu of these.
         case choosing([WireConnection])
+        /// A new wire was dropped on empty canvas; the app is showing its
+        /// node search, and the wire stays drawn until it closes.
+        case awaitingNode
     }
 
     /// A wire drag in progress.
@@ -211,11 +243,11 @@ public final class GraphCanvasController {
     /// expanded, only the set ones).
     @ObservationIgnored public var onToggleInputs: (@MainActor (Int) -> Void)? = nil
 
-    /// Called when the user asks to add a node (the Tab key, M2e), with the
-    /// point in the view where it should go: under the pointer, or the
-    /// view's centre if the pointer is elsewhere. The app shows its node
-    /// search there.
-    @ObservationIgnored public var onRequestNodeSearch: (@MainActor (CGPoint) -> Void)? = nil
+    /// Called when the user asks to add a node (M2e): with Tab (see
+    /// ``requestNodeSearch(at:)``), or by dropping a new wire on empty
+    /// canvas. The app shows its node search at the request's location,
+    /// and calls ``endNodeSearch()`` when it closes.
+    @ObservationIgnored public var onRequestNodeSearch: (@MainActor (NodeSearchRequest) -> Void)? = nil
 
     /// The size of the view showing the canvas, kept up to date by the view.
     /// Framing needs it; until the view has been laid out it is zero.
@@ -320,6 +352,11 @@ public final class GraphCanvasController {
     /// held, `cut` when Option is (an ⌥-drag cuts wires).
     public func mouseDown(at viewPoint: CGPoint, extend: Bool, cut: Bool = false) {
         let point: CGPoint = graphPoint(fromView: viewPoint)
+        // A click while a dropped wire waits for its node: the app's
+        // search is closing; don't leave the wire behind.
+        if case .awaitingNode = drag {
+            endNodeSearch()
+        }
         if cut {
             drag = .cutting(start: point)
             cutLine = CutLine(start: point, end: point)
@@ -400,7 +437,7 @@ public final class GraphCanvasController {
     public func mouseDragged(to viewPoint: CGPoint) {
         let point: CGPoint = graphPoint(fromView: viewPoint)
         switch drag {
-        case .idle, .choosing:
+        case .idle, .choosing, .awaitingNode:
             break
         case .movingNodes(let start, let original, _):
             moveNodes(original, by: CGSize(width: point.x - start.x, height: point.y - start.y))
@@ -468,7 +505,7 @@ public final class GraphCanvasController {
                 onDisconnect?(inputs)
             }
             return nil
-        case .idle, .marquee, .choosing:
+        case .idle, .marquee, .choosing, .awaitingNode:
             if case .marquee = drag {
                 drag = .idle
             }
@@ -489,10 +526,26 @@ public final class GraphCanvasController {
         }
     }
 
+    /// Asks the app for its node search at `viewPoint`, with no wire to
+    /// connect (the Tab key).
+    public func requestNodeSearch(at viewPoint: CGPoint) {
+        onRequestNodeSearch?(NodeSearchRequest(location: viewPoint))
+    }
+
+    /// The app's node search has closed: stops drawing the wire that was
+    /// dropped on empty canvas, if any. (The node added, if one was, comes
+    /// with the rebuilt model.)
+    public func endNodeSearch() {
+        if case .awaitingNode = drag {
+            drag = .idle
+            clearWire()
+        }
+    }
+
     /// Escape during a wire drag or a cut: abandons it.
     public func cancelDrag() {
         switch drag {
-        case .wiring, .cutting, .choosing:
+        case .wiring, .cutting, .choosing, .awaitingNode:
             drag = .idle
             clearWire()
             cutLine = nil
@@ -609,10 +662,21 @@ public final class GraphCanvasController {
             }
         case (_, nil):
             // Dropped on nothing: a wire pulled off its input is removed.
-            clearWire()
             if let movedFrom {
+                clearWire()
                 onDisconnect?([movedFrom])
+                return nil
             }
+            // A new wire: offer to add a node at its end. The wire stays
+            // drawn, without the dimming, while the app's search is open.
+            if let dangling = danglingWire(for: wire.anchor), let onRequestNodeSearch {
+                wireCandidates = nil
+                wireTarget = nil
+                drag = .awaitingNode
+                onRequestNodeSearch(NodeSearchRequest(location: viewPoint(fromGraph: wire.pointer), wire: dangling))
+                return nil
+            }
+            clearWire()
             return nil
         default:
             // A target of the other kind can't happen (target(at:for:)
@@ -642,6 +706,18 @@ public final class GraphCanvasController {
             onConnect?(connection)
         }
         return nil
+    }
+
+    /// The wire from `anchor`, for a new node to connect to. Nil for a
+    /// `uniform` input, which no node's output can feed.
+    private func danglingWire(for anchor: WireDrag.Anchor) -> DanglingWire? {
+        switch anchor {
+        case .output(let output):
+            return .fromOutput(output, type: model.nodes[output.node].outputs[output.index].type)
+        case .input(let input):
+            let port: GraphPort = model.nodes[input.node].inputs[input.index]
+            return port.isUniform ? nil : .intoInput(model.slot(of: input), type: port.type)
+        }
     }
 
     /// True if `connection` is already in the graph: a wire dropped back
@@ -737,12 +813,23 @@ public final class GraphCanvasController {
                          y: (size.height - bounds.height * zoom) / 2 - bounds.minY * zoom)
     }
 
-    /// Where a new node placed at `viewPoint` goes, in graph coordinates:
-    /// its header centred on the point, as if the user had just picked it
-    /// up there. (A node's position is its top-left corner.)
-    public func newNodePosition(atView viewPoint: CGPoint) -> CGPoint {
+    /// Where a new node placed at `viewPoint` goes, in graph coordinates.
+    /// (A node's position is its top-left corner.) On its own: its header
+    /// centred on the point, as if the user had just picked it up there.
+    /// At the end of a wire: beside the point, on the side away from the
+    /// wire, so the wire reaches the node's near edge (inputs are on the
+    /// left, outputs on the right).
+    public func newNodePosition(atView viewPoint: CGPoint, for wire: DanglingWire? = nil) -> CGPoint {
         let point: CGPoint = graphPoint(fromView: viewPoint)
-        return CGPoint(x: point.x - GraphLayout.nodeWidth / 2, y: point.y - GraphLayout.headerHeight / 2)
+        let y: CGFloat = point.y - GraphLayout.headerHeight / 2
+        switch wire {
+        case nil:
+            return CGPoint(x: point.x - GraphLayout.nodeWidth / 2, y: y)
+        case .fromOutput?:
+            return CGPoint(x: point.x, y: y)
+        case .intoInput?:
+            return CGPoint(x: point.x - GraphLayout.nodeWidth, y: y)
+        }
     }
 
     /// A double-click at `viewPoint`: opens the node there, if any.

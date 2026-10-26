@@ -214,3 +214,44 @@ struct MXNodeCatalogLibraryTests {
         #expect(problems.isEmpty, "\(problems.prefix(10))")
     }
 }
+
+@Suite("MXNodeCatalog: nodes for a wire")
+struct MXNodeCatalogMatchTests {
+    func catalog() throws -> MXNodeCatalog {
+        let document = try MXDocument(xml: #"<?xml version="1.0"?><materialx version="1.39" />"#)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        return MXNodeCatalog(document: document)
+    }
+
+    @Test("A wire from an output picks a variant whose output is the same type, and its first such input")
+    func inputs() throws {
+        let catalog = try catalog()
+        let multiply: MXNodeKind = try #require(catalog.kind(named: "multiply"))
+        #expect(multiply.match(for: .input("float"))?.variant.name == "ND_multiply_float")
+        #expect(multiply.match(for: .input("color3"))?.variant.name == "ND_multiply_color3")
+        #expect(multiply.match(for: .input("color3"))?.port == "in1")
+        #expect(catalog.kind(named: "surfacematerial")?.match(for: .input("surfaceshader"))?.port == "surfaceshader")
+        // `file` is uniform: an output can't feed it.
+        #expect(catalog.kind(named: "image")?.match(for: .input("filename")) == nil)
+    }
+
+    @Test("A wire into an input picks a variant with an output of its type")
+    func outputs() throws {
+        let catalog = try catalog()
+        #expect(catalog.kind(named: "image")?.match(for: .output("float"))?.variant.name == "ND_image_float")
+        #expect(catalog.kind(named: "convert")?.match(for: .output("color3"))?.variant.name == "ND_convert_float_color3")
+        let separate: MXNodeMatch? = catalog.kind(named: "separate3")?.match(for: .output("float"))
+        #expect(separate?.variant.name == "ND_separate3_color3" && separate?.port == "outr")
+        #expect(catalog.kind(named: "open_pbr_surface")?.match(for: .output("color3")) == nil)
+    }
+
+    @Test("Search with a wire lists only the nodes that can take it")
+    func filteredSearch() throws {
+        let catalog = try catalog()
+        let forShader: [MXNodeMatch] = catalog.search("", for: .input("surfaceshader"))
+        #expect(forShader.map(\.kind.node).contains("surfacematerial"))
+        #expect(!forShader.map(\.kind.node).contains("multiply"))
+        #expect(catalog.search("mult", for: .input("float")).first?.variant.name == "ND_multiply_float")
+        #expect(catalog.search("mult", for: nil).first?.variant.name == "ND_multiply_color3")
+    }
+}
