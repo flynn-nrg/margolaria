@@ -14,13 +14,21 @@
 // expands a node; which nodes are expanded is view state, kept here by
 // path, not saved in the document.
 //
+// Adding nodes (M2e): drop one from the Library tab onto the canvas, or
+// press Tab for a search popover under the pointer, or double-click one
+// in the library to add it in the middle. The new node is placed where it
+// was asked for and selected; like a move, adding saves the positions of
+// nodes placed by auto-layout, so they stay where they are. An empty
+// level shows the canvas, so a document can be built from nothing.
+//
 // Navigation: double-click a nodegraph to open it; U, or a breadcrumb, to go
 // back up. The sidebar opens levels and selects nodes through `level` and
 // `focus` (see ContentView).
 //
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
-// holding view state, closures capturing a binding.
+// holding view state, closures capturing a binding, `.dropDestination`,
+// `.popover` anchored to a point, `.allowsHitTesting`.
 
 import GraphKit
 import MXKit
@@ -66,17 +74,65 @@ struct GraphPanel: View {
     /// Why the level couldn't be shown, if it couldn't.
     @State private var failure: String? = nil
 
+    /// A node to add in the middle of the canvas (a nodedef's name), from
+    /// the Library tab. Cleared once added.
+    @Binding var nodeToAdd: String?
+
     /// The nodes showing all their inputs, by path.
     @State private var expandedPaths: Set<String> = []
+
+    /// Where the node search popover points (view coordinates), while it
+    /// is open (Tab).
+    @State private var searchPoint: CGPoint? = nil
+
+    /// A node to select once the level has been rebuilt: one just added.
+    @State private var pendingSelection: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
             BreadcrumbBar(path: $levelPath)
             Divider()
-            if let level, !level.graph.model.nodes.isEmpty {
+            if let level {
                 LayerGraphRepresentable(controller: level.controller, thumbnail: nil)
                     // A new canvas view for each level.
                     .id(ObjectIdentifier(level))
+                    // SWIFT: `.overlay` draws a view on top of another, the
+                    // same size. `.allowsHitTesting(false)` lets clicks go
+                    // through it to the canvas.
+                    .overlay {
+                        if level.graph.model.nodes.isEmpty {
+                            Text("Drag nodes here from the Library, or press Tab to add one.")
+                                .foregroundStyle(.secondary)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    // SWIFT: `.dropDestination(for:)` accepts drops of a
+                    // Transferable type; `location` is where, in this view's
+                    // coordinates (y down, like the canvas's). Returning
+                    // true tells the drag source the drop was taken.
+                    .dropDestination(for: NodeDefinitionDrag.self) { items, location in
+                        guard let item = items.first else {
+                            return false
+                        }
+                        addNode(item.nodeDef, atView: location, in: level)
+                        return true
+                    }
+                    // The node search, pointing at where the node will go.
+                    //
+                    // SWIFT: `attachmentAnchor: .rect(.rect(r))` anchors the
+                    // popover to a rectangle in this view, rather than to
+                    // the whole view; here a 1-point one at the pointer.
+                    .popover(isPresented: isSearching,
+                             attachmentAnchor: .rect(.rect(CGRect(origin: searchPoint ?? .zero,
+                                                                  size: CGSize(width: 1, height: 1)))),
+                             arrowEdge: .bottom) {
+                        NodeSearchPopup(catalog: document.catalog) { kind in
+                            if let point = searchPoint {
+                                addNode(kind.defaultVariant.name, atView: point, in: level)
+                            }
+                            searchPoint = nil
+                        }
+                    }
             } else {
                 // SWIFT: `ContentUnavailableView` is the standard "nothing to
                 // show here" placeholder: an icon, a title, a description.
@@ -105,6 +161,19 @@ struct GraphPanel: View {
         }
         .onChange(of: focus) {
             applyFocus()
+        }
+        // A node from the Library tab, added in the middle of the canvas.
+        .onChange(of: nodeToAdd) {
+            guard let nodeDef = nodeToAdd else {
+                return
+            }
+            nodeToAdd = nil
+            guard let level else {
+                NSSound.beep()
+                return
+            }
+            let size: CGSize = level.controller.viewSize
+            addNode(nodeDef, atView: CGPoint(x: size.width / 2, y: size.height / 2), in: level)
         }
         // SWIFT: Reading `level?.controller.selection` here, in `body`, makes
         // SwiftUI observe it (the controller is `@Observable`), so this runs
@@ -182,6 +251,9 @@ struct GraphPanel: View {
                 try newLevel.graph.disconnect(inputs, in: content)
             }
         }
+        newLevel.controller.onRequestNodeSearch = { point in
+            searchPoint = point
+        }
         newLevel.controller.onToggleInputs = { [weak newLevel] id in
             guard let newLevel else {
                 return
@@ -203,9 +275,53 @@ struct GraphPanel: View {
         } else {
             newLevel.controller.frame(.all)
         }
+        if let path = pendingSelection, let index = graph.nodeIndex(forPath: path) {
+            newLevel.controller.selection = [index]
+        }
+        pendingSelection = nil
         level = newLevel
         failure = nil
         applyFocus()
+    }
+
+    /// Whether the node search is open, as a binding for `.popover`:
+    /// closing it (Escape, a click elsewhere) clears `searchPoint`.
+    private var isSearching: Binding<Bool> {
+        Binding {
+            searchPoint != nil
+        } set: { isOpen in
+            if !isOpen {
+                searchPoint = nil
+            }
+        }
+    }
+
+    /// Adds a node of the nodedef `nodeDef` with its header centred at
+    /// `point` (view coordinates), as one undo step, and selects it.
+    private func addNode(_ nodeDef: String, atView point: CGPoint, in level: GraphLevel) {
+        let position: CGPoint = DocumentGraph.units(fromPoints: level.controller.newNodePosition(atView: point))
+        let positions: [String: CGPoint] = autoLayoutPositions(in: level)
+        let parent: String = levelPath
+        let name: String = document.catalog.definition(named: nodeDef)?.node ?? nodeDef
+        document.edit("Add \(name)") { content in
+            for (path, saved) in positions {
+                try content.setPosition(saved, of: path)
+            }
+            let path: String = try content.addNode(nodeDef: nodeDef, in: parent)
+            try content.setPosition(position, of: path)
+            pendingSelection = path
+        }
+    }
+
+    /// The positions auto-layout gave the level's nodes that have none in
+    /// the document, in MaterialX units, by path. Saved with the first
+    /// move or addition, so that later edits don't rearrange them.
+    private func autoLayoutPositions(in level: GraphLevel) -> [String: CGPoint] {
+        var positions: [String: CGPoint] = [:]
+        for node in level.controller.model.nodes where !node.isLocked && !level.graph.positioned.contains(node.id) {
+            positions[level.graph.elementPaths[node.id]] = DocumentGraph.units(fromPoints: node.position)
+        }
+        return positions
     }
 
     /// Saves moved nodes' positions in the document, as one "Move" step.
@@ -215,12 +331,9 @@ struct GraphPanel: View {
     /// could rearrange them after the next edit, around the moved ones.
     private func saveMove(of moved: [Int: CGPoint], in level: GraphLevel) {
         let model: GraphModel = level.controller.model
-        var positions: [String: CGPoint] = [:]
-        for node in model.nodes where !node.isLocked {
-            let isMoved: Bool = moved[node.id] != nil
-            if isMoved || !level.graph.positioned.contains(node.id) {
-                positions[level.graph.elementPaths[node.id]] = DocumentGraph.units(fromPoints: node.position)
-            }
+        var positions: [String: CGPoint] = autoLayoutPositions(in: level)
+        for id in moved.keys where !model.nodes[id].isLocked {
+            positions[level.graph.elementPaths[id]] = DocumentGraph.units(fromPoints: model.nodes[id].position)
         }
         document.edit(moved.count == 1 ? "Move" : "Move \(moved.count) Nodes") { content in
             for (path, position) in positions {
@@ -276,7 +389,7 @@ private struct BreadcrumbBar: View {
                 crumb(parts[i], target: parts[0...i].joined(separator: "/"))
             }
             Spacer()
-            Text("Drag between pins to connect · ⌥-drag cuts wires · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

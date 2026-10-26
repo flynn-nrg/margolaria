@@ -210,6 +210,35 @@ struct Issue {
     std::string message;
 };
 
+/// One input or output of a nodedef, for the node library (M2e).
+struct NodeDefPort {
+    std::string name;
+    /// The MaterialX type: "float", "color3", ...
+    std::string type;
+    /// `uniform="true"`: takes a value, not a node's output.
+    bool isUniform = false;
+};
+
+/// One node definition, as the node library lists it (M2e): enough to
+/// group, search and describe it, and to tell its type variants apart.
+struct NodeDefSummary {
+    /// The nodedef's name: "ND_multiply_color3FA".
+    std::string name;
+    /// The category of the nodes it defines: "multiply".
+    std::string node;
+    /// The output type: "color3", or "multioutput" for several outputs.
+    std::string type;
+    /// `nodegroup`: "math", "texture2d", "pbr", ... Empty when not set.
+    std::string nodeGroup;
+    /// `doc`: what the node does. Often empty.
+    std::string doc;
+    /// True for a nodedef in the document itself (or a file it includes),
+    /// rather than the data libraries.
+    bool isFromDocument = false;
+    std::vector<NodeDefPort> inputs;
+    std::vector<NodeDefPort> outputs;
+};
+
 /// The MaterialX standard data libraries: stdlib, pbrlib, bxdf and the rest.
 /// These hold the node definitions (nodedefs) that documents refer to. They
 /// are loaded once and shared by every open document.
@@ -309,6 +338,11 @@ public:
     /// at that path.
     bool graph(const std::string& path, GraphInfo& graph, std::string& errorMessage) const;
 
+    /// Every nodedef a node can be added from: the document's own, then
+    /// the data library's, each name once. Superseded versions (a
+    /// `version` that isn't the `isdefaultversion` one) are left out.
+    std::vector<NodeDefSummary> nodeDefinitions() const;
+
     /// Every nodegraph in the document, in file order, at any depth.
     std::vector<ElementSummary> nodeGraphs() const;
 
@@ -360,9 +394,19 @@ public:
     /// Adds a node defined by the nodedef `nodeDefName` (such as
     /// "ND_multiply_float") to the graph at `parentPath` ("" for the
     /// document). The name is `nameHint`, made valid and unique. Sets
-    /// `newPath` to the new node's path.
+    /// `newPath` to the new node's path. The node records its nodedef
+    /// (`nodedef="..."`), as MaterialX's addNodeInstance does.
     bool addNode(const std::string& parentPath, const std::string& nodeDefName, const std::string& nameHint,
                  std::string& newPath, std::string& errorMessage);
+
+    /// Changes the node at `path` to another type variant of the same
+    /// node, the nodedef `nodeDefName` ("ND_multiply_float" to
+    /// "ND_multiply_color3"). Inputs the new nodedef has with the same
+    /// type keep their values and connections; the others are removed.
+    /// Connections from the node's outputs stay where the types still
+    /// match, and are disconnected elsewhere. The node records the nodedef
+    /// (`nodedef="..."`), so MaterialX doesn't match it to another variant.
+    bool changeNodeDef(const std::string& path, const std::string& nodeDefName, std::string& errorMessage);
 
     /// Removes the node or nodegraph at `path`, and disconnects everything
     /// that was connected to it.

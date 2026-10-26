@@ -94,5 +94,25 @@
 			</dict>
 		</dict>
 	</array>
+
+	<!--
+	  A type of our own, which we do own, so it is "exported": a node
+	  dragged from the Library tab to the canvas (M2e, LibraryPanel.swift).
+	  Only Margolaria reads it; declaring it keeps the drag from being
+	  offered to other apps as text.
+	-->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>eu.emerald-isle.margolaria.nodedef</string>
+			<key>UTTypeDescription</key>
+			<string>MaterialX Node Definition</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

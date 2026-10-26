@@ -172,4 +172,19 @@ struct CanvasKeyTests {
         view.keyDown(with: key("a"))
         #expect(controller.zoom < selectionZoom)
     }
+
+    @Test("A new node goes with its header centred on the point asked for")
+    func newNodePosition() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 5))
+        controller.zoom = 2
+        controller.offset = CGPoint(x: 100, y: 50)
+        let position: CGPoint = controller.newNodePosition(atView: CGPoint(x: 300, y: 250))
+        // View (300, 250) is graph (100, 100) at this zoom and offset.
+        #expect(position == CGPoint(x: 100 - GraphLayout.nodeWidth / 2, y: 100 - GraphLayout.headerHeight / 2))
+        // So the point is in the middle of the new node's header.
+        var node: GraphNode = controller.model.nodes[0]
+        node.position = position
+        let frame: CGRect = GraphLayout.frame(of: node)
+        #expect(frame.midX == 100 && frame.minY + GraphLayout.headerHeight / 2 == 100)
+    }
 }

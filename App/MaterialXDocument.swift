@@ -87,6 +87,17 @@ final class MaterialXDocument: NSDocument {
     /// (see `libraryLoaded`).
     private(set) var issues: [MXIssue] = []
 
+    /// The nodes this document can add (M2e): the data libraries' and the
+    /// document's own nodedefs, for the Library tab, the canvas's node
+    /// search and the inspector's Type menu.
+    private(set) var catalog: MXNodeCatalog = MXNodeCatalog(definitions: [])
+
+    /// The names of the document's own nodedefs when `catalog` was built.
+    /// The catalog is rebuilt only when they change, not after every edit:
+    /// building it reads all ~800 nodedefs, and a slider drag edits many
+    /// times a second.
+    @ObservationIgnored private var catalogKey: [String]? = nil
+
     /// False if the MaterialX data libraries failed to load. Then nothing can
     /// be validated, and the UI says so instead of claiming the document is valid.
     private(set) var libraryLoaded: Bool = false
@@ -321,6 +332,11 @@ final class MaterialXDocument: NSDocument {
         }
         content = document
         elements = document.topLevelElements
+        let ownNodeDefs: [String] = elements.filter { $0.category == "nodedef" }.map(\.name)
+        if ownNodeDefs != catalogKey {
+            catalog = MXNodeCatalog(document: document)
+            catalogKey = ownNodeDefs
+        }
         // If writing fails, show the error text in place of the XML.
         // SWIFT: `(try? x) ?? y`: `try?` turns a thrown error into `nil`, and
         // `??` ("nil-coalescing") substitutes `y` when the left side is nil.

@@ -1,7 +1,7 @@
 // ContentView.swift
 //
 // The document window: a sidebar listing the document's top-level
-// elements, the graph canvas (or the XML) in the main area, the issue count
+// elements (or, in its Library tab, the nodes that can be added), the graph canvas (or the XML) in the main area, the issue count
 // in the toolbar and library information along the bottom.
 //
 // The layout of docs/PLAN.md §4.1: the canvas with the bottom panel (XML,
@@ -22,6 +22,14 @@ enum ViewMode: String, CaseIterable, Identifiable {
     case graph = "Graph"
     case split = "Split"
     case text = "Text"
+
+    var id: String { rawValue }
+}
+
+/// What the sidebar shows: the document's elements, or the node library (M2e).
+enum SidebarTab: String, CaseIterable, Identifiable {
+    case document = "Document"
+    case library = "Library"
 
     var id: String { rawValue }
 }
@@ -71,6 +79,13 @@ struct ContentView: View {
     /// The material shown in the viewport (its MaterialX name).
     @State private var previewMaterial: String? = nil
 
+    /// The sidebar's tab.
+    @State private var sidebarTab: SidebarTab = .document
+
+    /// A node to add in the middle of the canvas (its nodedef's name),
+    /// from the Library tab; GraphPanel adds it and clears this.
+    @State private var nodeToAdd: String? = nil
+
     /// Whether the viewport is shown, at the top of the right-hand column.
     @State private var showsViewport: Bool = true
 
@@ -84,8 +99,30 @@ struct ContentView: View {
             // the `@State` storage. The List writes the user's selection into
             // it. Writing the property name without `$` reads the value; with
             // `$`, you pass the storage itself.
-            List(document.elements, selection: $selection) { element in
-                ElementRow(element: element)
+            VStack(spacing: 0) {
+                Picker("Sidebar", selection: $sidebarTab) {
+                    ForEach(SidebarTab.allCases) { tab in
+                        Text(tab.rawValue).tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .padding(8)
+                // SWIFT: A `switch` in a view body, like `if`: each case
+                // is one possible view.
+                switch sidebarTab {
+                case .document:
+                    List(document.elements, selection: $selection) { element in
+                        ElementRow(element: element)
+                    }
+                case .library:
+                    LibraryPanel(catalog: document.catalog) { definition in
+                        if viewMode == .text {
+                            viewMode = .split
+                        }
+                        nodeToAdd = definition.name
+                    }
+                }
             }
             // SWIFT: Calls like `.navigationSplitViewColumnWidth(...)` are
             // *view modifiers*. Each returns a new view that wraps the old one
@@ -100,7 +137,7 @@ struct ContentView: View {
                 VSplitView {
                     if viewMode != .text {
                         GraphPanel(document: document, levelPath: $graphPath, focus: $focus,
-                                   selectedPath: $canvasSelection)
+                                   selectedPath: $canvasSelection, nodeToAdd: $nodeToAdd)
                             .frame(minHeight: 200, maxHeight: .infinity)
                     }
                     if viewMode != .graph {
