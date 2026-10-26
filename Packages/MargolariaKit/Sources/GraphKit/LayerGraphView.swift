@@ -5,15 +5,21 @@
 //   root layer (background)
 //    └─ content layer          transform = pan + zoom; everything below is in graph coordinates
 //        ├─ wires              one CAShapeLayer with every wire's curve
+//        ├─ cut wires          the wires an ⌥-drag will cut, highlighted
 //        ├─ node 0 … node N    one layer per node, drawn once with Core Graphics
+//        │   ├─ dim            covers the rows a dragged wire can't connect to
 //        │   └─ selection      outline, hidden unless selected
+//        ├─ dragged wire       the wire being dragged (M2d), over the nodes
+//        ├─ target             a ring or outline where it would connect
+//        ├─ cut line           the ⌥-drag line
 //        └─ marquee            CAShapeLayer
 //
 // Panning and zooming change one transform; the window server composites the
 // cached node images on the GPU, with no redrawing. Node images are redrawn
 // only when the zoom crosses a resolution step (so text stays sharp) or a
 // level-of-detail threshold, and then only for nodes on or near the screen;
-// wires are rebuilt only when nodes move.
+// wires are rebuilt only when nodes move. Dragging a wire changes only the
+// small layers above, and the dim layers' paths: no node is redrawn.
 //
 // Introduces (SWIFT): subclassing `CALayer` and overriding `draw(in:)`,
 // `withObservationTracking`, CoreText from Swift, `CATransaction`,
@@ -30,6 +36,10 @@ public final class LayerGraphView: GraphEventView {
     private let thumbnail: CGImage?
     private let contentLayer = CALayer()
     private let wiresLayer = CAShapeLayer()
+    private let cutWiresLayer = CAShapeLayer()
+    private let draggedWireLayer = CAShapeLayer()
+    private let targetLayer = CAShapeLayer()
+    private let cutLineLayer = CAShapeLayer()
     private let marqueeLayer = CAShapeLayer()
     private var nodeLayers: [NodeLayer] = []
 
@@ -38,7 +48,9 @@ public final class LayerGraphView: GraphEventView {
     /// The part of the graph that was on screen at the last update.
     private var drawnVisible: CGRect = .null
     private var drawnRevision: Int = -1
+    private var drawnHiddenWires: Set<GraphWire> = []
     private var drawnSelection: Set<Int> = []
+    private var drawnCandidates: WireCandidates? = nil
 
     public init(controller: GraphCanvasController, thumbnail: CGImage?) {
         self.thumbnail = thumbnail
@@ -62,11 +74,29 @@ public final class LayerGraphView: GraphEventView {
         wiresLayer.lineWidth = 2
         contentLayer.addSublayer(wiresLayer)
 
+        cutWiresLayer.fillColor = nil
+        cutWiresLayer.strokeColor = Self.cgColor(GraphPalette.cut)
+        cutWiresLayer.lineWidth = 3
+        contentLayer.addSublayer(cutWiresLayer)
+
         for node in controller.model.nodes {
             let nodeLayer = NodeLayer(node: node, thumbnail: thumbnail)
             nodeLayers.append(nodeLayer)
             contentLayer.addSublayer(nodeLayer)
         }
+
+        draggedWireLayer.fillColor = nil
+        draggedWireLayer.lineWidth = 2
+        contentLayer.addSublayer(draggedWireLayer)
+
+        targetLayer.fillColor = nil
+        targetLayer.strokeColor = Self.cgColor(GraphPalette.selection)
+        targetLayer.lineWidth = 2
+        contentLayer.addSublayer(targetLayer)
+
+        cutLineLayer.fillColor = nil
+        cutLineLayer.strokeColor = Self.cgColor(GraphPalette.cut)
+        contentLayer.addSublayer(cutLineLayer)
 
         marqueeLayer.fillColor = Self.cgColor(GraphPalette.selection, alpha: 0.15)
         marqueeLayer.strokeColor = Self.cgColor(GraphPalette.selection)
@@ -111,6 +141,12 @@ public final class LayerGraphView: GraphEventView {
             _ = controller.selection
             _ = controller.marquee
             _ = controller.positionsRevision
+            _ = controller.wirePreview
+            _ = controller.wireCandidates
+            _ = controller.wireTarget
+            _ = controller.hiddenWires
+            _ = controller.cutLine
+            _ = controller.cutWires
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.update()
@@ -135,14 +171,17 @@ public final class LayerGraphView: GraphEventView {
         contentLayer.setAffineTransform(CGAffineTransform(translationX: offset.x, y: offset.y).scaledBy(x: zoom, y: zoom))
         marqueeLayer.lineWidth = 1 / zoom
 
-        // Node positions and wires, only when nodes have moved.
-        if controller.positionsRevision != drawnRevision {
+        // Node positions and wires, only when nodes have moved, or a wire
+        // was picked up or put back.
+        if controller.positionsRevision != drawnRevision || controller.hiddenWires != drawnHiddenWires {
             drawnRevision = controller.positionsRevision
+            drawnHiddenWires = controller.hiddenWires
             for (index, node) in controller.model.nodes.enumerated() {
                 nodeLayers[index].frame = NodeLayer.layerFrame(for: node)
             }
-            wiresLayer.path = GraphLayout.wiresPath(for: controller.model)
+            wiresLayer.path = GraphLayout.wiresPath(for: controller.model, excluding: drawnHiddenWires)
         }
+        updateWiring()
 
         // Node images: redraw the visible nodes whose image was drawn at
         // another detail level. Off-screen nodes keep their old image until
@@ -182,6 +221,68 @@ public final class LayerGraphView: GraphEventView {
         }
     }
 
+    /// The dragged wire, its target, the cut line, and dimming (M2d).
+    private func updateWiring() {
+        let model: GraphModel = controller.model
+        if let preview = controller.wirePreview {
+            let path = CGMutablePath()
+            GraphLayout.addWire(from: preview.start, to: preview.end, to: path)
+            draggedWireLayer.path = path
+            draggedWireLayer.strokeColor = Self.cgColor(GraphPalette.pin(preview.type))
+        } else {
+            draggedWireLayer.path = nil
+        }
+
+        // SWIFT: `wireTarget` is optional; `.input(let port)?` matches when
+        // it holds `.input`, `nil` when it holds nothing.
+        switch controller.wireTarget {
+        case .input(let port)?:
+            targetLayer.path = Self.ring(around: GraphLayout.inputPoint(of: model.nodes[port.node], index: port.index))
+        case .output(let port)?:
+            targetLayer.path = Self.ring(around: GraphLayout.outputPoint(of: model.nodes[port.node], index: port.index))
+        case .node(let id)?:
+            let frame: CGRect = GraphLayout.frame(of: model.nodes[id]).insetBy(dx: -3, dy: -3)
+            targetLayer.path = CGPath(roundedRect: frame, cornerWidth: GraphLayout.cornerRadius + 3,
+                                      cornerHeight: GraphLayout.cornerRadius + 3, transform: nil)
+        case nil:
+            targetLayer.path = nil
+        }
+
+        if let cut = controller.cutLine {
+            let path = CGMutablePath()
+            path.move(to: cut.start)
+            path.addLine(to: cut.end)
+            cutLineLayer.path = path
+            // A constant width and dash on screen, whatever the zoom.
+            let zoom: CGFloat = controller.zoom
+            cutLineLayer.lineWidth = 1.5 / zoom
+            // SWIFT: Core Animation wants an array of NSNumber; Swift
+            // converts the CGFloat literals with `as NSNumber`.
+            cutLineLayer.lineDashPattern = [6 / zoom as NSNumber, 4 / zoom as NSNumber]
+        } else {
+            cutLineLayer.path = nil
+        }
+        let cutPath = CGMutablePath()
+        for wire in controller.cutWires {
+            GraphLayout.addWire(wire, in: model, to: cutPath)
+        }
+        cutWiresLayer.path = cutPath
+
+        let candidates: WireCandidates? = controller.wireCandidates
+        if candidates != drawnCandidates {
+            drawnCandidates = candidates
+            for nodeLayer in nodeLayers {
+                nodeLayer.dim(except: candidates)
+            }
+        }
+    }
+
+    /// A circle just outside a pin, in graph coordinates.
+    private static func ring(around point: CGPoint) -> CGPath {
+        let r: CGFloat = GraphLayout.portRadius + 3
+        return CGPath(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r), transform: nil)
+    }
+
     /// The detail level for a zoom: the image scale (rounded up to a power of
     /// two, so zooming redraws at most once per doubling) and which text to
     /// draw (the same thresholds as the Canvas renderer).
@@ -218,6 +319,7 @@ final class NodeLayer: CALayer {
     /// The detail the current image was drawn at. Starts at scale 0, which
     /// no real detail has, so every layer is drawn when it first comes into view.
     var detail = Detail(scale: 0, showsTitle: false, showsPortLabels: false)
+    private let dimLayer = CAShapeLayer()
     private let selectionLayer = CAShapeLayer()
 
     var isSelected: Bool = false {
@@ -239,6 +341,8 @@ final class NodeLayer: CALayer {
         frame = Self.layerFrame(for: node)
         // The node's own coordinates: (0, 0) is its top-left corner.
         let local = CGRect(x: Self.margin, y: 0, width: GraphLayout.nodeWidth, height: frame.height)
+        dimLayer.fillColor = LayerGraphView.cgColor(GraphPalette.background, alpha: GraphPalette.dimOpacity)
+        addSublayer(dimLayer)
         selectionLayer.path = GraphLayout.outlinePath(for: local)
         selectionLayer.fillColor = nil
         selectionLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.selection)
@@ -247,6 +351,38 @@ final class NodeLayer: CALayer {
         addSublayer(selectionLayer)
         // Don't fade contents in and out when they are redrawn.
         actions = ["contents": NSNull()]
+    }
+
+    /// Dims the rows a dragged wire can't connect to: with `candidates`
+    /// looking for inputs, every input row not in it (and the "+N more" row
+    /// unless a hidden input fits); looking for outputs, every output row
+    /// not in it. Nil clears the dimming.
+    func dim(except candidates: WireCandidates?) {
+        guard let candidates else {
+            dimLayer.path = nil
+            return
+        }
+        // The node's own coordinates, as in draw(in:).
+        var local: GraphNode = node
+        local.position = CGPoint(x: Self.margin, y: 0)
+        let path = CGMutablePath()
+        // Widen each row to cover its pin, which sticks out of the node.
+        let pin: CGFloat = Self.margin
+        if candidates.seeksOutputs {
+            for index in local.outputs.indices where !candidates.outputs.contains(PortReference(node: node.id, index: index)) {
+                let row: CGRect = GraphLayout.outputRowFrame(of: local, index: index)
+                path.addRect(CGRect(x: row.minX, y: row.minY, width: row.width + pin, height: row.height))
+            }
+        } else {
+            for index in local.inputs.indices where !candidates.inputs.contains(PortReference(node: node.id, index: index)) {
+                let row: CGRect = GraphLayout.inputRowFrame(of: local, index: index)
+                path.addRect(CGRect(x: row.minX - pin, y: row.minY, width: row.width + pin, height: row.height))
+            }
+            if let row = GraphLayout.inputToggleRowFrame(of: local), candidates.hiddenInputs[node.id] == nil {
+                path.addRect(row)
+            }
+        }
+        dimLayer.path = path
     }
 
     /// Core Animation copies layers (for its presentation tree) with this
@@ -340,11 +476,16 @@ final class NodeLayer: CALayer {
                                   maxWidth: frame.width - 18 - nameWidth - 10, in: context)
                 }
             }
-            if local.collapsedInputCount > 0 {
+            if local.hasInputToggle {
                 let count: Int = local.collapsedInputCount
-                Self.drawText(count == 1 ? "+1 more input" : "+\(count) more inputs",
-                              font: Self.labelFont, color: GraphPalette.secondaryText,
-                              at: CGPoint(x: frame.minX + 10, y: GraphLayout.collapsedRowCentre(of: local)),
+                let text: String
+                if local.isExpanded {
+                    text = "Fewer inputs"
+                } else {
+                    text = count == 1 ? "+1 more input" : "+\(count) more inputs"
+                }
+                Self.drawText(text, font: Self.labelFont, color: GraphPalette.secondaryText,
+                              at: CGPoint(x: frame.minX + 10, y: GraphLayout.inputToggleRowCentre(of: local)),
                               alignRight: false, maxWidth: frame.width - 20, in: context)
             }
         }

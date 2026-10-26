@@ -8,6 +8,10 @@
 // canvas (GraphEventView), because SwiftUI on macOS has no scroll-wheel or
 // pinch events of the precision a canvas needs.
 //
+// The app uses the Core Animation renderer; this one stays for the M0d
+// comparison benchmark. Of M2d's wiring, it draws the dragged wire and the
+// cut line, but doesn't dim or highlight.
+//
 // Introduces (SWIFT): `Canvas` and `GraphicsContext`, `Color(red:green:blue:)`,
 // `Path(_ cgPath:)`, reading `@Observable` properties in `body`, `.overlay`.
 
@@ -36,6 +40,8 @@ public struct CanvasGraphView: View {
         let offset: CGPoint = controller.offset
         let selection: Set<Int> = controller.selection
         let marquee: CGRect? = controller.marquee
+        let wirePreview: WirePreview? = controller.wirePreview
+        let cutLine: CutLine? = controller.cutLine
         let thumbnailImage: Image? = thumbnail.map { Image(decorative: $0, scale: 1) }
 
         // SWIFT: `Canvas { context, size in ... }` calls the closure to draw.
@@ -58,6 +64,17 @@ public struct CanvasGraphView: View {
                 }
                 Self.drawNode(node, frame: frame, selected: selection.contains(node.id),
                               zoom: zoom, thumbnail: thumbnailImage, in: &context)
+            }
+            if let wirePreview {
+                let path = CGMutablePath()
+                GraphLayout.addWire(from: wirePreview.start, to: wirePreview.end, to: path)
+                context.stroke(Path(path), with: .color(Self.color(GraphPalette.pin(wirePreview.type))), lineWidth: 2)
+            }
+            if let cutLine {
+                var path = Path()
+                path.move(to: cutLine.start)
+                path.addLine(to: cutLine.end)
+                context.stroke(path, with: .color(Self.color(GraphPalette.cut)), lineWidth: 1.5 / zoom)
             }
             if let marquee {
                 let path = Path(marquee)

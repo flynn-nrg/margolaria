@@ -13,7 +13,8 @@
 //   │   └──────────────┘   │
 //   │               out ●  │  one row per output
 //   │ ● in    0.5          │  one row per input (value if unconnected)
-//   │   +3 more inputs     │  if some inputs are collapsed
+//   │   +3 more inputs     │  if some inputs are collapsed ("Fewer
+//   │                      │  inputs" once expanded)
 //   └──────────────────────┘
 //
 // Introduces (SWIFT): `enum` as a namespace for constants and static
@@ -50,12 +51,32 @@ public enum GraphLayout {
 
     /// How many rows a node has: outputs, inputs, and the "+N more" row.
     static func rowCount(of node: GraphNode) -> Int {
-        node.outputs.count + node.inputs.count + (node.collapsedInputCount > 0 ? 1 : 0)
+        node.outputs.count + node.inputs.count + (node.hasInputToggle ? 1 : 0)
     }
 
     /// The vertical centre of the "+N more inputs" row (the last row).
-    public static func collapsedRowCentre(of node: GraphNode) -> CGFloat {
+    public static func inputToggleRowCentre(of node: GraphNode) -> CGFloat {
         rowCentre(of: node, row: node.outputs.count + node.inputs.count)
+    }
+
+    /// The full width of output `index`'s row, in graph coordinates.
+    public static func outputRowFrame(of node: GraphNode, index: Int) -> CGRect {
+        rowFrame(of: node, row: index)
+    }
+
+    /// The full width of input `index`'s row.
+    public static func inputRowFrame(of node: GraphNode, index: Int) -> CGRect {
+        rowFrame(of: node, row: node.outputs.count + index)
+    }
+
+    /// The "+N more inputs" row, if the node has one.
+    public static func inputToggleRowFrame(of node: GraphNode) -> CGRect? {
+        node.hasInputToggle ? rowFrame(of: node, row: node.outputs.count + node.inputs.count) : nil
+    }
+
+    static func rowFrame(of node: GraphNode, row: Int) -> CGRect {
+        CGRect(x: node.position.x, y: rowCentre(of: node, row: row) - rowHeight / 2,
+               width: nodeWidth, height: rowHeight)
     }
 
     /// The vertical centre of row `row` (outputs first, then inputs).
@@ -127,15 +148,63 @@ public enum GraphLayout {
     /// Below this zoom, port names and values are not drawn.
     public static let portLabelMinimumZoom: CGFloat = 0.6
 
-    /// The path of every wire in `model`, in graph coordinates.
-    public static func wiresPath(for model: GraphModel) -> CGPath {
+    /// The path of every wire in `model`, in graph coordinates, except
+    /// those in `excluded` (a wire being dragged, or about to be cut).
+    public static func wiresPath(for model: GraphModel, excluding excluded: Set<GraphWire> = []) -> CGPath {
         let path = CGMutablePath()
-        for wire in model.wires {
-            let start: CGPoint = outputPoint(of: model.nodes[wire.from.node], index: wire.from.index)
-            let end: CGPoint = inputPoint(of: model.nodes[wire.to.node], index: wire.to.index)
-            addWire(from: start, to: end, to: path)
+        for wire in model.wires where !excluded.contains(wire) {
+            addWire(wire, in: model, to: path)
         }
         return path
+    }
+
+    /// Adds one wire of `model` to `path`.
+    public static func addWire(_ wire: GraphWire, in model: GraphModel, to path: CGMutablePath) {
+        let start: CGPoint = outputPoint(of: model.nodes[wire.from.node], index: wire.from.index)
+        let end: CGPoint = inputPoint(of: model.nodes[wire.to.node], index: wire.to.index)
+        addWire(from: start, to: end, to: path)
+    }
+
+    /// Points along a wire's curve, `count` segments' worth, for testing
+    /// what crosses it. Uses the same control points as ``addWire(from:to:to:)``.
+    public static func wirePoints(from start: CGPoint, to end: CGPoint, count: Int = 24) -> [CGPoint] {
+        let bend: CGFloat = max(40, abs(end.x - start.x) * 0.5)
+        let c1 = CGPoint(x: start.x + bend, y: start.y)
+        let c2 = CGPoint(x: end.x - bend, y: end.y)
+        // SWIFT: `(0...count).map` runs the closure for each integer in the
+        // closed range and collects the results: count + 1 points.
+        return (0...count).map { (step: Int) -> CGPoint in
+            // The cubic Bézier formula, B(t) = (1-t)³P0 + 3(1-t)²t C1 +
+            // 3(1-t)t² C2 + t³P1.
+            let t: CGFloat = CGFloat(step) / CGFloat(count)
+            let u: CGFloat = 1 - t
+            let a: CGFloat = u * u * u
+            let b: CGFloat = 3 * u * u * t
+            let c: CGFloat = 3 * u * t * t
+            let d: CGFloat = t * t * t
+            return CGPoint(x: a * start.x + b * c1.x + c * c2.x + d * end.x,
+                           y: a * start.y + b * c1.y + c * c2.y + d * end.y)
+        }
+    }
+
+    /// True if the segments p1–p2 and q1–q2 cross or touch. A segment of
+    /// zero length (a cut that hasn't moved yet) crosses nothing.
+    public static func segmentsIntersect(_ p1: CGPoint, _ p2: CGPoint, _ q1: CGPoint, _ q2: CGPoint) -> Bool {
+        guard p1 != p2, q1 != q2 else {
+            return false
+        }
+        // Each segment's ends must lie on opposite sides of the other's
+        // line (or on it: a cut through one of a curve's sample points
+        // touches both segments there). The sign of a 2D cross product
+        // says which side a point is on.
+        func side(_ a: CGPoint, _ b: CGPoint, _ p: CGPoint) -> CGFloat {
+            (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)
+        }
+        let d1: CGFloat = side(q1, q2, p1)
+        let d2: CGFloat = side(q1, q2, p2)
+        let d3: CGFloat = side(p1, p2, q1)
+        let d4: CGFloat = side(p1, p2, q2)
+        return d1 * d2 <= 0 && d3 * d4 <= 0
     }
 
     /// The bounding box of all nodes, or an empty rect for an empty graph.
@@ -157,6 +226,11 @@ public enum GraphPalette {
     public static let secondaryText: (CGFloat, CGFloat, CGFloat) = (0.6, 0.6, 0.63)
     public static let wire: (CGFloat, CGFloat, CGFloat) = (0.62, 0.62, 0.66)
     public static let selection: (CGFloat, CGFloat, CGFloat) = (0.25, 0.55, 1.0)
+    /// The ⌥-drag cut line, and the wires it will cut.
+    public static let cut: (CGFloat, CGFloat, CGFloat) = (0.95, 0.35, 0.3)
+    /// How strongly rows a dragged wire can't connect to are dimmed: the
+    /// opacity of the background colour laid over them.
+    public static let dimOpacity: CGFloat = 0.7
 
     /// Muted header colours by category.
     public static func header(_ category: NodeCategory) -> (CGFloat, CGFloat, CGFloat) {

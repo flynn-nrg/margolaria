@@ -115,7 +115,104 @@ struct MXEditTests {
         // An input with no value of its own goes back to its default.
         try document.disconnect(input: "in1", on: "NG/offset")
         #expect(try !input("in1", of: "NG/offset", in: document).isAuthored)
+
+        // MaterialX doesn't allow `interfacename` on an <output>.
+        #expect(throws: MXError.self) {
+            try document.connect(input: "", on: "NG/out", toInterface: "amount")
+        }
         #expect(document.validationIssues().isEmpty)
+    }
+
+    @Test("Uniform inputs take a graph's input, not a node's output")
+    func uniform() throws {
+        let document = try document()
+        let image: String = try document.addNode(nodeDef: "ND_image_color3", in: "NG")
+        try document.addNode(nodeDef: "ND_constant_integer", in: "NG", named: "mode")
+        // `frameoffset` is a uniform integer: the types match, but it can't
+        // read a node's output.
+        let error = #expect(throws: MXError.self) {
+            try document.connect(input: "frameoffset", on: image, to: "mode")
+        }
+        #expect(String(describing: error).contains("uniform"))
+    }
+
+    @Test("Removing an input never changes which nodedef a node matches")
+    func nodeDefVariants() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <constant name="c" type="float" />
+              <constant name="v" type="vector3" />
+              <multiply name="m" type="vector3">
+                <input name="in1" type="vector3" value="1, 1, 1" />
+                <input name="in2" type="float" nodename="c" />
+              </multiply>
+              <separate3 name="s" type="multioutput">
+                <input name="in" type="vector3" nodename="v" />
+              </separate3>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        func node(_ name: String) throws -> MXNode {
+            try #require(try document.graph().node(named: name))
+        }
+        #expect(try node("m").nodeDefName == "ND_multiply_vector3FA")
+        #expect(try node("s").outputs.map(\.name) == ["outx", "outy", "outz"])
+
+        // Without `in2`, MaterialX would match ND_multiply_vector3 (vector3
+        // in2); the input stays, at the FA variant's default.
+        try document.disconnect(input: "in2", on: "m")
+        #expect(try node("m").nodeDefName == "ND_multiply_vector3FA")
+        #expect(try node("m").inputs.first(where: { $0.name == "in2" })?.value == "1.0")
+        try document.resetInput("in2", on: "m")
+        #expect(try node("m").nodeDefName == "ND_multiply_vector3FA")
+        // ...but an input whose removal changes nothing still goes.
+        try document.resetInput("in1", on: "m")
+        #expect(try !(node("m").inputs.first(where: { $0.name == "in1" })?.isAuthored ?? true))
+
+        // separate3 keeps its vector3 outputs, and its input's place.
+        try document.disconnect(input: "in", on: "s")
+        #expect(try node("s").outputs.map(\.name) == ["outx", "outy", "outz"])
+        #expect(document.validationIssues().isEmpty)
+    }
+
+    @Test("Inside a nodegraph that implements a nodedef, the nodedef's inputs are the interface")
+    func functionalInterface() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodedef name="ND_test" node="test">
+                <input name="amount" type="float" value="0.5" />
+                <output name="out" type="float" />
+              </nodedef>
+              <nodegraph name="NG_test" nodedef="ND_test">
+                <multiply name="m" type="float" />
+                <output name="out" type="float" nodename="m" />
+              </nodegraph>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        try document.connect(input: "in1", on: "NG_test/m", toInterface: "amount")
+        let m: MXNode? = try document.graph(at: "NG_test").node(named: "m")
+        #expect(m?.inputs.first(where: { $0.name == "in1" })?.connection == .interface("amount"))
+    }
+
+    @Test("Disconnecting a nodegraph's own input keeps it")
+    func disconnectGraphInput() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <constant name="c" type="float" />
+              <nodegraph name="NG">
+                <input name="amount" type="float" nodename="c" />
+                <output name="out" type="float" interfacename="amount" />
+              </nodegraph>
+            </materialx>
+            """)
+        try document.disconnect(input: "amount", on: "NG")
+        let amount: MXPort = try #require(try document.graph().node(named: "NG")?.inputs.first)
+        #expect(amount.name == "amount")
+        #expect(amount.connection == nil)
     }
 
     @Test("Adding a node from a nodedef, with a unique name")
