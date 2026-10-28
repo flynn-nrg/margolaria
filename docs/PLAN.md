@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes) and M1 (viewer) done as of 2026-10-24; see `docs/spikes/` and `docs/milestones/`. M2 (editor) is in progress, planned in §8.1: M2a (edits, undo, save), M2b (inspector), M2c (live viewport), M2d (wiring) and M2e1 (node library) are done; M2e2 (building from nothing) is under review.
+Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is next.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -210,7 +210,7 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 | **M5: Pipeline** | USD/USDZ export, other Hydra delegates, shader export (MSL/GLSL/OSL), image I/O through OIIO | USDZ opens correctly in Reality Composer Pro / Quick Look |
 | **M6: Python** | Embedded interpreter, Console tab as a Python REPL, `margolaria` module (document, selection, commands, undo grouping), PyMaterialX and `pxr` on the shared document, startup scripts and user commands in the command palette, a Python CLI | A script can build a material and appear in the undo history as one step; the signed and notarized build still passes `spctl` |
 
-### 8.1 M2 plan (editor)
+### 8.1 M2 plan (editor, done; see `docs/milestones/M2-editor.md`)
 
 M2 is split into reviewable PRs, like M1 (M1a to M1d), each leaving the app working. The order puts the foundation first (edits, undo, saving), then what makes editing visible (the inspector and a live viewport), then the canvas gestures.
 
