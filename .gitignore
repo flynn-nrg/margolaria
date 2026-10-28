@@ -14,6 +14,8 @@ DerivedData/
 # apple/SwiftUsd, cloned and patched by scripts/fetch-swiftusd.sh. The patch
 # itself (Vendor/*.patch) is tracked.
 /Vendor/SwiftUsd/
+# OpenColorIO, built as an xcframework by scripts/build-ocio.sh.
+/Vendor/OpenColorIO/
 # MaterialX's example materials, fetched by scripts/fetch-materialx-examples.sh.
 /Vendor/MaterialX/
 
