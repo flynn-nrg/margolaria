@@ -58,6 +58,12 @@ enum MargolariaApp {
 /// SWIFT: AppKit's delegate protocols are Objective-C protocols, so the class
 /// must inherit from `NSObject` to conform. `NSApplicationDelegate` methods
 /// are all optional; we implement the few we need.
+///
+/// SWIFT: `@MainActor` on the class puts all of it on the main actor. The
+/// delegate methods already were (the protocol says so), but the
+/// notification method below is our own, and would otherwise be
+/// nonisolated, unable to touch windows without a warning.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Lets macOS restore open windows securely after a relaunch. Apple
     /// requires `true` for new apps.

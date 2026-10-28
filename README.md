@@ -5,10 +5,11 @@ See [docs/PLAN.md](docs/PLAN.md) for the project plan and [the interface mockup]
 
 ## Building
 
-Requires Xcode 27 and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
+Requires Xcode 27, [XcodeGen](https://github.com/yonaskolb/XcodeGen), CMake and Ninja (`brew install xcodegen cmake ninja`).
 
 ```sh
 scripts/fetch-swiftusd.sh     # once: clones apple/SwiftUsd into Vendor/ (about 1.4 GB) and patches it
+scripts/build-ocio.sh         # once: builds OpenColorIO as an xcframework in Vendor/ (about a minute)
 scripts/fetch-materialx-examples.sh  # once: MaterialX's example materials (52 MB), for tests and trying the app
 xcodegen                      # generates Margolaria.xcodeproj from project.yml
 open Margolaria.xcodeproj
@@ -30,6 +31,7 @@ All our code that uses OpenUSD and MaterialX is in one Swift package, `Packages/
 - **Add new modules as targets in MargolariaKit**, not as new packages.
 - **Prefer `xcodebuild test -scheme Margolaria`** with the same `-derivedDataPath` as your app builds: the tests then reuse the app's build. `swift test` in `Packages/MargolariaKit` works too, but keeps its own build in `Packages/MargolariaKit/.build`.
 - SwiftUsd comes from `Vendor/SwiftUsd`, patched (`Vendor/swiftusd-openusdcxx-product.patch`) to add a product without SwiftUsd's Swift overlay. We don't use the overlay, and compiling it took about 12 of the 13 minutes of a clean build. To upgrade SwiftUsd, change `SWIFTUSD_TAG` in `scripts/fetch-swiftusd.sh` and run it again.
+- OpenColorIO isn't in SwiftUsd, so `scripts/build-ocio.sh` builds it from source, with its own dependencies linked in statically. To upgrade it, change `OCIO_TAG` in the script and run it again.
 - **Your editor's indexer builds too.** SourceKit-LSP, the language server behind Swift support in editors other than Xcode, keeps its own full build in `Packages/MargolariaKit/.build/index-build`. While it runs, a clean build can take several times longer (6 minutes instead of 1.5 here).
 
 Measured on 2026-10-18:

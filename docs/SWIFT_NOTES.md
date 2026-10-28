@@ -19,6 +19,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `??` | Use a default if the left side is nil | `p ? *p : d` | `MaterialXDocument.swift` |
 | Tuples | Anonymous fixed group of values; elements can have labels | `std::tuple` | `SwatchGeometry.swift`, `MXCorpusTests.swift` |
 | `typealias` | A second name for a type | `typedef` / `using` | (was in `MaterialXFileDocument.swift`, removed in M1a) |
+| `SIMD3<T>` | A small fixed-size vector value: `a + b`, `a * 2`, `.x/.y/.z` work element by element | GLSL/Metal `double3`; `simd::double3` | `ColorConverter.swift` |
 | Computed properties | A property whose getter runs code, with no storage | ObjC `@property` with a custom getter | `MXError.swift` |
 | `static` / `static let` | Type members; `static let` is initialised lazily, exactly once, thread-safely | C++ static member; function-local static; `dispatch_once` | `MXLibrary.swift` (`bundled`) |
 | `Self` | "This type", inside its own declaration | — | `MXGraph.swift` (`Self.resolveFile`) |
@@ -123,6 +124,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `public private(set)` | On a stored property: readable everywhere, settable only inside the type | — | `MXDocument.swift` (`hasDataLibrary`) |
 | `public internal(set)`; `private` is per file | Readable everywhere, settable anywhere in the module. Swift's `private` means "this file", so an extension in another file can't use it | — | `MXDocument.swift` (`hasDataLibrary`) |
 | Swift packages | `Package.swift` is Swift code describing targets and dependencies | `Packages/MargolariaKit/Package.swift` |
+| `binaryTarget` | A prebuilt library (an xcframework) as a package target: linked, its headers on the include path, embedded by Xcode | `Packages/MargolariaKit/Package.swift` (OpenColorIO) |
 | `@_exported import` | Re-export another module to everyone who imports this one | An umbrella header | `Snapshot.swift` |
 | Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |
 | `private(set)` | Readable at the property's access level, writable only inside the type | A public getter with a private setter | `GraphCanvasController.swift` (`marquee`) |
@@ -197,6 +199,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | C++ interop mode | `.interoperabilityMode(.Cxx)` / `SWIFT_OBJC_INTEROP_MODE = objcxx`; every importer of a C++-using module needs it too | `Package.swift`, `Config/Base.xcconfig` |
 | `std.string` | `std::string` in Swift. Make one with `std.string(swiftString)`; convert back with `.swiftString` (our helper) | `CxxString.swift` |
 | `std::vector` | Imported as a Swift collection, so `for x in v` works | `MXDocument.swift` |
+| C++ template instances | Swift can't write `std::vector<float>` itself; give it a name with `using FloatVector = std::vector<float>;` in the header. Imported vectors can be made from a Swift array: `FloatVector([1, 2, 3])` | `ColorBridge.h`, `ColorConverter.swift` |
 | C++ classes are structs | Copying a Swift value copies the C++ object (copy constructor) | `MXBridge.h` |
 | `const` ↔ `mutating` | Non-const C++ methods are `mutating`, so they need a `var` | `MXDocument.swift` |
 | C++ exceptions | Can't be caught in Swift; one that escapes terminates the process. Catch them in C++. | `MXBridge.cpp` |

@@ -17,6 +17,7 @@
 // `NSOpenPanel`, `.onExitCommand`, structs of closures.
 
 import AppKit
+import ColorKit
 import MXKit
 import SwiftUI
 
@@ -294,8 +295,9 @@ struct EnumEditor: View {
 ///
 /// MaterialX stores colours as numbers in a colour space (`colorspace`,
 /// or the document's, usually lin_rec709: linear, Rec. 709 primaries). The
-/// colour well shows them in the matching Core Graphics colour space, so
-/// the swatch looks right for the common spaces; OCIO comes in M3.
+/// colour well shows them converted by OCIO (M3a), so the swatch is right
+/// whatever the space; picked colours are converted back before they are
+/// stored.
 struct ColorEditor: View {
     let input: MXPort
     let componentCount: Int
@@ -329,72 +331,83 @@ struct ColorEditor: View {
 }
 
 /// How a MaterialX colour space is shown in a colour well.
+///
+/// The well always works in Core Graphics' extended linear sRGB, which is
+/// lin_rec709 (Rec. 709 primaries, linear) with components outside 0–1
+/// allowed, as MaterialX values often have (HDR emission, out-of-gamut
+/// colours). OCIO converts between it and the input's space.
 struct ColorSpaceMapping {
-    /// The Core Graphics colour space with the same primaries and transfer.
-    let space: CGColorSpace
+    /// The colour well's space.
+    let space: CGColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
     /// What the inspector shows next to the well, such as "lin_rec709".
     let label: String
     /// The label's tooltip.
     let help: String
+    /// From the input's space to the well's; nil when nothing to do.
+    private let toWell: ColorConverter?
+    /// From the well's space back to the input's.
+    private let fromWell: ColorConverter?
+
+    /// The OCIO name of the well's space (an alias in the studio config).
+    static let wellSpaceName: String = "lin_rec709"
 
     /// Maps a MaterialX colour space name; nil means the document's working
-    /// space, taken to be lin_rec709.
-    ///
-    /// The "extended" spaces allow components outside 0–1, which MaterialX
-    /// values often have (HDR emission, out-of-gamut colours).
+    /// space, taken to be lin_rec709 as MaterialX does.
     init(materialX name: String?) {
-        let spaceName: CFString
-        switch name ?? "lin_rec709" {
-        case "lin_rec709":
-            spaceName = CGColorSpace.extendedLinearSRGB
-        case "srgb_texture":
-            spaceName = CGColorSpace.extendedSRGB
-        case "lin_displayp3":
-            spaceName = CGColorSpace.extendedLinearDisplayP3
-        case "srgb_displayp3":
-            spaceName = CGColorSpace.displayP3
-        case "acescg", "lin_ap1":
-            spaceName = CGColorSpace.acescgLinear
-        default:
-            // Spaces Core Graphics doesn't have (g22_ap1, adobergb, ...):
-            // shown as if linear Rec. 709, and the label says so.
-            spaceName = CGColorSpace.extendedLinearSRGB
-            label = "\(name ?? "") ≈"
-            help = "\(name ?? "This colour space") is shown approximately until colour management arrives (M3)"
-            // SWIFT: `!` force-unwraps: Core Graphics always has its named
-            // spaces, so `CGColorSpace(name:)` can't return nil for them.
-            space = CGColorSpace(name: spaceName)!
+        let spaceName: String = name ?? Self.wellSpaceName
+        // SWIFT: `try?` turns a thrown error into nil. Without colour
+        // management (OCIO failed to load), or for a space the config
+        // doesn't know, the numbers are shown as if lin_rec709, and the
+        // label says so.
+        guard let configuration = try? ColorConfiguration.studio.get(),
+              let colorSpace = configuration.colorSpace(named: spaceName),
+              let toWell = try? configuration.converter(from: spaceName, to: Self.wellSpaceName),
+              let fromWell = try? configuration.converter(from: Self.wellSpaceName, to: spaceName) else {
+            label = "\(spaceName) ?"
+            help = "\(spaceName) is not a colour space of the colour config; shown as if lin_rec709"
+            toWell = nil
+            fromWell = nil
             return
         }
-        space = CGColorSpace(name: spaceName)!
-        label = name ?? "lin_rec709"
-        help = name == nil ? "The document's working colour space" : "The input's colour space"
+        label = spaceName
+        let whose: String = name == nil ? "The document's working colour space" : "The input's colour space"
+        help = "\(whose): \(colorSpace.name) (\(configuration.name))"
+        self.toWell = toWell.isIdentity ? nil : toWell
+        self.fromWell = fromWell.isIdentity ? nil : fromWell
     }
 
-    /// A colour from MaterialX numbers in this space (alpha 1 for a color3).
+    /// A colour from MaterialX numbers in the input's space (alpha 1 for a
+    /// color3).
     func cgColor(_ numbers: [Double]) -> CGColor {
-        var components: [CGFloat] = numbers.prefix(4).map { CGFloat($0) }
-        while components.count < 3 {
-            components.append(0)
+        var rgb = SIMD3<Double>(numbers.count > 0 ? numbers[0] : 0,
+                                numbers.count > 1 ? numbers[1] : 0,
+                                numbers.count > 2 ? numbers[2] : 0)
+        if let toWell {
+            rgb = toWell.convert(rgb)
         }
-        if components.count == 3 {
-            components.append(1)
-        }
+        let alpha: Double = numbers.count > 3 ? numbers[3] : 1
         // SWIFT: `CGColor(colorSpace:components:)` takes a C array of
         // CGFloat; Swift passes the array's storage as an
         // `UnsafePointer<CGFloat>` for the duration of the call only.
+        let components: [CGFloat] = [rgb.x, rgb.y, rgb.z, alpha].map { CGFloat($0) }
         return CGColor(colorSpace: space, components: components) ?? CGColor(gray: 0, alpha: 1)
     }
 
-    /// The first `count` components of `color` in this space, or nil if
-    /// it can't be converted.
+    /// The first `count` components of `color` in the input's space, or
+    /// nil if it can't be converted.
     func components(of color: CGColor, count: Int) -> [Double]? {
-        // The colour panel may hand back any colour space; convert first.
+        // The colour panel may hand back any colour space; convert to the
+        // well's first.
         guard let converted = color.converted(to: space, intent: .defaultIntent, options: nil),
-              let components = converted.components, components.count >= count else {
+              let components = converted.components, components.count >= 4 else {
             return nil
         }
-        return components.prefix(count).map { Double($0) }
+        var rgb = SIMD3<Double>(Double(components[0]), Double(components[1]), Double(components[2]))
+        if let fromWell {
+            rgb = fromWell.convert(rgb)
+        }
+        let all: [Double] = [rgb.x, rgb.y, rgb.z, Double(components[3])]
+        return Array(all.prefix(count))
     }
 }
 

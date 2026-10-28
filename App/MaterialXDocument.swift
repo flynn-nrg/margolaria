@@ -145,11 +145,20 @@ final class MaterialXDocument: NSDocument {
     ///
     /// - Throws: MXKit's error when the file can't be parsed. NSDocument
     ///   shows it to the user in a standard alert.
+    ///
+    /// SWIFT: The SDK declares this method `nonisolated`, because a document
+    /// class may opt into reading on a background thread
+    /// (`canConcurrentlyReadDocuments`). This one doesn't, so AppKit calls it
+    /// on the main thread, and `MainActor.assumeIsolated` says so to the
+    /// compiler: the closure may then touch main-actor state, and it traps if
+    /// it is ever run anywhere else.
     override func read(from url: URL, ofType typeName: String) throws {
         let document: MXDocument = try MXDocument.read(from: url)
-        load(document)
-        upgradeConfirmed = false
-        isChoosingTemplate = false
+        MainActor.assumeIsolated {
+            load(document)
+            upgradeConfirmed = false
+            isChoosingTemplate = false
+        }
     }
 
     /// The file's contents when saving: MaterialX's XML.

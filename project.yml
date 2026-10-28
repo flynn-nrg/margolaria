@@ -23,10 +23,11 @@ options:
   # Mirror the folder structure as groups in Xcode's navigator.
   createIntermediateGroups: true
 
-# Local Swift packages. MargolariaKit holds all our code that talks to OpenUSD
-# and MaterialX: MXKit (MaterialX) and ViewportKit (the Storm viewport). It
-# depends on the SwiftUsd copy in Vendor/SwiftUsd; run scripts/fetch-swiftusd.sh
-# before the first build.
+# Local Swift packages. MargolariaKit holds all our code that talks to OpenUSD,
+# MaterialX and OpenColorIO: MXKit (MaterialX), ViewportKit (the Storm
+# viewport), ColorKit (OCIO) and more. It depends on the SwiftUsd copy in
+# Vendor/SwiftUsd and the OCIO framework in Vendor/OpenColorIO; run
+# scripts/fetch-swiftusd.sh and scripts/build-ocio.sh before the first build.
 packages:
   MargolariaKit:
     path: Packages/MargolariaKit
@@ -48,6 +49,8 @@ targets:
         product: GraphKit
       - package: MargolariaKit
         product: ViewportKit
+      - package: MargolariaKit
+        product: ColorKit
     # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
     # Its Test action runs the package's tests in the same build folder as
     # the app, so `xcodebuild test -scheme Margolaria` reuses the app's build
@@ -58,6 +61,7 @@ targets:
         - package: MargolariaKit/ViewportKitTests
         - package: MargolariaKit/PreviewKitTests
         - package: MargolariaKit/GraphKitTests
+        - package: MargolariaKit/ColorKitTests
 
   # Spike M0b: a one-window demo of the Storm viewport (docs/spikes/M0b-storm-viewport.md).
   # The .mtlx next to the source is copied into the app's resources.

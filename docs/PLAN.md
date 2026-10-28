@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is next.
+Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is in progress, planned in §8.3: M3a (OpenColorIO) is under review.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -65,7 +65,7 @@ All of the following was verified on 2026-10-11.
 | OpenUSD (+ Hydra, Storm, HgiMetal) | **[apple/SwiftUsd](https://github.com/apple/SwiftUsd)** 8.1.0 (OpenUSD **v26.08**, released 2026-08-03) | SwiftPM, through a local copy patched to skip SwiftUsd's Swift overlay, which we don't use (`scripts/fetch-swiftusd.sh`). Requires Swift–C++ interop and GNU++17. Ships HdStorm, HgiMetal, UsdImaging, OpenSubdiv, OpenEXR, Embree. Apache-2.0. |
 | MaterialX | **MaterialX C++ as bundled in SwiftUsd**: Core, Format, GenShader, GenGlsl, **GenMsl**, Render, RenderHw, RenderGlsl xcframeworks | SwiftUsd does **not** include MaterialXRenderMsl, GenOsl or GenMdl. **Spike:** check that the MaterialX headers are reachable from Swift through SwiftUsd, and which MaterialX version it bundles (OpenUSD ≥ 25.05 defaults to 1.39). Fallback: our own xcframework of MaterialX 1.39.4 built at the same version as SwiftUsd's. |
 | Shader generation for previews | MaterialX **MslShaderGenerator** + our own small Metal renderer for node swatches | The main viewport uses Hydra/Storm, which already runs MaterialX codegen internally. |
-| Color management | **OpenColorIO** (C++), built as an xcframework | Needed for colour pickers, the viewport view transform and texture colour spaces. Not in SwiftUsd. Default config: ACES 2.0 studio. |
+| Color management | **OpenColorIO 2.5.2** (C++), built as an xcframework by `scripts/build-ocio.sh` (M3a) | Needed for colour pickers, the viewport view transform and texture colour spaces. Not in SwiftUsd. Default config: OCIO's built-in ACES 2.0 studio config (`ocio://studio-config-latest`), compiled into the library. |
 | Image I/O | **Apple ImageIO** first (handles EXR, PNG, JPEG, TIFF, HEIC), then **OpenImageIO** (C++) when we need `.tx`, tiled or mip-mapped files, or UDIMs | SwiftUsd's Hio already reads images for Hydra. Note: the Swift package called "OpenImageIO" (1amageek) is an unrelated pure-Swift codec library, **not** OIIO. |
 | Graph canvas | Custom view: AppKit `NSView` + Core Animation, one layer per node (chosen in spike M0d over SwiftUI `Canvas` and Metal) | Must handle about 500 nodes at 120 fps, plus hit testing, marquee selection and wire routing |
 | Text view | AppKit `NSTextView` (TextKit 2) with XML highlighting | Two-way sync with the graph |
@@ -186,7 +186,7 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 | Signing configuration | Tracked `Config/Base.xcconfig` with an optional `#include? "Signing.local.xcconfig"`. The local file holds `DEVELOPMENT_TEAM` and `CODE_SIGN_IDENTITY` and is in `.gitignore`. | The Team ID isn't secret, but keeping it out of the repo means anyone can clone and build with their own team. |
 | Bundle identifier | **`eu.emerald-isle.margolaria`** (`Config/Base.xcconfig`); spikes use `eu.emerald-isle.margolaria.spike-*` | Must be stable before the first notarized release. Changing it later resets user preferences and permissions. |
 | Embedded C++ frameworks | Dynamic xcframeworks (SwiftUsd, OCIO, OIIO) are set to **Embed & Sign**, so Xcode re-signs them with our identity. Static ones are linked into the binary. SwiftUsd's are all dynamic and arm64 only, so the app is **Apple silicon only** (`ARCHS = arm64`; spike M0e). | Under the Hardened Runtime, *library validation* refuses to load dylibs signed by a different team. |
-| Bundle resources | USD `plugInfo.json` files, MaterialX `libraries/` and the OCIO config are shipped read-only inside `Contents/Resources`. **Nothing writes into the app bundle at runtime.** Shader and pipeline caches go to `~/Library/Caches/<bundle-id>/`. | Changing a signed bundle after signing breaks its signature. |
+| Bundle resources | USD `plugInfo.json` files and MaterialX `libraries/` are shipped read-only inside `Contents/Resources` (the OCIO config is built into the library, M3a). **Nothing writes into the app bundle at runtime.** Shader and pipeline caches go to `~/Library/Caches/<bundle-id>/`. | Changing a signed bundle after signing breaks its signature. |
 | Embedded Python (M6) | Every `.so`/`.dylib` in the bundled Python, and the bundled site-packages, is signed by us at build time. User-installed **pure-Python** packages work. User-installed packages with **native extensions** signed by someone else would be blocked by library validation. As with Hydra delegates below, that needs `disable-library-validation`, so we decide it deliberately. | Blender and Houdini users expect `pip install`, so this trade-off will come up. |
 | Third-party Hydra delegates (M5) | Loading renderers such as Arnold or Karma at runtime needs the `com.apple.security.cs.disable-library-validation` entitlement. We postpone that and decide explicitly when we get there. | It weakens the Hardened Runtime's protection, so it should be a deliberate choice, not a default. |
 
@@ -257,6 +257,30 @@ Found while testing M2c's live viewport (2026-10-25), left until the lighting is
 Found while testing M2e (2026-10-26):
 
 - **Colours picked outside the working space's gamut.** The colour panel's wheel covers Display P3, wider than lin_rec709, so a saturated pick converts to negative components (a bright green became `-0.04, 0.71, -0.004`). MaterialX accepts these, but renderers treat them inconsistently. Decide with the OCIO colour pickers: map into the gamut, clamp, or keep the values and say so in the inspector.
+
+### 8.3 M3 plan (previews & colour)
+
+M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport's view transform and the colour pickers both need it.
+
+**Design decisions:**
+
+| Topic | Decision | Why |
+|---|---|---|
+| Building OCIO (M3a) | `scripts/build-ocio.sh` builds OCIO **2.5.2** from source as one dynamic framework, macOS arm64, into `Vendor/OpenColorIO` (git-ignored, like SwiftUsd). OCIO's own CMake builds its dependencies (yaml-cpp, expat, pystring, Imath, minizip-ng, zlib) and links them in statically; the framework exports only OCIO's symbols and links nothing outside macOS (the script checks). It is signed ad hoc for tests, and re-signed by Xcode when embedded. | No prebuilt macOS framework exists. Static dependencies can't pick up a Homebrew copy, and its private Imath can't clash with SwiftUsd's `Imath.framework`. 2.5 is the VFX Reference Platform CY2026 version, the generation of OpenUSD 26.08 and MaterialX 1.39.5; 2.6.0 (ACES 2.1 configs) is a month old. Upgrading is a change to `OCIO_TAG`. |
+| Config (M3a) | OCIO's **built-in** studio config, `ocio://studio-config-latest` (studio-config-v4.0.0_aces-v2.0_ocio-v2.5). Nothing is shipped or looked up on disk. Choosing another config (a studio's own, `$OCIO`) comes later. | MaterialX's colour space names (lin_rec709, srgb_texture, acescg, g22_ap1, ...) are aliases in it, so `colorspace` attributes go to OCIO unchanged. A test checks every space MaterialX's libraries name. |
+| Precision (M3a) | ColorBridge asks OCIO for **lossless** CPU processors, not its default optimisation | The default approximates pow, log and exp (white came back as 1.000024). Images wouldn't show it, but values the inspector converts are written into documents. |
+| Layers (M3a) | `ColorBridge` (C++, the only code including OCIO headers, like MXBridge) and `ColorKit` (Swift: `ColorConfiguration`, `ColorSpace`, `ColorConverter`). ColorKit doesn't depend on MXKit. | PLAN §5's ColorService. The viewport (M3b) and the pickers (M3e) use the same config. |
+| Colour wells (M3a) | The inspector's colour well works in lin_rec709 (Core Graphics' extended linear sRGB) and OCIO converts to and from the input's space, for every space. **Changed** from M2b's table of Core Graphics spaces, which showed the spaces it lacked (g22_ap1, adobergb, ...) as if they were lin_rec709. | Every MaterialX space now shows its true colour. The picker itself is redone in M3e. |
+
+**PRs:**
+
+| PR | Scope | Done when |
+|---|---|---|
+| **M3a: OpenColorIO** | `scripts/build-ocio.sh`; the `ColorBridge` and `ColorKit` targets; the built-in studio config; the inspector's colour wells converted by OCIO | Conversions match the colour spaces' published definitions (the sRGB curve, gamma curves, the AP1 to Rec. 709 matrix) and every MaterialX space is known; the Developer ID build embeds and signs OCIO, and the notarized build still passes `spctl` |
+| **M3b: Viewport lighting and view transform** | A neutral studio environment (`TODO(M3)` in `MGStormRenderer.mm`); OCIO's view transform on Storm's output, with display and view menus; then §8.2's comparison with MaterialXView | The suspect examples (SimpleHair, gold, Disney) are explained or fixed |
+| **M3c: Per-node thumbnails** | PreviewKit's swatches (M0c) on canvas nodes, rendered off the main thread, cancellable, re-rendered only downstream of an edit | M3's exit criterion: swatches update in under 100 ms after an edit on a typical graph |
+| **M3d: Solo preview** | Click a node to show its output in the viewport, until solo is left | Any node's output in the examples can be soloed |
+| **M3e: OCIO colour pickers** | Picking in a chosen space, converted to the input's; §8.2's out-of-gamut decision | Picks give the values OCIO's conversions give, in every space the picker offers |
 
 ## 9. Open questions
 
