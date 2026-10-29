@@ -1,8 +1,9 @@
 // ViewportPanel.swift
 //
-// The 3D preview for one document (PLAN.md §4.1, region 4): a material
-// picker above the Storm viewport from ViewportKit, which shows the chosen
-// material on a sphere. Drag to orbit, scroll to zoom.
+// The 3D preview for one document (PLAN.md §4.1, region 4): a bar above
+// the Storm viewport from ViewportKit, which shows the chosen material on a
+// sphere. Drag to orbit, scroll to zoom. The bar picks the material, the
+// light around the sphere, and the OCIO view transform (M3b).
 //
 // The viewport shows the document as it is in memory (M2c), edits included,
 // saved or not: after each edit it gets the new text (`previewXML`), and
@@ -10,7 +11,8 @@
 // is dragged: an update costs about 3 ms on top of a 10 ms frame
 // (StormUpdateTests), so no throttling is needed.
 //
-// Introduces (SWIFT): `Picker` with an optional selection.
+// Introduces (SWIFT): `Picker` with an optional selection, `@AppStorage`,
+// `Section` in a menu-style picker.
 
 import MXKit
 import SwiftUI
@@ -22,6 +24,27 @@ struct ViewportPanel: View {
     /// The MaterialX name of the material shown. ContentView owns it, so
     /// the sidebar can change it too.
     @Binding var materialName: String?
+
+    /// The light around the sphere, kept between launches.
+    ///
+    /// SWIFT: `@AppStorage("key")` is `@State` saved in the app's user
+    /// defaults (NSUserDefaults) under that key: every viewport reads the
+    /// same value, a change shows in all of them, and it is still there
+    /// next launch. It stores strings, numbers and enums with a String or
+    /// Int raw value, like ViewportEnvironment.
+    @AppStorage("viewportEnvironment") private var environment: ViewportEnvironment = .studio
+
+    /// The OCIO display and view chosen, kept between launches. Empty until
+    /// one is chosen; the config's default is shown until then.
+    @AppStorage("viewportDisplay") private var display: String = ""
+    @AppStorage("viewportView") private var view: String = ""
+
+    /// The view transform to use: the one chosen if the config still
+    /// offers it, otherwise the config's default (nil without OCIO).
+    private var viewTransform: ViewportViewTransform? {
+        let chosen = ViewportViewTransform(display: display, view: view)
+        return chosen.isAvailable ? chosen : .standard
+    }
 
     /// The document's materials (top-level elements of type "material"), in
     /// file order.
@@ -48,6 +71,17 @@ struct ViewportPanel: View {
                     .disabled(materials.count < 2)
                 }
                 Spacer()
+                Picker("Light", selection: $environment) {
+                    ForEach(ViewportEnvironment.allCases) { environment in
+                        Text(environment.title).tag(environment)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("The light around the sphere")
+                if let viewTransform {
+                    viewTransformPicker(showing: viewTransform)
+                }
                 Text("Storm")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -59,7 +93,8 @@ struct ViewportPanel: View {
             Divider()
 
             if !materials.isEmpty, !document.previewXML.isEmpty {
-                ViewportView(source: .text(document.previewXML), materialName: materialName)
+                ViewportView(source: .text(document.previewXML), materialName: materialName,
+                             environment: environment, viewTransform: viewTransform)
             } else {
                 ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",
                                        description: Text("The preview shows the document's materials on a sphere."))
@@ -75,5 +110,35 @@ struct ViewportPanel: View {
                 materialName = materials.first?.name
             }
         }
+    }
+
+    /// A menu of every view of every display the viewport offers, one
+    /// section per display, with `current` ticked.
+    private func viewTransformPicker(showing current: ViewportViewTransform) -> some View {
+        // SWIFT: A `Binding` is a getter and a setter that a control reads
+        // and writes through. `$display` would bind one stored value; this
+        // one is made from two closures, so the picker can choose a display
+        // and a view together, stored in two settings.
+        let selection = Binding<ViewportViewTransform>(
+            get: { current },
+            set: { chosen in
+                display = chosen.display
+                view = chosen.view
+            }
+        )
+        return Picker("View", selection: selection) {
+            ForEach(ViewportViewTransform.displays, id: \.self) { display in
+                // SWIFT: In a menu-style picker, a `Section` is a group with
+                // a heading, separated from the next by a line.
+                Section(display) {
+                    ForEach(ViewportViewTransform.views(for: display), id: \.self) { view in
+                        Text(view).tag(ViewportViewTransform(display: display, view: view))
+                    }
+                }
+            }
+        }
+        .labelsHidden()
+        .fixedSize()
+        .help("OCIO view transform: \(current.display), \(current.view)")
     }
 }

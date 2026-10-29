@@ -1,7 +1,8 @@
 // ColorBridge.h
 //
-// The C++ API that Swift sees for colour management (M3a). ColorKit (Swift)
-// imports this header; nothing else in Margolaria talks to OpenColorIO.
+// The C++ API that Swift sees for colour management (M3a; displays, views
+// and GPU shaders since M3b). ColorKit (Swift) imports this header; nothing
+// else in Margolaria talks to OpenColorIO.
 //
 // The same rules as MXBridge.h, for the same reasons:
 //
@@ -31,6 +32,9 @@ namespace colorbridge {
 /// it imports as `colorbridge.FloatVector`.
 using FloatVector = std::vector<float>;
 
+/// A list of strings, as `FloatVector` is for floats.
+using StringVector = std::vector<std::string>;
+
 /// OpenColorIO's version, such as "2.5.2".
 std::string ocioVersion();
 
@@ -54,6 +58,47 @@ struct ColorSpaceInfo {
     /// True for display spaces (what a monitor shows), false for scene
     /// spaces (what materials and textures hold).
     bool isDisplay = false;
+};
+
+/// A lookup table that a GPU shader samples, as OCIO describes it. The
+/// shader declares it as a texture (`textureName`) and a sampler
+/// (`samplerName`); whoever runs the shader creates both from these values.
+struct ShaderTexture {
+    /// The texture's name in the shader text, such as "ocio_lut1d_0".
+    std::string textureName;
+    /// The name of the sampler the shader samples it with.
+    std::string samplerName;
+    /// Size in texels. `depth` is 0 for a 2D texture, the size of the cube
+    /// for a 3D one (then width, height and depth are equal).
+    unsigned width = 0;
+    unsigned height = 0;
+    unsigned depth = 0;
+    /// 1 (red only) or 3 (RGB) floats per texel.
+    unsigned channels = 0;
+    /// True to sample with linear filtering, false for nearest.
+    bool linearFilter = false;
+    /// The texels, row by row (and slice by slice), `channels` floats each.
+    FloatVector values;
+};
+
+/// The textures of a GPU shader.
+using ShaderTextureVector = std::vector<ShaderTexture>;
+
+/// A colour transform as GPU shader code, in the Metal Shading Language.
+///
+/// The code defines a function, `functionName`, that takes each texture
+/// and its sampler, in the order of `textures`, then the pixel:
+///
+///     float4 OCIOMain(texture2d<float> t0, sampler s0, ..., float4 inPixel)
+struct GPUShader {
+    /// True when this holds a shader.
+    bool isLoaded = false;
+    /// MSL source: helper functions and `functionName`, no entry points.
+    std::string source;
+    /// The function to call, "OCIOMain".
+    std::string functionName;
+    /// The lookup tables the function samples.
+    ShaderTextureVector textures;
 };
 
 /// Converts colours from one colour space to another, on the CPU, without
@@ -109,6 +154,36 @@ public:
     /// alias. On failure (an unknown name), returns an empty Processor and
     /// sets `errorMessage`.
     Processor processor(const std::string& from, const std::string& to, std::string& errorMessage) const;
+
+    // --- Displays and views (M3b) ------------------------------------------
+    //
+    // A *display* is a kind of monitor ("sRGB - Display"); a *view* is a way
+    // of showing scene-linear light on it ("ACES 2.0 - SDR 100 nits
+    // (Rec.709)" tone-maps, "Un-tone-mapped" only encodes). Together they
+    // are a "view transform", applied to rendered images just before they
+    // reach the screen.
+
+    /// The active displays, in the config's order. The first is the default.
+    StringVector displays() const;
+
+    /// The views of `display`, in the config's order. Empty for an unknown
+    /// display.
+    StringVector views(const std::string& display) const;
+
+    /// The view `display` shows unless told otherwise. Empty for an unknown
+    /// display.
+    std::string defaultView(const std::string& display) const;
+
+    /// A CPU processor from the colour space `from` to `display` through
+    /// `view`. On failure, returns an empty Processor and sets `errorMessage`.
+    Processor displayProcessor(const std::string& from, const std::string& display, const std::string& view,
+                               std::string& errorMessage) const;
+
+    /// The same transform as displayProcessor, as a Metal shader. On
+    /// failure, returns a GPUShader whose isLoaded is false and sets
+    /// `errorMessage`.
+    GPUShader displayShader(const std::string& from, const std::string& display, const std::string& view,
+                            std::string& errorMessage) const;
 
 private:
     struct Impl;

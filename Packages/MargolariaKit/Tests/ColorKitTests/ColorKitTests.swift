@@ -3,7 +3,8 @@
 // Tests for colour management (M3a): OCIO's built-in studio config loads,
 // knows every colour space MaterialX names, and converts colours as the
 // spaces' published definitions say: the sRGB curve, pure gamma curves and
-// the ACES AP1 to Rec. 709 matrix.
+// the ACES AP1 to Rec. 709 matrix. Since M3b, its displays and views, and
+// view transforms as GPU shaders (run on the GPU in ViewportKitTests).
 //
 // Introduces (SWIFT): nothing new.
 
@@ -101,6 +102,62 @@ struct ColorKitTests {
         #expect(!(try config.converter(from: "srgb_texture", to: "lin_rec709").isIdentity))
         #expect(throws: ColorError.self) {
             try config.converter(from: "no_such_space", to: "lin_rec709")
+        }
+    }
+
+    @Test("The sRGB display comes first, with ACES 2.0 as its default view and an un-tone-mapped one")
+    func displaysAndViews() throws {
+        let config = try studio()
+        #expect(config.displays.first == "sRGB - Display")
+        #expect(config.displays.contains("Display P3 - Display"))
+        #expect(config.defaultView(for: "sRGB - Display") == "ACES 2.0 - SDR 100 nits (Rec.709)")
+        #expect(config.views(for: "sRGB - Display").contains("Un-tone-mapped"))
+        #expect(config.views(for: "No Such Display").isEmpty)
+        #expect(config.defaultView(for: "No Such Display") == nil)
+    }
+
+    @Test("Un-tone-mapped on the sRGB display is the sRGB curve, on Display P3 also the P3 primaries")
+    func untoneMapped() throws {
+        let config = try studio()
+        let colour = SIMD3<Double>(0.18, 0.5, 0.8)
+        let sRGB: SIMD3<Double> = try config.converter(from: "lin_rec709", display: "sRGB - Display",
+                                                       view: "Un-tone-mapped").convert(colour)
+        let encoded: SIMD3<Double> = try config.converter(from: "lin_rec709", to: "srgb_texture").convert(colour)
+        #expect(close(sRGB, encoded, within: 1e-6), "\(sRGB)")
+        let p3: SIMD3<Double> = try config.converter(from: "lin_rec709", display: "Display P3 - Display",
+                                                     view: "Un-tone-mapped").convert(colour)
+        let p3Encoded: SIMD3<Double> = try config.converter(from: "lin_rec709", to: "srgb_displayp3").convert(colour)
+        #expect(close(p3, p3Encoded, within: 1e-6), "\(p3)")
+    }
+
+    @Test("ACES 2.0 tone-maps: highlights stay below 1 and grey stays grey")
+    func acesToneMaps() throws {
+        let converter = try studio().converter(from: "lin_rec709", display: "sRGB - Display",
+                                               view: "ACES 2.0 - SDR 100 nits (Rec.709)")
+        let bright: SIMD3<Double> = converter.convert(SIMD3(8, 8, 8))
+        #expect(bright.x < 1 && bright.x > 0.9, "\(bright)")
+        let grey: SIMD3<Double> = converter.convert(SIMD3(0.18, 0.18, 0.18))
+        #expect(close(SIMD3(repeating: grey.x), grey, within: 1e-4) && grey.x > 0.3 && grey.x < 0.5, "\(grey)")
+    }
+
+    @Test("A view transform as a Metal shader: OCIO's function and its lookup tables")
+    func displayShader() throws {
+        let config = try studio()
+        let aces: GPUShader = try config.displayShader(from: "lin_rec709", display: "sRGB - Display",
+                                                       view: "ACES 2.0 - SDR 100 nits (Rec.709)")
+        #expect(aces.functionName == "OCIOMain")
+        #expect(aces.source.contains("float4 OCIOMain("))
+        #expect(!aces.textures.isEmpty)
+        for texture in aces.textures {
+            #expect(aces.source.contains(texture.name) && aces.source.contains(texture.samplerName))
+            #expect(texture.values.count == texture.width * texture.height * max(texture.depth, 1) * texture.channels)
+        }
+        // Un-tone-mapped is a curve: plain arithmetic, no tables.
+        let plain: GPUShader = try config.displayShader(from: "lin_rec709", display: "sRGB - Display",
+                                                        view: "Un-tone-mapped")
+        #expect(plain.textures.isEmpty)
+        #expect(throws: ColorError.self) {
+            try config.displayShader(from: "lin_rec709", display: "No Such Display", view: "Raw")
         }
     }
 }

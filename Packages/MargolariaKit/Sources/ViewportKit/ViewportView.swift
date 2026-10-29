@@ -4,8 +4,9 @@
 // rendered by Hydra Storm (MGStormRenderer). Drag to orbit, scroll to zoom.
 // It shows a .mtlx file, or a document's text; when the text changes (an
 // edit, M2c), the same renderer shows the new version.
-// Frames are rendered at twice the size and scaled down (Downsampler.swift),
-// which smooths the edges.
+// Frames are rendered at twice the size and scaled down, which smooths the
+// edges, and converted for the screen by an OCIO view transform (M3b); both
+// in DisplayPass.swift. The sphere is lit by a ViewportEnvironment.
 //
 // Structure:
 //
@@ -18,7 +19,8 @@
 // `fatalError`, `Result`, `enum` with associated values as view state,
 // `.task(id:)`, `[weak self]` capture lists, `===` identity comparison,
 // `Task.sleep(for:)`, `Date` arithmetic, bridging a String to NSString, an
-// `init` that calls another (`self.init`), `.overlay(alignment:)`.
+// `init` that calls another (`self.init`), `.overlay(alignment:)`; since
+// M3b, `oldValue` in `didSet`, and observers not running in `init`.
 
 import AppKit
 import MetalKit
@@ -47,6 +49,13 @@ public struct ViewportView: View {
     /// or nil for the first material.
     public let materialName: String?
 
+    /// The light around the sphere.
+    public let environment: ViewportEnvironment
+
+    /// How Storm's light is shown on the screen, or nil to let Storm encode
+    /// sRGB itself (also what happens if OCIO is unavailable).
+    public let viewTransform: ViewportViewTransform?
+
     /// What the viewport currently shows.
     ///
     /// SWIFT: An enum with *associated values* is a tagged union: each case
@@ -71,9 +80,12 @@ public struct ViewportView: View {
     /// SWIFT: A `public` struct gets no public memberwise initializer for
     /// free; the automatic one is `internal`. Code in other modules (the app)
     /// needs this explicit `public init`.
-    public init(source: ViewportSource, materialName: String? = nil) {
+    public init(source: ViewportSource, materialName: String? = nil, environment: ViewportEnvironment = .studio,
+                viewTransform: ViewportViewTransform? = .standard) {
         self.source = source
         self.materialName = materialName
+        self.environment = environment
+        self.viewTransform = viewTransform
     }
 
     /// Shows a .mtlx file (the M0b spike).
@@ -89,7 +101,8 @@ public struct ViewportView: View {
             case .loading:
                 ProgressView()
             case .ready(let renderer):
-                StormView(renderer: renderer, text: text, materialName: materialName) { error in
+                StormView(renderer: renderer, text: text, materialName: materialName,
+                          environment: environment, viewTransform: viewTransform) { error in
                     updateError = error
                 }
                 // A short note along the bottom when an edit can't be shown.
@@ -172,11 +185,13 @@ private struct StormView: NSViewRepresentable {
     /// The document text, for a renderer made from text; nil for a file.
     let text: String?
     let materialName: String?
+    let environment: ViewportEnvironment
+    let viewTransform: ViewportViewTransform?
     /// Told whether the latest text could be shown: nil if so, otherwise why not.
     let onUpdate: (String?) -> Void
 
     func makeNSView(context: Context) -> StormMTKView {
-        let view = StormMTKView(renderer: renderer)
+        let view = StormMTKView(renderer: renderer, environment: environment, viewTransform: viewTransform)
         // The renderer was made from this text already.
         view.shownText = text
         view.bindMaterial(named: materialName)
@@ -201,6 +216,8 @@ private struct StormView: NSViewRepresentable {
             }
         }
         view.bindMaterial(named: materialName)
+        view.environment = environment
+        view.viewTransform = viewTransform
     }
 }
 
@@ -219,7 +236,31 @@ final class StormMTKView: MTKView {
     var renderer: MGStormRenderer {
         didSet {
             device = renderer.device
+            // A new renderer starts with its own lighting.
+            renderer.use(environment)
             needsDisplay = true
+        }
+    }
+
+    /// The light around the sphere.
+    var environment: ViewportEnvironment {
+        didSet {
+            // SWIFT: `oldValue` is the value before the assignment, given
+            // to `didSet` for free.
+            if environment != oldValue {
+                renderer.use(environment)
+                needsDisplay = true
+            }
+        }
+    }
+
+    /// The view transform, or nil to show Storm's sRGB as it is.
+    var viewTransform: ViewportViewTransform? {
+        didSet {
+            if viewTransform != oldValue {
+                configurePass()
+                needsDisplay = true
+            }
         }
     }
 
@@ -229,9 +270,10 @@ final class StormMTKView: MTKView {
     /// calling `[super init]` first; it guarantees that no method (even an
     /// override called from the superclass's init) ever sees an
     /// uninitialized property.
-    /// Scales Storm's double-size frames down to the screen. Nil if its
-    /// shaders failed to compile; frames are then copied as they are.
-    private let downsampler: Downsampler?
+    /// Scales Storm's double-size frames down to the screen and applies
+    /// the view transform. Nil if its shaders failed to compile; frames
+    /// are then copied as they are.
+    private var pass: DisplayPass? = nil
 
     /// When the camera last moved. Double-size frames cost about three
     /// times as much (22 ms instead of 7 for a 1040 × 1500 viewport), so
@@ -242,22 +284,22 @@ final class StormMTKView: MTKView {
     /// How long after the last camera move the smooth frame is drawn.
     private static let settleDelay: TimeInterval = 0.15
 
-    init(renderer: MGStormRenderer) {
+    init(renderer: MGStormRenderer, environment: ViewportEnvironment, viewTransform: ViewportViewTransform?) {
         self.renderer = renderer
-        // SWIFT: `try?` turns a thrown error into nil: without the
-        // downsampler the viewport still works, just with jagged edges.
-        downsampler = try? Downsampler(device: renderer.device, pixelFormat: .rgba16Float)
+        self.environment = environment
+        self.viewTransform = viewTransform
         super.init(frame: .zero, device: renderer.device)
+        // SWIFT: Property observers (`didSet`) don't run for assignments
+        // made in the type's own initializer, so apply these by hand.
+        renderer.use(environment)
 
         // Storm's output is half-float RGBA. The screen uses the same
         // format, so the fallback path can copy frames with a blit.
         colorPixelFormat = .rgba16Float
-        // Storm's colour correction already encoded the pixels as sRGB.
-        // Tell the window server, so it doesn't apply the curve twice.
-        colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         // The fallback blit writes into the drawable, which "framebuffer
         // only" textures don't allow.
         framebufferOnly = false
+        configurePass()
 
         // Draw only when asked (`needsDisplay = true`), like a normal NSView.
         isPaused = true
@@ -308,6 +350,26 @@ final class StormMTKView: MTKView {
 
     // MARK: Drawing
 
+    /// Makes the display pass for `viewTransform`, and tells the screen
+    /// what colour space its pixels are in. Without a transform, or if
+    /// OCIO's shader can't be built, the pass only scales, and Storm's
+    /// sRGB values are shown as they are.
+    private func configurePass() {
+        // SWIFT: `try?` turns a thrown error into nil.
+        if let viewTransform, let shader = try? viewTransform.shader(),
+           let transforming = try? DisplayPass(device: renderer.device, pixelFormat: .rgba16Float, transform: shader) {
+            pass = transforming
+            // The pixels are encoded for the transform's display. Tell the
+            // window server, so macOS converts them correctly for the
+            // actual screen (and doesn't apply a curve twice).
+            colorspace = viewTransform.colorSpace
+        } else {
+            // Without the pass the viewport still works, with jagged edges.
+            pass = try? DisplayPass(device: renderer.device, pixelFormat: .rgba16Float)
+            colorspace = CGColorSpace(name: CGColorSpace.sRGB)
+        }
+    }
+
     /// Renders a frame with Storm and copies it to the screen.
     ///
     /// SWIFT: `override` is mandatory when replacing a superclass method;
@@ -316,10 +378,10 @@ final class StormMTKView: MTKView {
     override func draw(_ dirtyRect: NSRect) {
         let width: Int = Int(drawableSize.width)
         let height: Int = Int(drawableSize.height)
-        // Render larger for anti-aliasing, if the downsampler is available
-        // and the camera is still.
+        // Render larger for anti-aliasing, if the pass is available and the
+        // camera is still.
         let moving: Bool = Date().timeIntervalSince(lastCameraMove) < Self.settleDelay
-        let factor: Int = (downsampler == nil || moving) ? 1 : Downsampler.factor
+        let factor: Int = (pass == nil || moving) ? 1 : DisplayPass.factor
 
         // SWIFT: One `guard` can unwrap several optionals and check
         // conditions; if any fails, the `else` branch must leave the function.
@@ -332,10 +394,10 @@ final class StormMTKView: MTKView {
 
         // The command buffer comes from Storm's own queue, so what it does
         // runs after Storm's rendering commands.
-        if let downsampler {
+        if let pass {
             // Draw the frame into the drawable at its real size: scaled down
-            // if it is double size, a plain copy otherwise.
-            downsampler.encode(from: frame, to: drawable.texture, in: commandBuffer)
+            // if it is double size, and through the view transform.
+            pass.encode(from: frame, to: drawable.texture, in: commandBuffer)
         } else if frame.pixelFormat == drawable.texture.pixelFormat,
                   let blit = commandBuffer.makeBlitCommandEncoder() {
             // Fallback: copy Storm's frame into the drawable as it is.

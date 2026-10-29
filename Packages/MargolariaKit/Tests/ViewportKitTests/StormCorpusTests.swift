@@ -44,6 +44,9 @@ enum Examples {
 // suite, so they inherit its `.serialized` trait and never render at the
 // same time as the other Storm tests.
 extension StormRendererTests {
+    /// The sRGB curve alone, as the viewport showed before M3b.
+    static let untoneMapped = ViewportViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
+
     @Test("Every material in MaterialX's examples renders",
           .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
           arguments: Examples.files)
@@ -51,7 +54,10 @@ extension StormRendererTests {
         let renderer = try MGStormRenderer(materialXFile: url)
         for path in renderer.materialPaths {
             #expect(renderer.bindMaterial(atPath: path))
-            let image: CGImage = try #require(renderer.snapshot(width: 96, height: 96), "\(path)")
+            // Un-tone-mapped: clear glass differs from the background only
+            // slightly, and ACES 2.0's tone curve narrows that further.
+            let image: CGImage = try #require(renderer.snapshot(width: 96, height: 96, viewTransform: Self.untoneMapped),
+                                              "\(path)")
             if ProcessInfo.processInfo.environment["VIEWPORT_SNAPSHOT_DIR"] != nil {
                 let name: String = url.deletingPathExtension().lastPathComponent + "_" + (path as NSString).lastPathComponent
                 _ = try Fixtures.save(image, as: name + ".png")

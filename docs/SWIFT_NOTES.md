@@ -33,7 +33,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `ContinuousClock`, `Duration` | Measure elapsed time: `clock.measure { }` | `std::chrono::steady_clock` | `SwatchRendererTests.swift` |
 | Iterating `indices` | `for i in array.indices` to change elements in place; `for x in array` gives copies | Index loop vs range-for by value | `SwatchSpikeApp.swift` |
 | Raw strings `#"..."#` | Backslashes and quotes are literal; `"""` makes them multi-line | C++ `R"(...)"` | `StormRendererTests.swift` |
-| Multi-line strings `"""` | Text over several lines; the closing `"""`'s indentation is removed from each line | C++ raw string literal | `Downsampler.swift` (Metal source) |
+| Multi-line strings `"""` | Text over several lines; the closing `"""`'s indentation is removed from each line | C++ raw string literal | `Downsampler.swift` (Metal source; now `DisplayPass.swift`) |
 | `defer { }` | Runs when the enclosing scope exits, however it exits | Go `defer`; a C++ RAII guard | `LayerGraphView.swift` (`update`) |
 | `CaseIterable` | The compiler generates `allCases`, an array of every case of an enum | An X-macro list | `GraphModel.swift` |
 | Wrapping arithmetic `&+`, `&*` | Plain `+` traps on overflow; `&+` wraps around like unsigned C arithmetic | C unsigned `+` | `GraphModel.swift` (`SeededRandom`) |
@@ -65,6 +65,11 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `ClosedRange` | `0...1`: a range including both ends; SwiftUI sliders take one | — | `MXValue.swift` (`sliderRange`) |
 | `zip` | Pairs two sequences element by element into tuples | Python `zip` | `MXValue.swift` (`MXPortUI`) |
 | `Double` vs `Float`; `String(Float(x))` | 64- and 32-bit floats, never converted implicitly. `String(_:)` on a Float prints the shortest text that reads back as the same Float | `double`/`float`; `%g` with round-trip precision | `MXValue.swift` (`MXValueText`) |
+| Enums with raw values | `enum E: String { case studio }`: each case has a fixed value (`.rawValue`), and `E(rawValue:)` reads one back, nil if unknown | A C enum with explicit values, plus a parse function | `ViewportSettings.swift` (`ViewportEnvironment`) |
+| `switch` as an expression | `let t = switch x { case .a: "A" case .b: "B" }`: the value of the chosen case | A ternary over many cases | `ViewportSettings.swift` |
+| `Float.exponent`, `Float(sign:exponent:significand:)` | A float's binary exponent, and building `2^e` exactly | `frexp`, `ldexp` | `StudioEnvironment.swift` (`rgbe`) |
+| `static let x = { ... }()` | A constant computed by a closure, once, on first use | A function-local static initialised by a lambda | `StudioEnvironment.swift` (`fileURL`) |
+| `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` |
 
 ## Functions and closures
 
@@ -93,6 +98,11 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@discardableResult` | A function whose result callers may ignore without a warning | — | `LayerGraphView.swift` (`drawText`) |
 | `inout` on your own functions | `func apply(to model: inout GraphModel)`, called with `&model` | Non-const reference parameter | `GraphAutoLayout.swift` |
 | Nested functions | A `func` inside a `func`; it can use the outer function's constants | A lambda assigned to a local | `MXCorpusTests.swift` |
+| `enumerated()` | Pairs each element with its index | Go's `for i, x := range xs` | `DisplayPass.swift` |
+| `joined(separator:)` | Concatenates strings | Go's `strings.Join` | `DisplayPass.swift` |
+| `&variable` to a pointer parameter | Lends a C API a pointer to a `var` for the length of the call | `&x` in C | `DisplayPass.swift` (`setFragmentBytes`) |
+| `withUnsafeMutableBytes` | Lends a writable raw pointer to an array's storage for the length of a closure | Passing `vec.data()` to a C function that fills it | `ViewTransformTests.swift` |
+| `oldValue` in `didSet` | The value before the assignment; observers don't run for assignments in the type's own `init` | Comparing in a custom setter | `ViewportView.swift` (`StormMTKView.environment`) |
 
 ## Protocols and extensions
 
@@ -191,6 +201,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.keyboardShortcut(.defaultAction)` / `.cancelAction` | Return (or Escape) presses the button; the default one is drawn highlighted | `TemplateSheet.swift` |
 | `.buttonStyle(.plain)` | A button without the standard look, drawing only its label: for rows that show their own selection | `TemplateSheet.swift` |
 | `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
+| `@AppStorage("key")` | `@State` kept in user defaults: shared by every view that uses the key, and kept between launches (`NSUserDefaults`) | `ViewportPanel.swift` |
+| `Section` in a menu-style `Picker` | Groups the menu's items under a heading, with a separator | `ViewportPanel.swift` (view transform) |
 
 ## Swift ↔ C++
 
@@ -206,6 +218,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `CGContext` drawing | Core Graphics' C API with Swift names: `CGContext(data:width:...)`, `context.fill(rect)`, `makeImage()` | `CGBitmapContextCreate`, `CGContextFillRect` | `BuildFromNothingTests.swift` |
 | Objective-C classes | Import as Swift classes: `-initWithX:error:` becomes `init(x:) throws`, `nullable` becomes `?` | `MGStormRenderer.h`, `Snapshot.swift` |
 | Out-parameter structs | A C++ `T&` parameter is an `inout` argument: pass a `var` with `&` | `MXDocument.swift` (`generateMSL`) |
+| `Array(cxxVector)` | Copies an imported C++ vector into a Swift array, so it outlives the C++ object | `GPUShader.swift` |
+| Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` |
 
 ## Testing
 

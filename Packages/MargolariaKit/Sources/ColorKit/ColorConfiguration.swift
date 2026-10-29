@@ -1,7 +1,8 @@
 // ColorConfiguration.swift
 //
 // Colour management for the app (M3a; PLAN.md §5, "ColorService"): an
-// OpenColorIO config, its colour spaces, and converters between them.
+// OpenColorIO config, its colour spaces, and converters between them; its
+// displays and views, and view transforms as GPU shaders (M3b).
 // ColorBridge (C++) does the OCIO calls; this is the Swift API on top.
 //
 // The app uses OCIO's built-in ACES studio config, which is compiled into
@@ -30,6 +31,10 @@ public final class ColorConfiguration: @unchecked Sendable {
     /// Every active colour space, scene and display ones, in the config's order.
     public let colorSpaces: [ColorSpace]
 
+    /// The active displays (kinds of monitor, such as "sRGB - Display"), in
+    /// the config's order. The first is the config's default.
+    public let displays: [String]
+
     /// The built-in config the app uses: the latest ACES studio config of
     /// this OCIO version (ACES 2.0 for OCIO 2.5).
     public static let studioURI: String = "ocio://studio-config-latest"
@@ -56,6 +61,7 @@ public final class ColorConfiguration: @unchecked Sendable {
         handle = config
         name = config.name().colorKitString
         colorSpaces = config.colorSpaces().map(ColorSpace.init)
+        displays = config.displays().map(\.colorKitString)
     }
 
     /// The colour space with this name or alias, ignoring case ("acescg"
@@ -79,6 +85,51 @@ public final class ColorConfiguration: @unchecked Sendable {
             throw ColorError.conversionFailed(errorMessage.colorKitString)
         }
         return ColorConverter(handle: processor)
+    }
+
+    // MARK: Displays and views
+
+    /// The views of `display`, such as "ACES 2.0 - SDR 100 nits (Rec.709)"
+    /// or "Un-tone-mapped", in the config's order. Empty for an unknown
+    /// display.
+    public func views(for display: String) -> [String] {
+        handle.views(std.string(display)).map(\.colorKitString)
+    }
+
+    /// The view the config shows on `display` unless told otherwise, or nil
+    /// for an unknown display.
+    public func defaultView(for display: String) -> String? {
+        let view: String = handle.defaultView(std.string(display)).colorKitString
+        return view.isEmpty ? nil : view
+    }
+
+    /// A converter from the colour space `source` to `display`, through
+    /// `view`: what a pixel of that colour looks like on the screen, as the
+    /// display encodes it.
+    ///
+    /// - Throws: ``ColorError/conversionFailed(_:)`` if a name is unknown.
+    public func converter(from source: String, display: String, view: String) throws -> ColorConverter {
+        var errorMessage = std.string()
+        let processor = handle.displayProcessor(std.string(source), std.string(display), std.string(view),
+                                                &errorMessage)
+        guard processor.isLoaded() else {
+            throw ColorError.conversionFailed(errorMessage.colorKitString)
+        }
+        return ColorConverter(handle: processor)
+    }
+
+    /// The same transform as ``converter(from:display:view:)``, as Metal
+    /// shader code, for converting whole images on the GPU.
+    ///
+    /// - Throws: ``ColorError/conversionFailed(_:)`` if a name is unknown.
+    public func displayShader(from source: String, display: String, view: String) throws -> GPUShader {
+        var errorMessage = std.string()
+        let shader = handle.displayShader(std.string(source), std.string(display), std.string(view),
+                                          &errorMessage)
+        guard shader.isLoaded else {
+            throw ColorError.conversionFailed(errorMessage.colorKitString)
+        }
+        return GPUShader(shader)
     }
 }
 
