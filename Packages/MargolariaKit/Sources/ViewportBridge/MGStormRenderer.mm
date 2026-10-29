@@ -81,6 +81,10 @@ const char *const kMaterialXRootPath = "/World/MaterialX";
 /// The preview sphere.
 const char *const kSpherePath = "/World/Sphere";
 
+/// The lights (AddLights).
+const char *const kKeyLightPath = "/World/Lights/Key";
+const char *const kDomeLightPath = "/World/Lights/Dome";
+
 /// Serializes engine creation. The first UsdImagingGLEngine loads Hydra's
 /// renderer plugins into a process-wide registry, and that registry is not
 /// safe to initialize from two threads at once: two renderers created in
@@ -199,22 +203,27 @@ UsdGeomMesh DefineSphereMesh(const UsdStageRefPtr &stage, const SdfPath &path) {
     return mesh;
 }
 
-/// Adds a key light and a dome light. Metals only reflect their
+/// The path of OpenUSD's default environment map (an outdoor HDR,
+/// "StinsonBeach.hdr"), the one usdview uses. It ships with the Hdx library
+/// in SwiftUsd.
+std::string DefaultEnvironmentPath() {
+    return HdxPackageDefaultDomeLightTexture().GetString();
+}
+
+/// Adds a key light and a dome light, lit by OpenUSD's default environment
+/// until environmentURL chooses another. Metals only reflect their
 /// surroundings, so the dome needs an environment image.
 void AddLights(const UsdStageRefPtr &stage) {
-    UsdLuxDistantLight key = UsdLuxDistantLight::Define(stage, SdfPath("/World/Lights/Key"));
+    UsdLuxDistantLight key = UsdLuxDistantLight::Define(stage, SdfPath(kKeyLightPath));
     key.CreateIntensityAttr(VtValue(3.0f));
     key.CreateAngleAttr(VtValue(2.0f));
     // A distant light shines down its local -Z axis. Tilt it to come from
     // above and to the right of the default camera.
     UsdGeomXformable(key.GetPrim()).AddRotateXYZOp().Set(GfVec3f(-40.0f, 35.0f, 0.0f));
 
-    // OpenUSD's default environment map (an outdoor HDR, "StinsonBeach.hdr"),
-    // the one usdview uses. It ships with the Hdx library in SwiftUsd.
-    // TODO(M3): a neutral studio environment, chosen by the user.
-    UsdLuxDomeLight dome = UsdLuxDomeLight::Define(stage, SdfPath("/World/Lights/Dome"));
+    UsdLuxDomeLight dome = UsdLuxDomeLight::Define(stage, SdfPath(kDomeLightPath));
     dome.CreateIntensityAttr(VtValue(1.0f));
-    dome.CreateTextureFileAttr(VtValue(SdfAssetPath(HdxPackageDefaultDomeLightTexture().GetString())));
+    dome.CreateTextureFileAttr(VtValue(SdfAssetPath(DefaultEnvironmentPath())));
 }
 
 /// Writes `xml` to the file at `path`, replacing it. On failure, returns
@@ -286,6 +295,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     SdfLayerRefPtr _materialLayer;
     NSString *_boundMaterialPath;
     NSArray<NSString *> *_materialPaths;
+    NSURL *_environmentURL;
 }
 
 - (nullable instancetype)initWithMaterialXFile:(NSURL *)fileURL error:(NSError **)error {
@@ -433,6 +443,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     _azimuth = 30.0;
     _elevation = 15.0;
     _distance = 5.0;
+    _keyLightEnabled = YES;
     return YES;
 }
 
@@ -521,6 +532,29 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     }
 }
 
+- (nullable NSURL *)environmentURL {
+    return _environmentURL;
+}
+
+- (void)setEnvironmentURL:(nullable NSURL *)url {
+    if (url == _environmentURL || [url isEqual:_environmentURL]) {
+        return;
+    }
+    _environmentURL = [url copy];
+    // A new texture file for the dome. Storm notices the change, loads the
+    // image and prefilters it for diffuse and glossy lighting again.
+    const std::string path = url != nil ? std::string(url.fileSystemRepresentation) : DefaultEnvironmentPath();
+    UsdLuxDomeLight dome(_stage->GetPrimAtPath(SdfPath(kDomeLightPath)));
+    dome.GetTextureFileAttr().Set(SdfAssetPath(path));
+}
+
+- (void)setKeyLightEnabled:(BOOL)enabled {
+    _keyLightEnabled = enabled;
+    // An inactive prim is left out of the stage, as if deleted, but keeps
+    // its settings for when it is made active again.
+    _stage->GetPrimAtPath(SdfPath(kKeyLightPath)).SetActive(enabled);
+}
+
 - (NSString *)rendererName {
     return @(_engine->GetRendererDisplayName(_engine->GetCurrentRendererId()).c_str());
 }
@@ -574,8 +608,15 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         params.enableLighting = true;
         params.enableSceneLights = true;
         params.enableSceneMaterials = true;
-        // Storm works in linear light; this converts its output to sRGB for
-        // display. M3 replaces it with an OCIO view transform.
+        // Storm works in linear light; this encodes its output as sRGB,
+        // without tone mapping or clamping. ViewportKit's DisplayPass
+        // decodes it again and applies the OCIO view transform (M3b).
+        //
+        // Why not `disabled`, which would leave the output linear: with
+        // colour correction disabled, Storm (OpenUSD 26.08 on Metal) draws
+        // no geometry into the colour AOV, only the clear colour and the
+        // dome (found in M3b; see docs/PLAN.md §8.2). OpenUSD's own OCIO
+        // mode isn't in SwiftUsd's build.
         params.colorCorrectionMode = HdxColorCorrectionTokens->sRGB;
 
         _engine->Render(_stage->GetPseudoRoot(), params);

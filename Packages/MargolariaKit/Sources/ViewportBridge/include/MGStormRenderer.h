@@ -30,7 +30,8 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 
 /// A Hydra Storm renderer for one material on a preview sphere.
 ///
-/// It owns an in-memory USD stage containing a sphere, two lights and a
+/// It owns an in-memory USD stage containing a sphere, two lights (a key
+/// light and a dome light for the environment) and a
 /// reference to the .mtlx file (or to MaterialX text, kept in a temporary file). OpenUSD's UsdMtlx plugin translates the
 /// MaterialX document into UsdShade prims; one of its materials is bound to
 /// the sphere (the first, unless bindMaterialAtPath: picks another).
@@ -83,6 +84,16 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// be read.
 - (BOOL)updateMaterialXString:(NSString *)xml error:(NSError **)error;
 
+/// The latitude-longitude HDR image lighting the sphere (the dome light's
+/// texture), or nil for OpenUSD's default, an outdoor scene
+/// ("StinsonBeach.hdr", as in usdview). Nil until set.
+@property (nonatomic, copy, nullable) NSURL *environmentURL;
+
+/// Whether the distant key light shines, as well as the environment. YES
+/// until set. An environment with its own bright lights (a studio's soft
+/// boxes) needs none.
+@property (nonatomic) BOOL keyLightEnabled;
+
 /// The name of the Hydra renderer in use ("GL" for Storm, whatever its backend).
 @property (nonatomic, readonly) NSString *rendererName;
 
@@ -95,10 +106,13 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 
 /// Renders one frame of `width` × `height` pixels.
 ///
-/// Returns Storm's colour output: an RGBA16Float texture, already converted to
-/// sRGB for display. The texture belongs to Storm and is reused by the next
-/// call, so copy it before rendering again. Returns nil if Storm produced no
-/// output.
+/// Returns Storm's colour output: an RGBA16Float texture of scene-linear
+/// light (lin_rec709) encoded with the sRGB curve, unclamped (values above
+/// 1 stay above 1). Negative components, which the curve can't encode,
+/// come out as NaN. Decode it to get the linear light back (ViewportKit's
+/// DisplayPass does, before its view transform). The texture belongs to
+/// Storm and is reused by the next call, so copy it before rendering again.
+/// Returns nil if Storm produced no output.
 - (nullable id<MTLTexture>)renderWithWidth:(NSInteger)width height:(NSInteger)height;
 
 /// True once Storm has finished all background work (shader compilation,
