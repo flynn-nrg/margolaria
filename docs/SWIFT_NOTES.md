@@ -72,6 +72,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
 | `Dictionary(uniqueKeysWithValues:)` | Builds a dictionary from (key, value) pairs; traps on a repeated key (`uniquingKeysWith:` decides instead) | Filling a `std::map` from a vector of pairs | `GraphPanel.swift` (`requestSwatches`) |
 | An initializer as a function | `String.init` is String's initializer, passable where a function is expected: `.map(String.init)` is `.map { String($0) }` | A function pointer to a constructor (which C++ doesn't have) | `ViewportPanel.swift` |
+| `WritableKeyPath` and `value[keyPath:]` | `\.x` names a property; `v[keyPath: path]` reads or writes it, so one function can edit any component | A pointer to member, `&T::x` | `ColorPickerPopover.swift` (`channel`) |
+| `simd_max`, `simd_min` on vectors | Component-wise maximum and minimum of two vectors | `std::max` per component | `ColorPicking.swift` |
+| `String(format:)`, `Int(_:radix:)` | printf-style formatting (`%02X`), and parsing in another base | `snprintf`, `strtol(s, nil, 16)` | `ColorPicking.swift` (`hex`) |
 | `Hasher` | Swift's hash function, used by hand: `combine` values, then `finalize()` to an `Int`. Seeded randomly per process, so hashes are only compared within one run | `std::hash` combined with `boost::hash_combine` | `SwatchPlan.swift` |
 | `Float16` | A 16-bit float, the same as Metal's `half` | `_Float16` | `SwatchEnvironment.swift` |
 | CryptoKit's `SHA256` | Hashes bytes into a digest; here, to key a cache by a long text without keeping it | CommonCrypto's `CC_SHA256` | `SwatchRenderer.swift` (`key(for:)`) |
@@ -199,7 +202,13 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@FocusState` | State kept in step with keyboard focus; `.focused($isFocused)` connects a field to it | `InspectorFields.swift` (`CommitTextField`) |
 | `Binding(get:set:)` | A binding made of two closures instead of stored state: reading reads the document, writing makes an edit | `InspectorFields.swift` (`ScalarEditor`) |
 | `Slider(onEditingChanged:)` | Reports when a drag starts (true) and ends (false); used to make a drag one undo step | `InspectorFields.swift` |
-| `ColorPicker` with `CGColor` | A colour well bound to a Core Graphics colour; convert it to a known `CGColorSpace` before reading components | `InspectorFields.swift` (`ColorSpaceMapping`) |
+| `ColorPicker` with `CGColor` | A colour well bound to a Core Graphics colour; convert it to a known `CGColorSpace` before reading components | `InspectorFields.swift` (`ColorSpaceMapping`; replaced by our own popover in M3e) |
+| `State(initialValue:)` | Sets a `@State` property's first value from an `init` argument; in `init` the property is its wrapper, `_name` | — | `ColorPickerPopover.swift` (`original`) |
+| `TextField(value:format:)` | A text field that edits a number, parsed and shown with a format (`.number.precision(.fractionLength(0...4))`) | `NSNumberFormatter` on an `NSTextField` | `ColorPickerPopover.swift` |
+| A custom control: shapes and a `DragGesture` | Draw the control from shapes in a `GeometryReader`, and map the pointer to a value with `DragGesture(minimumDistance: 0)` (which also takes a click) | Subclassing `NSControl` and overriding `mouseDown`/`mouseDragged` | `ColorPickerPopover.swift` (`ColorTrack`, `ColorField`) |
+| `.presentationBackground` | What is behind a popover's or sheet's content; here opaque instead of the default glass | — | `ColorPickerPopover.swift` |
+| A float bitmap | `CGContext` with 32-bit components and `CGBitmapInfo.floatComponents`, filled from a `[Float]`, to show computed colours (above 1 included) | `CGBitmapContextCreate` with `kCGBitmapFloatComponents` | `ColorPickerPopover.swift` (`fieldImage`) |
+| `NSColorSampler` | The system's screen eyedropper; its handler gets the colour (or nil) | — | `ColorPickerPopover.swift` (`sampleScreen`) |
 | `DisclosureGroup` | A collapsible section with a triangle; `isExpanded:` binds whether it is open | `InspectorPanel.swift` |
 | `Transferable`, `.draggable`, `.dropDestination` | A value that can be dragged (or copied); a view that starts the drag; a view that accepts drops of that type, with the drop location | `LibraryPanel.swift`, `GraphPanel.swift` |
 | `UTType(exportedAs:)` | A data type of our own for the pasteboard, also declared in Info.plist; `CodableRepresentation` carries a Codable value under it | `LibraryPanel.swift` |

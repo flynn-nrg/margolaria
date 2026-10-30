@@ -13,7 +13,8 @@
 //
 // Introduces (SWIFT): `@FocusState`, `Binding(get:set:)` (a binding computed
 // from closures), `Slider` with `onEditingChanged`, `ColorPicker` with a
-// `CGColor`, `CGColorSpace` and converting colours between spaces,
+// `CGColor` (M2b; replaced by ColorPickerPopover in M3e), `CGColorSpace`
+// and converting colours between spaces,
 // `NSOpenPanel`, `.onExitCommand`, structs of closures.
 
 import AppKit
@@ -303,24 +304,37 @@ struct ColorEditor: View {
     let componentCount: Int
     let actions: InputActions
 
+    /// Whether the picker (M3e) is open.
+    @State private var picking: Bool = false
+
     var body: some View {
         let space: ColorSpaceMapping = ColorSpaceMapping(materialX: input.activeColorSpace)
         let numbers: [Double] = MXValueText.numbers(input.value ?? "") ?? Array(repeating: 0, count: componentCount)
-        // SWIFT: A binding of a Core Graphics colour (`CGColor`, a C type
-        // that Swift manages with ARC like an object). The colour panel
-        // reports changes continuously while the user drags in it.
-        let color = Binding<CGColor>(
-            get: { space.cgColor(numbers) },
-            set: { newColor in
-                guard let components = space.components(of: newColor, count: componentCount) else {
-                    return
-                }
-                actions.scrub(MXValueText.text(components, as: input.valueType))
-            }
-        )
         HStack(spacing: 6) {
-            ColorPicker("", selection: color, supportsOpacity: componentCount == 4)
-                .labelsHidden()
+            // The well: the colour, converted for the screen; a click
+            // opens the picker (ColorPickerPopover.swift).
+            Button {
+                picking = true
+            } label: {
+                // SWIFT: `Color(cgColor:)` shows a Core Graphics colour (a
+                // C type that Swift manages with ARC like an object) in
+                // SwiftUI, in its own colour space.
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(cgColor: space.cgColor(numbers)))
+                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(.separator))
+                    .frame(width: 40, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help("Pick a colour")
+            .popover(isPresented: $picking, arrowEdge: .leading) {
+                ColorPickerPopover(input: input, componentCount: componentCount, actions: actions)
+            }
+            if ColorPicking.isOutOfGamut(SIMD3(numbers.count > 0 ? numbers[0] : 0, numbers.count > 1 ? numbers[1] : 0,
+                                               numbers.count > 2 ? numbers[2] : 0)) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .help("Outside the gamut of \(space.label): a component is negative. Open the picker to clip it.")
+            }
             Text(space.label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -374,6 +388,11 @@ struct ColorSpaceMapping {
         help = "\(whose): \(colorSpace.name) (\(configuration.name))"
         self.toWell = toWell.isIdentity ? nil : toWell
         self.fromWell = fromWell.isIdentity ? nil : fromWell
+    }
+
+    /// RGB in the input's space, converted to the well's (linear Rec.709).
+    func wellRGB(_ rgb: SIMD3<Double>) -> SIMD3<Double> {
+        toWell?.convert(rgb) ?? rgb
     }
 
     /// A colour from MaterialX numbers in the input's space (alpha 1 for a
