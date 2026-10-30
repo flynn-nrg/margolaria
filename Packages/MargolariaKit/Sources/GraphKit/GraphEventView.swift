@@ -93,7 +93,7 @@ public class GraphEventView: NSView {
 
     /// Keyboard shortcuts, as in MaterialX's Graph Editor (PLAN.md §4.2):
     /// A frames everything, F the selection, U leaves a nodegraph; Tab adds
-    /// a node (M2e).
+    /// a node (M2e); S solos the selected node, as ⌥-click does (M3d).
     public override func keyDown(with event: NSEvent) {
         // Only plain keys; ⌘A and friends go to the menus.
         let modifiers: NSEvent.ModifierFlags = event.modifierFlags.intersection([.command, .option, .control])
@@ -112,6 +112,10 @@ public class GraphEventView: NSView {
             controller.frame(.selection)
         case "u":
             controller.onNavigateUp?()
+        case "s":
+            if !controller.soloSelection() {
+                NSSound.beep()
+            }
         case "\t":
             // Tab: add a node where the pointer is (M2e).
             controller.requestNodeSearch(at: pointerLocation())

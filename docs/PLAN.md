@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is in progress, planned in §8.3: M3a (OpenColorIO) and M3b (viewport lighting and view transform) done; M3c (per-node thumbnails) is under review.
+Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is in progress, planned in §8.3: M3a (OpenColorIO), M3b (viewport lighting and view transform) and M3c (per-node thumbnails) done; M3d (solo preview) is under review.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -106,7 +106,7 @@ See `docs/mockup/margolaria-mockup.png`. The source is `margolaria-mockup.svg`, 
 | Connect / disconnect | Drag pin to pin; ⌥-drag a wire to detach it; drop a node onto a wire to insert it |
 | Enter / exit nodegraph | Double-click / `U` or breadcrumb (matches the MaterialX Graph Editor) |
 | Frame selection / all | `F` / `A` |
-| Solo-preview a node | ⌥-click the node's thumbnail (Blender's Ctrl+Shift-click idea) |
+| Solo-preview a node | ⌥-click the node's thumbnail (Blender's Ctrl+Shift-click idea), or S |
 | Group | ⌘G puts the selection in a backdrop; ⌥⌘G collapses it into a nodegraph |
 | Promote input | ⌥-drag it to the graph edge, or right-click → Promote |
 | Command palette | ⌘K (every menu command, plus node search) |
@@ -270,6 +270,12 @@ Found in M3c (2026-10-30):
 - **MaterialX 1.39.5 can't make 12 of the 293 swatches in the examples.** Shading a node alone, rather than its material, hits two generator bugs: an image node inside a nodegraph that has an interface input with the same name as one of the node's inputs (`uvtiling` in the brick and onyx examples) gets two uniforms of that name, a float2 and a float, and the MSL doesn't compile; and the hair absorption helpers call `mx_environment_radiance`, which MaterialX only includes for surfaces. These nodes show "No preview" on the canvas, and the inspector shows the compiler's message. SwatchCorpusTests lists them, and says when a newer MaterialX fixes one. Worth reporting to MaterialX; a workaround (shading such a node through a temporary `<output>`, or renaming the clashing input in a copy) is possible if they matter.
 - **Graph edits recompile.** Connecting, adding or changing the type of a node changes the shaders downstream, and each new shader takes 170–450 ms to compile, several at once (half the processor cores): the 28 swatches of the brick example's nodegraph take 1.3 s the first time on an 8 + 4-core Mac, against 5.0 s one at a time. The canvas keeps the old swatches until the new ones are drawn. Value edits don't recompile: see §8.3.
 
+Found in M3d (2026-10-30):
+
+- **Storm missed connection changes inside a nodegraph.** Reconnecting a nodegraph's output to another node (by wiring on the canvas since M2d, or a solo preview) left the viewport showing the old network: the stage had the new connection, but Hydra didn't rebuild the material. Values changed inside a nodegraph were shown. **Fixed:** after each update, MGStormRenderer compares every connection under the MaterialX root with those before; if any changed, it removes and adds again the stage's reference to the MaterialX layer, and UsdImaging reads every material afresh. Value edits (a slider drag) change no connection and stay cheap. StormUpdateTests checks it. Worth reporting to OpenUSD.
+- **Storm can't compile `surface_unlit`.** Its generated code uses environment uniforms (`u_envMatrix`, `u_envRadianceMips`) that Storm only declares for lit surfaces, and the sphere falls back to grey. Solo previews of values use a `standard_surface` with no base and no specular, and the value as emission, which shows exactly the value.
+- **UsdMtlx and nodes added around a nodegraph.** A top-level `convert` reading a nodegraph's output came out black, and a shader node placed inside a nodegraph lost its connections. Solo previews therefore convert values next to the node, inside its nodegraph, and keep shader nodes at the top level, reading the graph through a new output.
+
 ### 8.3 M3 plan (previews & colour)
 
 M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport's view transform and the colour pickers both need it.
@@ -293,6 +299,8 @@ M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport'
 | Large graphs (M3c) | Swatches are drawn only for nodes on screen or within half a screen of it, nearest the middle first, and none below 40% zoom (where titles disappear); panning and zooming ask for the rest 150 ms after the camera stops. The toggle stays on for every graph. | A graph of hundreds of nodes would otherwise compile hundreds of shaders on opening, mostly for nodes off screen or too small to see. An automatic "off for big graphs" would have to override the user's one app-wide setting. |
 | Overlapping saved positions (M3c) | Positions saved by another editor, or before swatches, can make our taller nodes overlap. The canvas pushes overlapping nodes down on screen, within their column, keeping their order (`GraphAutoLayout.separate`); the document keeps its positions until a node is moved. The canvas bar's **Arrange** button lays the whole level out again and saves every position, as one undo step. | Opening a file shouldn't change it; rearranging is the user's decision, and undoable. |
 | M3's exit criterion (M3c) | Measured in SwatchCacheTests on the marble example (a nodegraph of 12 nodes feeding a standard_surface): a value edit redraws the 7 swatches downstream of it in about 17 ms; a shader value edit, its 2 swatches (shader and material) in about 19 ms; a new connection, one recompiled swatch in about 200 ms (4 ms when macOS's shader cache already has it). Every example: 281 swatches drawn, the 12 of §8.2 failing. | The criterion is under 100 ms after an edit on a typical graph. |
+| Solo preview (M3d) | ⌥-click a node's swatch or title bar (⌥-drag elsewhere still cuts wires), S with one node selected, or the inspector's button, shows that node alone in the viewport; again, the bar's ✕ or the inspector's button goes back to the material. The soloed node is outlined in orange; the viewport's bar says "Solo: name". It stays across edits and levels, and ends if the node is deleted. MXKit writes the preview text with a material wrapped around the node (`MXDocument.soloPreview`): a value through `convert` nodes to color3, as the emission of an otherwise black `standard_surface` (unlit, like its swatch); a BSDF in a `surface`; a shader in a `surfacematerial`; a material as it is. The document isn't changed. | PLAN §4.1's ⌥-click on the thumbnail; the title bar too, for when swatches are hidden. A wrapper material rather than a separate renderer: Storm shows it with the viewport's light, camera and view transform, and every edit updates it as usual. The wrapper's shape works around UsdMtlx and Storm (§8.2). Checked on every node with a swatch in every example (SoloPreviewTests, about a minute). |
+| Data swatches (M3d) | Values that are data, not light (float, vector2/3/4: roughness, masks, normals, positions), are shown through the display's **Raw** view (`ViewTransform.raw`): unconverted, so 0.5 shows as half the display's white. Colours, shaders and materials keep the chosen view transform. The same in the viewport for a soloed value, with "Raw" in its bar. | Tone mapping is for light; through ACES a roughness of 0.5 showed as 0.56 of white. Raw is how data maps are shown in other tools. |
 
 **PRs:**
 
@@ -301,8 +309,12 @@ M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport'
 | **M3a: OpenColorIO** | `scripts/build-ocio.sh`; the `ColorBridge` and `ColorKit` targets; the built-in studio config; the inspector's colour wells converted by OCIO | Conversions match the colour spaces' published definitions (the sRGB curve, gamma curves, the AP1 to Rec. 709 matrix) and every MaterialX space is known; the Developer ID build embeds and signs OCIO, and the notarized build still passes `spctl` |
 | **M3b: Viewport lighting and view transform** | A neutral studio environment (`TODO(M3)` in `MGStormRenderer.mm`); OCIO's view transform on Storm's output, with display and view menus; then §8.2's comparison with MaterialXView | The suspect examples (SimpleHair, gold, Disney) are explained or fixed |
 | **M3c: Per-node thumbnails** | PreviewKit's swatches (M0c) on canvas nodes, rendered off the main thread, cancellable, re-rendered only downstream of an edit | M3's exit criterion: swatches update in under 100 ms after an edit on a typical graph |
-| **M3d: Solo preview** | Click a node to show its output in the viewport, until solo is left. Data swatches: value nodes whose type isn't a colour (float, vector2/3/4: roughness, masks, normals, positions) shown without tone mapping, only the display's encoding, as the config's Raw view does; colours, shaders and materials keep the view transform (found in M3c: a roughness of 0.5 is currently tone-mapped like scene light) | Any node's output in the examples can be soloed |
+| **M3d: Solo preview** | Click a node to show its output in the viewport, until solo is left. Data swatches: value nodes whose type isn't a colour (float, vector2/3/4: roughness, masks, normals, positions) shown unconverted, through the config's Raw view; colours, shaders and materials keep the view transform (found in M3c: a roughness of 0.5 is currently tone-mapped like scene light) | Any node's output in the examples can be soloed |
 | **M3e: OCIO colour pickers** | Picking in a chosen space, converted to the input's; §8.2's out-of-gamut decision | Picks give the values OCIO's conversions give, in every space the picker offers |
+
+### 8.4 After the features: keyboard shortcuts
+
+Decided 2026-10-30: once the milestones' features are in, add keyboard shortcuts for most actions, as users are expected to rely on them to work quickly (the canvas has A, F, U, S, Tab, Delete and ⌥-drag so far). Review every command then, give the frequent ones single keys on the canvas and menu shortcuts elsewhere, show them in the menus and tooltips, and check for clashes with macOS and with MaterialX's Graph Editor conventions (PLAN.md §4.2).
 
 ## 9. Open questions
 

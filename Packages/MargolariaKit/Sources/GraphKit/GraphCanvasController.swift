@@ -16,6 +16,12 @@
 // (GraphWiring.swift has the rules). Dropping a wire on a node rather than
 // a row offers that node's compatible inputs, hidden ones included.
 //
+// Solo (M3d): ⌥-clicking a node's swatch, or its title bar, or S with the
+// node selected, asks the app to show that node alone in the viewport
+// (onSoloNode); ⌥-dragging anywhere
+// else still cuts wires. The app says which node is soloed (`soloNode`),
+// and the renderers outline it.
+//
 // Adding nodes (M2e): Tab, or a new wire dropped on empty canvas, asks the
 // app for its node search (onRequestNodeSearch). A dropped wire stays
 // drawn, dangling, until the app reports the search closed
@@ -154,6 +160,9 @@ public final class GraphCanvasController {
     public private(set) var cutLine: CutLine? = nil
     public private(set) var cutWires: Set<GraphWire> = []
 
+    /// The node shown alone in the viewport (M3d), if it is on this level.
+    public var soloNode: Int? = nil
+
     /// Each node's swatch, by node ID, for the nodes that have a thumbnail
     /// (``GraphNode/hasThumbnail``). Nodes not in it show an empty disc.
     public var thumbnails: [Int: NodeThumbnail] = [:]
@@ -263,6 +272,9 @@ public final class GraphCanvasController {
     /// canvas. The app shows its node search at the request's location,
     /// and calls ``endNodeSearch()`` when it closes.
     @ObservationIgnored public var onRequestNodeSearch: (@MainActor (NodeSearchRequest) -> Void)? = nil
+    /// Called on ⌥-click on a node's swatch or title bar: show it alone in
+    /// the viewport, or stop if it already is (M3d).
+    @ObservationIgnored public var onSoloNode: (@MainActor (Int) -> Void)? = nil
 
     /// The size of the view showing the canvas, kept up to date by the view.
     /// Framing needs it; until the view has been laid out it is zero.
@@ -392,6 +404,11 @@ public final class GraphCanvasController {
         // search is closing; don't leave the wire behind.
         if case .awaitingNode = drag {
             endNodeSearch()
+        }
+        // ⌥ on a node's swatch or title bar solos it; elsewhere it cuts.
+        if cut, case .node(let id) = hitTest(point), Self.isSoloSpot(point, of: model.nodes[id]) {
+            onSoloNode?(id)
+            return
         }
         if cut {
             drag = .cutting(start: point)
@@ -866,6 +883,26 @@ public final class GraphCanvasController {
         case .intoInput?:
             return CGPoint(x: point.x - GraphLayout.nodeWidth, y: y)
         }
+    }
+
+    /// Solos the selected node, or stops soloing it, as an ⌥-click on it
+    /// does (the S key). Returns false, doing nothing, unless exactly one
+    /// node is selected.
+    @discardableResult
+    public func soloSelection() -> Bool {
+        guard selection.count == 1, let id = selection.first else {
+            return false
+        }
+        onSoloNode?(id)
+        return true
+    }
+
+    /// True if an ⌥-click at `point` (graph coordinates) on `node` solos
+    /// it: on its swatch, or on its title bar.
+    static func isSoloSpot(_ point: CGPoint, of node: GraphNode) -> Bool {
+        let frame: CGRect = GraphLayout.frame(of: node)
+        let header = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: GraphLayout.headerHeight)
+        return header.contains(point) || (node.hasThumbnail && GraphLayout.thumbnailFrame(of: node).contains(point))
     }
 
     /// A double-click at `viewPoint`: opens the node there, if any.

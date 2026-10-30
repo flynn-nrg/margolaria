@@ -78,6 +78,19 @@ public enum MXValidationResult: Equatable, Sendable {
 /// look like a value but behave like a reference. Using a class makes the
 /// sharing visible in the type.
 ///
+/// A document's preview text with a material that shows one element on its
+/// own (``MXDocument/soloPreview(for:)``).
+public struct MXSoloPreview: Hashable, Sendable {
+    /// MaterialX XML, self-contained like the preview text.
+    public let xml: String
+    /// The material to bind: the one added, or the element if it is a
+    /// material itself.
+    public let materialName: String
+    /// The MaterialX type of what is shown, such as "float" or
+    /// "surfaceshader".
+    public let outputType: String
+}
+
 /// Not `Sendable`: the document will be edited, and mutable shared state must
 /// stay on one thread. The compiler enforces that: it rejects code that would
 /// pass an MXDocument to another thread.
@@ -193,6 +206,23 @@ public final class MXDocument {
             throw MXError.writeFailed
         }
         return xml
+    }
+
+    /// The preview text (``previewXMLString()``) with a material added
+    /// that shows the element at `path` on its own, for the viewport's
+    /// solo preview (M3d). The document itself isn't changed.
+    ///
+    /// - Throws: ``MXError/notFound`` if the element can't be shown alone:
+    ///   it doesn't exist, has no output a sphere can show (a string, a
+    ///   matrix), or sits in a nodegraph inside another.
+    public func soloPreview(for path: String) throws -> MXSoloPreview {
+        var solo = mxbridge.SoloPreview()
+        var errorMessage = std.string()
+        guard handle.writeSoloPreview(std.string(path), &solo, &errorMessage), !solo.xml.empty() else {
+            throw MXError.notFound(errorMessage.swiftString)
+        }
+        return MXSoloPreview(xml: solo.xml.swiftString, materialName: solo.materialName.swiftString,
+                             outputType: solo.outputType.swiftString)
     }
 
     /// Makes `library`'s node definitions visible to this document.

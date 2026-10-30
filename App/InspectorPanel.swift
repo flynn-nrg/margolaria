@@ -31,6 +31,9 @@ struct InspectorPanel: View {
     let document: MaterialXDocument
     /// The path of the element selected on the canvas, or nil.
     let selectedPath: String?
+    /// The element shown alone in the viewport (M3d); the node header's
+    /// button sets and clears it.
+    @Binding var soloPath: String?
     /// Shows the element at a path on the canvas (a connection's source,
     /// or a node just renamed).
     let onShow: (String) -> Void
@@ -44,7 +47,7 @@ struct InspectorPanel: View {
         VStack(spacing: 0) {
             if let selectedPath, let element = lookUp(selectedPath) {
                 ScrollView {
-                    InspectedElementView(document: document, element: element, onShow: onShow)
+                    InspectedElementView(document: document, element: element, soloPath: $soloPath, onShow: onShow)
                         .padding(12)
                 }
                 // A new set of editors for each element. Otherwise SwiftUI
@@ -78,13 +81,14 @@ struct InspectorPanel: View {
 private struct InspectedElementView: View {
     let document: MaterialXDocument
     let element: MXInspectable
+    @Binding var soloPath: String?
     let onShow: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             switch element {
             case .node(let node):
-                NodeHeader(document: document, node: node, onShow: onShow)
+                NodeHeader(document: document, node: node, soloPath: $soloPath, onShow: onShow)
                 Divider()
                 InputList(document: document, inputs: node.inputs, ownerPath: node.path,
                           sourceGraph: parent(of: node.path), isReadOnly: isReadOnly(node), onShow: onShow)
@@ -149,6 +153,7 @@ private struct ElementTitle: View {
 private struct NodeHeader: View {
     let document: MaterialXDocument
     let node: MXNode
+    @Binding var soloPath: String?
     let onShow: (String) -> Void
 
     var body: some View {
@@ -183,6 +188,17 @@ private struct NodeHeader: View {
                     // SWIFT: Lets the text wrap onto as many lines as it
                     // needs instead of being cut off.
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            // Solo (M3d): the node alone in the viewport, or back to the
+            // material. For every node with a swatch, and materials.
+            if SwatchPlan.shaderPath(for: node) != nil {
+                let isSoloed: Bool = soloPath == node.path
+                Button(isSoloed ? "Show the Material in the Viewport" : "Show in Viewport Alone",
+                       systemImage: "scope") {
+                    soloPath = isSoloed ? nil : node.path
+                }
+                .controlSize(.small)
+                .help("Solo: show this node's output on the viewport's sphere, on its own (⌥-click its swatch on the canvas, or press S)")
             }
             // A swatch that couldn't be drawn (M3c) says why here: the
             // canvas only shows "No preview".

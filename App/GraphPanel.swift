@@ -38,6 +38,11 @@
 // transform, from the same user defaults as its menus. The bar above the
 // canvas hides them, for a more compact graph.
 //
+// Solo (M3d): ⌥-clicking a node's swatch or title bar, or S with it
+// selected, shows it alone in
+// the viewport (ContentView's `soloPath`), or stops if it already is; the
+// soloed node is outlined.
+//
 // Arranging (M3c): saved positions can make nodes overlap (they are taller
 // with swatches than in the editor that saved them); the canvas pushes
 // them apart on screen (DocumentGraph.layout), without changing the
@@ -120,6 +125,9 @@ struct GraphPanel: View {
     /// A node to add in the middle of the canvas (a nodedef's name), from
     /// the Library tab. Cleared once added.
     @Binding var nodeToAdd: String?
+
+    /// The element shown alone in the viewport (M3d), by path.
+    @Binding var soloPath: String?
 
     /// The nodes showing all their inputs, by path.
     @State private var expandedPaths: Set<String> = []
@@ -243,6 +251,9 @@ struct GraphPanel: View {
         .onChange(of: focus) {
             applyFocus()
         }
+        .onChange(of: soloPath) {
+            level?.controller.soloNode = soloPath.flatMap { level?.graph.nodeIndex(forPath: $0) }
+        }
         // A node from the Library tab, added in the middle of the canvas.
         .onChange(of: nodeToAdd) {
             guard let nodeDef = nodeToAdd else {
@@ -337,6 +348,19 @@ struct GraphPanel: View {
                 try newLevel.graph.disconnect(inputs, in: content)
             }
         }
+        newLevel.controller.onSoloNode = { [weak newLevel] id in
+            guard let newLevel else {
+                return
+            }
+            // A nodegraph's own inputs show nothing on their own.
+            guard newLevel.graph.kinds[id] != .interfaceInput else {
+                NSSound.beep()
+                return
+            }
+            let path: String = newLevel.graph.elementPaths[id]
+            soloPath = soloPath == path ? nil : path
+        }
+        newLevel.controller.soloNode = soloPath.flatMap { graph.nodeIndex(forPath: $0) }
         newLevel.controller.onRequestNodeSearch = { request in
             searchRequest = request
         }
@@ -601,7 +625,7 @@ private struct BreadcrumbBar: View {
                 crumb(parts[i], target: parts[0...i].joined(separator: "/"))
             }
             Spacer()
-            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

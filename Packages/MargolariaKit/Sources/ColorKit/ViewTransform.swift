@@ -89,6 +89,16 @@ public struct ViewTransform: Hashable, Sendable {
         return chosen.isAvailable ? chosen : .standard
     }
 
+    /// The same display's "Raw" view: values shown as they are, with no
+    /// conversion at all. For data (roughness, masks, normals,
+    /// positions), whose numbers aren't light and shouldn't be tone-mapped
+    /// (M3d): a roughness of 0.5 shows as half the display's white. Nil if
+    /// the config has no Raw view for this display.
+    public var raw: ViewTransform? {
+        let raw = ViewTransform(display: display, view: "Raw")
+        return raw.isAvailable ? raw : nil
+    }
+
     /// True when this display and view exist and are offered.
     public var isAvailable: Bool {
         Self.displayColorSpaces[display] != nil && Self.views(for: display).contains(view)

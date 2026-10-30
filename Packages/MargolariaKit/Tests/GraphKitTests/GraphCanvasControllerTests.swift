@@ -173,6 +173,22 @@ struct CanvasKeyTests {
         #expect(controller.zoom < selectionZoom)
     }
 
+    @Test("S solos the selected node, as ⌥-click does; only with one node selected")
+    func soloKey() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 5))
+        let view = GraphEventView(controller: controller)
+        var soloed: [Int] = []
+        controller.onSoloNode = { soloed.append($0) }
+        controller.selection = [3]
+        view.keyDown(with: key("s"))
+        #expect(soloed == [3])
+        controller.selection = [1, 2]
+        #expect(!controller.soloSelection())
+        controller.selection = []
+        #expect(!controller.soloSelection())
+        #expect(soloed == [3])
+    }
+
     @Test("A new node goes with its header centred on the point asked for")
     func newNodePosition() {
         let controller = GraphCanvasController(model: .synthetic(nodeCount: 5))
@@ -213,5 +229,31 @@ extension GraphCanvasControllerTests {
         // Zoomed out below the minimum: none.
         controller.zoom = 0.3
         #expect(controller.nodesNearView(minimumZoom: 0.4).isEmpty)
+    }
+    @Test("⌥-click on a swatch or title bar solos the node; ⌥-drag elsewhere still cuts")
+    func soloClick() {
+        let node = GraphNode(id: 0, title: "noise", category: .procedural, position: .zero,
+                             inputs: [GraphPort(name: "in", type: .float)], outputs: [GraphPort(name: "out", type: .float)],
+                             hasThumbnail: true)
+        let controller = GraphCanvasController(model: GraphModel(nodes: [node], wires: []))
+        controller.zoom = 1
+        controller.offset = .zero
+        var soloed: [Int] = []
+        controller.onSoloNode = { soloed.append($0) }
+
+        let swatch: CGRect = GraphLayout.thumbnailFrame(of: node)
+        controller.mouseDown(at: CGPoint(x: swatch.midX, y: swatch.midY), extend: false, cut: true)
+        _ = controller.mouseUp()
+        controller.mouseDown(at: CGPoint(x: 20, y: GraphLayout.headerHeight / 2), extend: false, cut: true)
+        _ = controller.mouseUp()
+        #expect(soloed == [0, 0])
+        #expect(controller.cutLine == nil)
+
+        // On the input row, or on empty canvas: a cut, as before.
+        let row: CGRect = GraphLayout.inputRowFrame(of: node, index: 0)
+        controller.mouseDown(at: CGPoint(x: row.midX, y: row.midY), extend: false, cut: true)
+        #expect(controller.cutLine != nil)
+        _ = controller.mouseUp()
+        #expect(soloed.count == 2)
     }
 }

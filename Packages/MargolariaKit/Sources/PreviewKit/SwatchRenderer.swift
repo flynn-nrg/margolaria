@@ -180,6 +180,9 @@ public final class SwatchRenderer {
     public private(set) var viewTransform: ViewTransform?
     /// Turns the linear render into the display's encoding.
     private var displayPass: DisplayPass
+    /// The same for data swatches (M3d): the display's Raw view, which
+    /// shows values unconverted (see ViewTransform.raw).
+    private var dataPass: DisplayPass
 
     /// The colour format swatches are rendered in: linear, half float.
     static let colorFormat: MTLPixelFormat = .rgba16Float
@@ -212,6 +215,7 @@ public final class SwatchRenderer {
         self.textureLoader = MTKTextureLoader(device: device)
         self.viewTransform = viewTransform
         self.displayPass = try Self.makeDisplayPass(for: viewTransform, device: device)
+        self.dataPass = try Self.makeDisplayPass(for: viewTransform?.raw ?? viewTransform, device: device)
 
         let samplerDescriptor = MTLSamplerDescriptor()
         samplerDescriptor.minFilter = .linear
@@ -275,6 +279,7 @@ public final class SwatchRenderer {
             return
         }
         displayPass = try Self.makeDisplayPass(for: transform, device: device)
+        dataPass = try Self.makeDisplayPass(for: transform?.raw ?? transform, device: device)
         viewTransform = transform
     }
 
@@ -340,8 +345,9 @@ public final class SwatchRenderer {
 
     /// Renders `shader` and returns it as an image for the screen: through
     /// the view transform, in its display's colour space (sRGB without
-    /// one), transparent around the sphere.
-    public func image(_ shader: MXGeneratedShader, size: Int) throws -> CGImage {
+    /// one), transparent around the sphere. With `showsData`, through the
+    /// display's Raw view instead: for values that aren't colours (M3d).
+    public func image(_ shader: MXGeneratedShader, size: Int, showsData: Bool = false) throws -> CGImage {
         let commandBuffer: any MTLCommandBuffer = try makeCommandBuffer()
         let linear: any MTLTexture = try encodeRender(shader, size: size, in: commandBuffer)
 
@@ -353,7 +359,7 @@ public final class SwatchRenderer {
         guard let display = device.makeTexture(descriptor: descriptor) else {
             throw PreviewError.metal("Could not create a \(size)×\(size) texture")
         }
-        displayPass.encode(from: linear, to: display, in: commandBuffer)
+        (showsData ? dataPass : displayPass).encode(from: linear, to: display, in: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error {

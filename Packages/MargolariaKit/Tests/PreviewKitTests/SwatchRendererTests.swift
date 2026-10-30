@@ -186,4 +186,27 @@ struct SwatchRendererTests {
         }
         #expect(sawRed && sawBlue)
     }
+    @Test("Data swatches show their values unconverted; colours keep the view transform")
+    func dataSwatches() throws {
+        let (document, library) = try Fixtures.document(xml: #"""
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <constant name="roughness" type="float"><input name="value" type="float" value="0.5" /></constant>
+              <constant name="grey" type="color3"><input name="value" type="color3" value="0.5, 0.5, 0.5" /></constant>
+            </materialx>
+            """#)
+        // M3d: a float is data, a colour is light.
+        let graph: MXGraph = try document.graph()
+        let requests: [SwatchRequest] = SwatchPlan.requests(for: graph, in: document, documentText: "", customNodeDefs: [])
+        #expect(requests.map(\.showsData) == [true, false])
+
+        // The default view transform is ACES 2.0; data goes through Raw
+        // instead, so 0.5 is stored as 0.5 of white: 128.
+        let data: CGImage = try renderer.image(try document.generateMSL(for: "roughness", library: library),
+                                                size: 64, showsData: true)
+        #expect(abs(Fixtures.pixel(data, x: 32, y: 32).r - 128) <= 1, "\(Fixtures.pixel(data, x: 32, y: 32))")
+        // A grey of 0.5 is light: ACES 2.0 shows it as about 144.
+        let light: CGImage = try renderer.image(try document.generateMSL(for: "grey", library: library), size: 64)
+        #expect(abs(Fixtures.pixel(light, x: 32, y: 32).r - 128) > 10, "\(Fixtures.pixel(light, x: 32, y: 32))")
+    }
 }
