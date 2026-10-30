@@ -11,11 +11,19 @@
 // is dragged: an update costs about 3 ms on top of a 10 ms frame
 // (StormUpdateTests), so no throttling is needed.
 //
+// Solo (M3d): with `soloPath` set, the viewport shows that element on its
+// own instead of the material: MXKit writes the preview text with a
+// material wrapped around it (MXDocument.soloPreview), and the bar says
+// what is soloed, with a button to stop. Data (a float or a vector, not a
+// colour) is shown through the display's Raw view, as its swatch is.
+//
 // Introduces (SWIFT): `Picker` with an optional selection, `@AppStorage`,
-// `Section` in a menu-style picker.
+// `Section` in a menu-style picker; an initializer as a function,
+// `String.init` (M3d).
 
 import ColorKit
 import MXKit
+import PreviewKit
 import SwiftUI
 import ViewportKit
 
@@ -25,6 +33,9 @@ struct ViewportPanel: View {
     /// The MaterialX name of the material shown. ContentView owns it, so
     /// the sidebar can change it too.
     @Binding var materialName: String?
+
+    /// The element shown alone instead of the material (M3d), by path.
+    @Binding var soloPath: String?
 
     /// The light around the sphere, kept between launches.
     ///
@@ -47,6 +58,26 @@ struct ViewportPanel: View {
         ViewTransform.preferred(display: display, view: view)
     }
 
+    /// The soloed element's preview, or nil when nothing is soloed or it
+    /// can't be shown (deleted by an edit, say). Written again after every
+    /// edit: reading `document.revision` makes the view ask.
+    private var solo: MXSoloPreview? {
+        _ = document.revision
+        guard let soloPath else {
+            return nil
+        }
+        return try? document.content.soloPreview(for: soloPath)
+    }
+
+    /// The view transform for what is shown: the display's Raw view for a
+    /// soloed value that is data, as its swatch shows it.
+    private func shownTransform(for solo: MXSoloPreview?) -> ViewTransform? {
+        if let solo, SwatchPlan.showsData(solo.outputType) {
+            return viewTransform?.raw ?? viewTransform
+        }
+        return viewTransform
+    }
+
     /// The document's materials (top-level elements of type "material"), in
     /// file order.
     private var materials: [MXElementSummary] {
@@ -54,11 +85,30 @@ struct ViewportPanel: View {
     }
 
     var body: some View {
+        // Once per update of the view: writing it copies the document.
+        let solo: MXSoloPreview? = self.solo
         VStack(spacing: 0) {
             HStack {
                 // SWIFT: The selection is a `String?`, so each row's tag must
                 // be a `String?` too; `Optional(name)` makes one.
-                if materials.isEmpty {
+                if let soloPath, solo != nil {
+                    // SWIFT: `split(separator:).last` is the last part of
+                    // the path: the node's name, a Substring. `String.init`
+                    // names String's initializer as a function, so `map`
+                    // can call it: the same as `.map { String($0) }`.
+                    Label("Solo: " + (soloPath.split(separator: "/").last.map(String.init) ?? soloPath),
+                          systemImage: "scope")
+                        .foregroundStyle(Color(red: 0.98, green: 0.68, blue: 0.2))
+                        .lineLimit(1)
+                        .help("The node's output alone on the sphere. ⌥-click its swatch again, press S, or ✕, for the material.")
+                    Button {
+                        self.soloPath = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Show the material again")
+                } else if materials.isEmpty {
                     // An empty menu would just be a blank button.
                     Text("No material")
                         .foregroundStyle(.secondary)
@@ -83,6 +133,12 @@ struct ViewportPanel: View {
                 if let viewTransform {
                     viewTransformPicker(showing: viewTransform)
                 }
+                if let solo, SwatchPlan.showsData(solo.outputType) {
+                    Text("Raw")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help("A \(solo.outputType) is data, not light: its values are shown as they are, without the view transform")
+                }
                 Text("Storm")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -93,7 +149,10 @@ struct ViewportPanel: View {
             .background(.bar)
             Divider()
 
-            if !materials.isEmpty, !document.previewXML.isEmpty {
+            if let solo {
+                ViewportView(source: .text(solo.xml), materialName: solo.materialName,
+                             environment: environment, viewTransform: shownTransform(for: solo))
+            } else if !materials.isEmpty, !document.previewXML.isEmpty {
                 ViewportView(source: .text(document.previewXML), materialName: materialName,
                              environment: environment, viewTransform: viewTransform)
             } else {
@@ -102,6 +161,12 @@ struct ViewportPanel: View {
                     // Fill the panel, so the material bar stays at the top
                     // (as GraphPanel does for an empty level).
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        // A soloed element that an edit removed: back to the material.
+        .onChange(of: document.revision) {
+            if soloPath != nil, self.solo == nil {
+                soloPath = nil
             }
         }
         // Show the first material until one is chosen, and again if the

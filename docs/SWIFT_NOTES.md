@@ -71,6 +71,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `static let x = { ... }()` | A constant computed by a closure, once, on first use | A function-local static initialised by a lambda | `StudioEnvironment.swift` (`fileURL`) |
 | `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
 | `Dictionary(uniqueKeysWithValues:)` | Builds a dictionary from (key, value) pairs; traps on a repeated key (`uniquingKeysWith:` decides instead) | Filling a `std::map` from a vector of pairs | `GraphPanel.swift` (`requestSwatches`) |
+| An initializer as a function | `String.init` is String's initializer, passable where a function is expected: `.map(String.init)` is `.map { String($0) }` | A function pointer to a constructor (which C++ doesn't have) | `ViewportPanel.swift` |
 | `Hasher` | Swift's hash function, used by hand: `combine` values, then `finalize()` to an `Int`. Seeded randomly per process, so hashes are only compared within one run | `std::hash` combined with `boost::hash_combine` | `SwatchPlan.swift` |
 | `Float16` | A 16-bit float, the same as Metal's `half` | `_Float16` | `SwatchEnvironment.swift` |
 | CryptoKit's `SHA256` | Hashes bytes into a digest; here, to key a cache by a long text without keeping it | CommonCrypto's `CC_SHA256` | `SwatchRenderer.swift` (`key(for:)`) |

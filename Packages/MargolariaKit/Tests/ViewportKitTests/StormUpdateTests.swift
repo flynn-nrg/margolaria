@@ -72,6 +72,40 @@ struct StormUpdateTests {
         #expect(green.g > green.r + 40, "green through the new node, got \(green)")
     }
 
+    /// A material whose colour comes from a nodegraph, whose output is
+    /// connected to `source`: "red" or "blue".
+    static func graphMaterial(source: String) -> String {
+        """
+        <?xml version="1.0"?>
+        <materialx version="1.39">
+          <nodegraph name="NG">
+            <constant name="red" type="color3"><input name="value" type="color3" value="0.8, 0.05, 0.05" /></constant>
+            <constant name="blue" type="color3"><input name="value" type="color3" value="0.05, 0.05, 0.8" /></constant>
+            <output name="out" type="color3" nodename="\(source)" />
+          </nodegraph>
+          <open_pbr_surface name="SR" type="surfaceshader">
+            <input name="base_color" type="color3" nodegraph="NG" output="out" />
+          </open_pbr_surface>
+          <surfacematerial name="M" type="material">
+            <input name="surfaceshader" type="surfaceshader" nodename="SR" />
+          </surfacematerial>
+        </materialx>
+        """
+    }
+
+    @Test("Reconnecting a nodegraph's output to another node shows in the next frame")
+    func rewiredGraph() throws {
+        // Storm alone kept the old network after this edit (M3d): the
+        // renderer re-adds the MaterialX layer when connections change.
+        let renderer = try MGStormRenderer(materialXString: Self.graphMaterial(source: "red"))
+        let red = try Self.litPixel(renderer)
+        #expect(red.r > red.b + 40, "red, got \(red)")
+        try renderer.updateMaterialXString(Self.graphMaterial(source: "blue"))
+        #expect(renderer.boundMaterialPath == "/World/MaterialX/Materials/M")
+        let blue = try Self.litPixel(renderer)
+        #expect(blue.b > blue.r + 40, "blue after rewiring, got \(blue)")
+    }
+
     @Test("Bad text is refused and the last document stays")
     func badText() throws {
         let renderer = try MGStormRenderer(materialXString: Self.material(color: "0.8, 0.05, 0.05"))

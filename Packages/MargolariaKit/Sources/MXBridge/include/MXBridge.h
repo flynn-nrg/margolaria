@@ -64,6 +64,17 @@ struct ShaderUniform {
     std::string stringValue;
 };
 
+/// A document's preview text with a material showing one element on its
+/// own (Document::writeSoloPreview).
+struct SoloPreview {
+    /// The preview XML, with the added material.
+    std::string xml;
+    /// The material to show: the added one, or the element itself.
+    std::string materialName;
+    /// The type of what is shown: "float", "color3", "surfaceshader", ...
+    std::string outputType;
+};
+
 /// A shader generated for one element, in the Metal Shading Language.
 struct GeneratedShader {
     /// Complete MSL source for the vertex stage (entry point "VertexMain").
@@ -312,6 +323,14 @@ public:
     /// applied, against the folder of the file the element came from.
     /// Returns "" if not loaded.
     std::string writeForPreview() const;
+
+    /// The same, with a material added that shows the element at
+    /// `elementPath` on its own (solo preview, M3d): a value through
+    /// `convert` nodes into the emission of an otherwise black surface, a BSDF in a `surface`, a
+    /// surface shader as it is, each in a new surfacematerial; a material
+    /// itself. A node inside a nodegraph is reached through a new output
+    /// of the graph. The document itself is not changed.
+    bool writeSoloPreview(const std::string& elementPath, SoloPreview& solo, std::string& errorMessage) const;
 
     /// Makes the standard libraries' nodedefs visible to this document, so
     /// validation and nodedef lookups work. The library is referenced, not

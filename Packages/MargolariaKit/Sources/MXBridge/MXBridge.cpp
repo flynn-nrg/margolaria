@@ -594,40 +594,254 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
 
 } // namespace
 
+namespace {
+
+/// A copy of `document` for a renderer reading it from memory: absolute
+/// file paths, `fileprefix` applied (see writeForPreview). It keeps the
+/// document's data library, so nodedefs can still be looked up.
+mx::DocumentPtr PreviewCopy(const mx::DocumentPtr& document) {
+    // A copy, so the document itself keeps its relative paths.
+    mx::DocumentPtr preview = document->copy();
+    preview->setSourceUri(document->getSourceUri());
+    if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
+        preview->setDataLibrary(library);
+    }
+
+    for (const mx::ElementPtr& element : preview->traverseTree()) {
+        mx::ValueElementPtr value = element->asA<mx::ValueElement>();
+        if (!value || value->getType() != mx::FILENAME_TYPE_STRING || !value->hasValueString()) {
+            continue;
+        }
+        // Applies `fileprefix` from this element or any ancestor.
+        mx::FilePath file(value->getResolvedValueString());
+        const std::string source = ResolvedSourceUri(value);
+        if (!file.isEmpty() && !file.isAbsolute() && !source.empty()) {
+            file = (mx::FilePath(source).getParentPath() / file).getNormalized();
+        }
+        value->setValueString(file.asString());
+    }
+    // The prefixes are applied now; leaving them would apply them twice.
+    for (const mx::ElementPtr& element : preview->traverseTree()) {
+        element->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+    }
+    preview->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+    return preview;
+}
+
+/// Writes a preview copy with included elements in place, not as
+/// references to their files.
+std::string WritePreview(const mx::DocumentPtr& preview) {
+    mx::XmlWriteOptions options;
+    options.writeXIncludeEnable = false;
+    return mx::writeToXmlString(preview, &options);
+}
+
+/// The conversions from a value type to color3, through the standard
+/// library's `convert` nodes: one step for most, two for vector2 (there is
+/// no vector2-to-color3), and through float for integers and booleans.
+/// Empty for types with no conversion.
+std::vector<std::string> ConversionsToColor3(const std::string& type) {
+    if (type == "color3") {
+        return {};
+    }
+    if (type == "vector2") {
+        return {"vector3", "color3"};
+    }
+    if (type == "integer" || type == "boolean") {
+        return {"float", "color3"};
+    }
+    if (type == "float" || type == "color4" || type == "vector3" || type == "vector4") {
+        return {"color3"};
+    }
+    return {"?"};
+}
+
+} // namespace
+
 std::string Document::writeForPreview() const {
     if (!_impl) {
         return {};
     }
     try {
-        // A copy, so the document itself keeps its relative paths.
-        mx::DocumentPtr preview = _impl->document->copy();
-        preview->setSourceUri(_impl->document->getSourceUri());
-
-        for (const mx::ElementPtr& element : preview->traverseTree()) {
-            mx::ValueElementPtr value = element->asA<mx::ValueElement>();
-            if (!value || value->getType() != mx::FILENAME_TYPE_STRING || !value->hasValueString()) {
-                continue;
-            }
-            // Applies `fileprefix` from this element or any ancestor.
-            mx::FilePath file(value->getResolvedValueString());
-            const std::string source = ResolvedSourceUri(value);
-            if (!file.isEmpty() && !file.isAbsolute() && !source.empty()) {
-                file = (mx::FilePath(source).getParentPath() / file).getNormalized();
-            }
-            value->setValueString(file.asString());
-        }
-        // The prefixes are applied now; leaving them would apply them twice.
-        for (const mx::ElementPtr& element : preview->traverseTree()) {
-            element->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
-        }
-        preview->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
-
-        mx::XmlWriteOptions options;
-        // Write included elements in place, not as references to their files.
-        options.writeXIncludeEnable = false;
-        return mx::writeToXmlString(preview, &options);
+        return WritePreview(PreviewCopy(_impl->document));
     } catch (const std::exception&) {
         return {};
+    }
+}
+
+bool Document::writeSoloPreview(const std::string& elementPath, SoloPreview& solo,
+                                std::string& errorMessage) const {
+    if (!_impl) {
+        errorMessage = "No document loaded";
+        return false;
+    }
+    try {
+        mx::DocumentPtr preview = PreviewCopy(_impl->document);
+        mx::ElementPtr target = preview->getDescendant(elementPath);
+        if (!target) {
+            errorMessage = "No element at path " + elementPath;
+            return false;
+        }
+        mx::ElementPtr parent = target->getParent();
+        const bool topLevel = parent && parent->isA<mx::Document>();
+
+        // What is shown, as a node and which of its outputs, and the
+        // nodegraph it is in (null at the top level). Every case comes down
+        // to this: a nodegraph shown as a node, or an <output>, is shown
+        // through the node its output is connected to.
+        mx::NodePtr source;
+        std::string sourceOutput;
+        mx::NodeGraphPtr owner;
+        std::string type;
+
+        auto showOutput = [&](const mx::OutputPtr& output, const mx::NodeGraphPtr& graph) {
+            source = output->getConnectedNode();
+            sourceOutput = output->getOutputString();
+            owner = graph;
+            type = output->getType();
+        };
+
+        if (mx::NodePtr node = target->asA<mx::Node>()) {
+            source = node;
+            type = node->getType();
+            // A multi-output node shows its first output, as its swatch does.
+            if (type == mx::MULTI_OUTPUT_TYPE_STRING) {
+                mx::NodeDefPtr nodeDef = node->getNodeDef();
+                std::vector<mx::OutputPtr> outputs = nodeDef ? nodeDef->getActiveOutputs() : std::vector<mx::OutputPtr>{};
+                if (outputs.empty()) {
+                    errorMessage = node->getName() + " has no outputs to show";
+                    return false;
+                }
+                sourceOutput = outputs.front()->getName();
+                type = outputs.front()->getType();
+            }
+            if (topLevel && type == mx::MATERIAL_TYPE_STRING) {
+                // A material is shown as it is.
+                solo.materialName = node->getName();
+                solo.outputType = type;
+                solo.xml = WritePreview(preview);
+                return true;
+            }
+            if (!topLevel) {
+                owner = parent->asA<mx::NodeGraph>();
+            }
+        } else if (mx::NodeGraphPtr graph = target->asA<mx::NodeGraph>(); graph && topLevel) {
+            // A nodegraph shown as a node: its first output.
+            std::vector<mx::OutputPtr> outputs = graph->getOutputs();
+            if (outputs.empty()) {
+                errorMessage = graph->getName() + " has no outputs to show";
+                return false;
+            }
+            showOutput(outputs.front(), graph);
+        } else if (mx::OutputPtr output = target->asA<mx::Output>(); output && parent && parent->isA<mx::NodeGraph>()) {
+            showOutput(output, parent->asA<mx::NodeGraph>());
+        } else {
+            errorMessage = elementPath + " can't be shown on its own";
+            return false;
+        }
+        if (!source) {
+            errorMessage = elementPath + " isn't connected to a node";
+            return false;
+        }
+        if (owner && !(owner->getParent() && owner->getParent()->isA<mx::Document>())) {
+            errorMessage = "Only nodes at the top level or in a top-level nodegraph can be shown";
+            return false;
+        }
+
+        // The chain from the shown node to the material is built in two
+        // parts, because of how UsdMtlx (OpenUSD's MaterialX reader, which
+        // Storm uses) translates documents:
+        //
+        //  - Conversions of a value to color3 go next to the shown node,
+        //    inside its nodegraph if it is in one: a top-level `convert`
+        //    reading a nodegraph's output came out black.
+        //  - Shader nodes (the surface, a BSDF's `surface`) go at the top
+        //    level, reading the nodegraph through a new output: shader
+        //    nodes inside a nodegraph lost their connections.
+        //
+        // `last` and `lastOutput` are the end of the chain so far.
+        mx::NodePtr last = source;
+        std::string lastOutput = sourceOutput;
+        // Connects `port` (an input, or a nodegraph's output: both are
+        // port elements) to the end of the chain, from the same scope.
+        auto feed = [&](const mx::PortElementPtr& port) {
+            port->setNodeName(last->getName());
+            if (!lastOutput.empty()) {
+                port->setOutputString(lastOutput);
+            }
+        };
+
+        // 1. Conversions, next to the shown node.
+        std::string shownType = type;
+        if (type != mx::SURFACE_SHADER_TYPE_STRING && type != "BSDF") {
+            std::vector<std::string> steps = ConversionsToColor3(type);
+            if (!steps.empty() && steps.front() == "?") {
+                errorMessage = "A " + type + " output can't be shown on the sphere";
+                return false;
+            }
+            mx::GraphElementPtr scope = owner ? mx::GraphElementPtr(owner) : mx::GraphElementPtr(preview);
+            std::string from = type;
+            for (const std::string& to : steps) {
+                mx::NodePtr convert = scope->addNode("convert", scope->createValidChildName("margolaria_solo_convert"), to);
+                feed(convert->addInput("in", from));
+                last = convert;
+                lastOutput.clear();
+                from = to;
+            }
+            shownType = "color3";
+        }
+
+        // Connects a top-level input to the end of the chain: directly, or
+        // through a new output of the nodegraph the chain ends in.
+        auto feedFromTop = [&](const mx::InputPtr& input) {
+            if (!owner) {
+                feed(input);
+                return;
+            }
+            mx::OutputPtr exit = owner->addOutput(owner->createValidChildName("margolaria_solo_out"), shownType);
+            feed(exit);
+            input->setNodeGraphString(owner->getName());
+            input->setOutputString(exit->getName());
+        };
+
+        // 2. The surface shader, at the top level.
+        mx::NodePtr material = preview->addNode("surfacematerial", preview->createValidChildName("margolaria_solo"),
+                                                mx::MATERIAL_TYPE_STRING);
+        mx::InputPtr shaderInput = material->addInput("surfaceshader", mx::SURFACE_SHADER_TYPE_STRING);
+        if (shownType == mx::SURFACE_SHADER_TYPE_STRING) {
+            feedFromTop(shaderInput);
+        } else if (shownType == "BSDF") {
+            // A BSDF on its own lights the sphere through MaterialX's
+            // `surface` node, as a shader would.
+            mx::NodePtr surface = preview->addNode("surface", preview->createValidChildName("margolaria_solo_surface"),
+                                                   mx::SURFACE_SHADER_TYPE_STRING);
+            feedFromTop(surface->addInput("bsdf", "BSDF"));
+            shaderInput->setNodeName(surface->getName());
+        } else {
+            // Values are shown unlit, as their swatches are: the colour is
+            // the value, whatever the light. As the emission of a
+            // standard_surface with no base and no specular, which adds
+            // nothing else, rather than MaterialX's surface_unlit: Storm
+            // (OpenUSD 26.08) can't compile surface_unlit, whose code uses
+            // environment uniforms Storm only declares for lit surfaces,
+            // and falls back to a grey sphere.
+            mx::NodePtr surface = preview->addNode("standard_surface",
+                                                   preview->createValidChildName("margolaria_solo_surface"),
+                                                   mx::SURFACE_SHADER_TYPE_STRING);
+            surface->setInputValue("base", 0.0f);
+            surface->setInputValue("specular", 0.0f);
+            surface->setInputValue("emission", 1.0f);
+            feedFromTop(surface->addInput("emission_color", "color3"));
+            shaderInput->setNodeName(surface->getName());
+        }
+
+        solo.materialName = material->getName();
+        solo.outputType = type;
+        solo.xml = WritePreview(preview);
+        return true;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return false;
     }
 }
 

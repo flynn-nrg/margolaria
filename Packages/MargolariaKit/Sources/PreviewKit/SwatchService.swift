@@ -162,7 +162,7 @@ public actor SwatchService {
                 continue
             }
             if renderer.hasPipeline(for: shader) {
-                await deliver(request, draw(shader, with: renderer, size: settings.pixelSize))
+                await deliver(request, draw(shader, with: renderer, for: request, size: settings.pixelSize))
             } else {
                 toCompile.append((request, shader))
             }
@@ -204,7 +204,7 @@ public actor SwatchService {
                     // Cached even if cancelled: the next edit probably needs it.
                     renderer.add(pipeline, for: shader)
                     if !Task.isCancelled {
-                        await deliver(request, draw(shader, with: renderer, size: settings.pixelSize))
+                        await deliver(request, draw(shader, with: renderer, for: request, size: settings.pixelSize))
                     }
                 case .failure(let error):
                     if !Task.isCancelled {
@@ -217,9 +217,10 @@ public actor SwatchService {
     }
 
     /// Draws one swatch with a compiled shader.
-    private func draw(_ shader: MXGeneratedShader, with renderer: SwatchRenderer, size: Int) -> Swatch {
+    private func draw(_ shader: MXGeneratedShader, with renderer: SwatchRenderer, for request: SwatchRequest,
+                      size: Int) -> Swatch {
         do {
-            return .image(try renderer.image(shader, size: size))
+            return .image(try renderer.image(shader, size: size, showsData: request.showsData))
         } catch {
             return .failed(String(describing: error))
         }

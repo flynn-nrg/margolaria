@@ -228,6 +228,8 @@ public enum GraphPalette {
     public static let secondaryText: (CGFloat, CGFloat, CGFloat) = (0.6, 0.6, 0.63)
     public static let wire: (CGFloat, CGFloat, CGFloat) = (0.62, 0.62, 0.66)
     public static let selection: (CGFloat, CGFloat, CGFloat) = (0.25, 0.55, 1.0)
+    /// The node shown alone in the viewport (M3d).
+    public static let solo: (CGFloat, CGFloat, CGFloat) = (0.98, 0.68, 0.2)
     /// The ⌥-drag cut line, and the wires it will cut.
     public static let cut: (CGFloat, CGFloat, CGFloat) = (0.95, 0.35, 0.3)
     /// How strongly rows a dragged wire can't connect to are dimmed: the

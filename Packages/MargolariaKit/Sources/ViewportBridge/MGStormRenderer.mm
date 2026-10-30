@@ -269,6 +269,22 @@ bool ReloadMaterialX(const SdfLayerRefPtr &layer, NSString *path, std::string &m
 
 /// Every UsdShadeMaterial at or below `root`, in stage order (for UsdMtlx,
 /// the MaterialX document's order).
+/// Every connection under `root`, as text ("a.inputs:x -> b.outputs:y",
+/// one per line): to tell whether a reload changed the networks' shape.
+std::string ConnectionSignature(const UsdPrim &root) {
+    std::string signature;
+    for (const UsdPrim &prim : UsdPrimRange(root)) {
+        for (const UsdAttribute &attribute : prim.GetAttributes()) {
+            SdfPathVector targets;
+            attribute.GetConnections(&targets);
+            for (const SdfPath &target : targets) {
+                signature += attribute.GetPath().GetString() + " -> " + target.GetString() + "\n";
+            }
+        }
+    }
+    return signature;
+}
+
 std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     std::vector<UsdShadeMaterial> materials;
     for (const UsdPrim &prim : UsdPrimRange(root)) {
@@ -465,6 +481,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     }
     try {
         std::string message;
+        const std::string before = ConnectionSignature(_stage->GetPrimAtPath(SdfPath(kMaterialXRootPath)));
         if (!WriteText(xml.UTF8String, _textFile, message) || !ReloadMaterialX(_materialLayer, _textFile, message)) {
             if (error != nullptr) {
                 *error = MakeError(@(message.c_str()));
@@ -473,6 +490,17 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         }
         // Materials may have been added, removed or renamed.
         UsdPrim materialXRoot = _stage->GetPrimAtPath(SdfPath(kMaterialXRootPath));
+        // Storm (OpenUSD 26.08) notices changed values and new nodes, but
+        // not a connection changed inside a nodegraph (its output
+        // reconnected to another node): the sphere kept the old network
+        // (found in M3d). When any connection changed, the reference to
+        // the MaterialX layer is removed and added again: UsdImaging then
+        // reads every material afresh. Value edits, such as a slider
+        // drag, change no connection and stay cheap.
+        if (ConnectionSignature(materialXRoot) != before) {
+            materialXRoot.GetReferences().ClearReferences();
+            materialXRoot.GetReferences().AddReference(_textFile.fileSystemRepresentation, SdfPath("/MaterialX"));
+        }
         const std::vector<UsdShadeMaterial> materials = FindMaterials(materialXRoot);
         [self listMaterials:materials];
         if (![_materialPaths containsObject:_boundMaterialPath]) {

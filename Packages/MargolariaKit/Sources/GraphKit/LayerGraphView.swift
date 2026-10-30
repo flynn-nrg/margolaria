@@ -9,6 +9,7 @@
 //        ├─ node 0 … node N    one layer per node, drawn once with Core Graphics
 //        │   ├─ thumbnail      the node's swatch (M3c), an image set as is
 //        │   ├─ dim            covers the rows a dragged wire can't connect to
+//        │   ├─ solo           outline, hidden unless shown in the viewport (M3d)
 //        │   └─ selection      outline, hidden unless selected
 //        ├─ dragged wire       the wire being dragged (M2d), over the nodes
 //        ├─ target             a ring or outline where it would connect
@@ -56,6 +57,7 @@ public final class LayerGraphView: GraphEventView {
     private var drawnRevision: Int = -1
     private var drawnHiddenWires: Set<GraphWire> = []
     private var drawnSelection: Set<Int> = []
+    private var drawnSolo: Int? = nil
     private var drawnCandidates: WireCandidates? = nil
 
     public init(controller: GraphCanvasController, thumbnail: CGImage? = nil) {
@@ -154,6 +156,7 @@ public final class LayerGraphView: GraphEventView {
             _ = controller.cutLine
             _ = controller.cutWires
             _ = controller.thumbnails
+            _ = controller.soloNode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.update()
@@ -213,6 +216,17 @@ public final class LayerGraphView: GraphEventView {
         // this costs a comparison per node with a swatch.
         for (id, thumbnail) in controller.thumbnails where id < nodeLayers.count {
             nodeLayers[id].show(thumbnail)
+        }
+
+        // The solo outline: off the old node, on the new.
+        if controller.soloNode != drawnSolo {
+            if let old = drawnSolo, old < nodeLayers.count {
+                nodeLayers[old].isSoloed = false
+            }
+            if let new = controller.soloNode, new < nodeLayers.count {
+                nodeLayers[new].isSoloed = true
+            }
+            drawnSolo = controller.soloNode
         }
 
         // Selection outlines: only the nodes whose state changed.
@@ -342,7 +356,14 @@ final class NodeLayer: CALayer {
     /// empty disc where the sphere will be.
     private let thumbnailLayer = CALayer()
     private let dimLayer = CAShapeLayer()
+    private let soloLayer = CAShapeLayer()
     private let selectionLayer = CAShapeLayer()
+
+    /// Shown alone in the viewport (M3d): outlined in the solo colour,
+    /// just outside the selection outline.
+    var isSoloed: Bool = false {
+        didSet { soloLayer.isHidden = !isSoloed }
+    }
 
     var isSelected: Bool = false {
         didSet { selectionLayer.isHidden = !isSelected }
@@ -380,6 +401,14 @@ final class NodeLayer: CALayer {
         }
         dimLayer.fillColor = LayerGraphView.cgColor(GraphPalette.background, alpha: GraphPalette.dimOpacity)
         addSublayer(dimLayer)
+        let soloOutline: CGRect = local.insetBy(dx: -3, dy: -3)
+        soloLayer.path = CGPath(roundedRect: soloOutline, cornerWidth: GraphLayout.cornerRadius + 3,
+                                cornerHeight: GraphLayout.cornerRadius + 3, transform: nil)
+        soloLayer.fillColor = nil
+        soloLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.solo)
+        soloLayer.lineWidth = 2
+        soloLayer.isHidden = true
+        addSublayer(soloLayer)
         selectionLayer.path = GraphLayout.outlinePath(for: local)
         selectionLayer.fillColor = nil
         selectionLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.selection)

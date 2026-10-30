@@ -80,6 +80,10 @@ struct ContentView: View {
     /// The material shown in the viewport (its MaterialX name).
     @State private var previewMaterial: String? = nil
 
+    /// The element shown alone in the viewport instead (solo preview,
+    /// M3d), by path; nil when the viewport shows a material.
+    @State private var soloPath: String? = nil
+
     /// The sidebar's tab.
     @State private var sidebarTab: SidebarTab = .document
 
@@ -138,7 +142,7 @@ struct ContentView: View {
                 VSplitView {
                     if viewMode != .text {
                         GraphPanel(document: document, levelPath: $graphPath, focus: $focus,
-                                   selectedPath: $canvasSelection, nodeToAdd: $nodeToAdd)
+                                   selectedPath: $canvasSelection, nodeToAdd: $nodeToAdd, soloPath: $soloPath)
                             .frame(minHeight: 200, maxHeight: .infinity)
                     }
                     if viewMode != .graph {
@@ -153,13 +157,13 @@ struct ContentView: View {
                 if showsViewport || showsInspector {
                     VSplitView {
                         if showsViewport {
-                            ViewportPanel(document: document, materialName: $previewMaterial)
+                            ViewportPanel(document: document, materialName: $previewMaterial, soloPath: $soloPath)
                                 .frame(minHeight: 160, idealHeight: 320, maxHeight: .infinity)
                         }
                         if showsInspector {
                             // Clicking a connection, or renaming, shows that
                             // node on the canvas, selected.
-                            InspectorPanel(document: document, selectedPath: canvasSelection) { path in
+                            InspectorPanel(document: document, selectedPath: canvasSelection, soloPath: $soloPath) { path in
                                 focus = path
                             }
                             .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)

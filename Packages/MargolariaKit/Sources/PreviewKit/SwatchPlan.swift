@@ -42,11 +42,15 @@ public struct SwatchRequest: Hashable, Sendable {
     public let shaderPath: String
     /// A hash of everything the swatch depends on (see the file comment).
     public let fingerprint: Int
+    /// True for data (a float or a vector, not a colour): shown through
+    /// the display's Raw view, not tone-mapped (M3d, SwatchPlan.showsData).
+    public let showsData: Bool
 
-    public init(nodePath: String, shaderPath: String, fingerprint: Int) {
+    public init(nodePath: String, shaderPath: String, fingerprint: Int, showsData: Bool = false) {
         self.nodePath = nodePath
         self.shaderPath = shaderPath
         self.fingerprint = fingerprint
+        self.showsData = showsData
     }
 }
 
@@ -61,6 +65,24 @@ public enum SwatchPlan {
         "BSDF", "surfaceshader", "material",
     ]
 
+    /// The types shown as data rather than light (M3d): their values are
+    /// numbers (a roughness, a mask, a normal, a position), and tone
+    /// mapping them, as the view transform does to light, would show a
+    /// roughness of 0.5 as something else. Colours, shaders and materials
+    /// are light and keep the view transform.
+    public static func showsData(_ type: String) -> Bool {
+        ["float", "vector2", "vector3", "vector4"].contains(type)
+    }
+
+    /// The type of what `node`'s swatch shows: its output's, or for a
+    /// nodegraph or a multi-output node, its first output's.
+    public static func shownType(of node: MXNode) -> String {
+        if node.isNodeGraph || node.type == "multioutput" {
+            return node.outputs.first?.type ?? ""
+        }
+        return node.type
+    }
+
     /// The element whose shader shows `node`'s swatch, or nil if the node
     /// gets no swatch.
     ///
@@ -70,13 +92,11 @@ public enum SwatchPlan {
     /// its own ("NG_marble1/out").
     public static func shaderPath(for node: MXNode) -> String? {
         if node.isNodeGraph {
-            // SWIFT: `first(where:)` returns the first matching element, or
-            // nil; `map` then builds the path only if there is one.
-            return node.outputs.first(where: { previewableTypes.contains($0.type) })
-                .map { node.path + "/" + $0.name }
+            // SWIFT: `first.map { }` builds the path only if there is a
+            // first output.
+            return previewableTypes.contains(shownType(of: node)) ? node.outputs.first.map { node.path + "/" + $0.name } : nil
         }
-        let type: String = node.type == "multioutput" ? (node.outputs.first?.type ?? "") : node.type
-        return previewableTypes.contains(type) ? node.path : nil
+        return previewableTypes.contains(shownType(of: node)) ? node.path : nil
     }
 
     /// A swatch request for every node of `graph` that gets a swatch.
@@ -98,7 +118,8 @@ public enum SwatchPlan {
             guard let shaderPath = shaderPath(for: node), let fingerprint = byNode[node.name] else {
                 return nil
             }
-            return SwatchRequest(nodePath: node.path, shaderPath: shaderPath, fingerprint: fingerprint)
+            return SwatchRequest(nodePath: node.path, shaderPath: shaderPath, fingerprint: fingerprint,
+                                 showsData: showsData(shownType(of: node)))
         }
     }
 
