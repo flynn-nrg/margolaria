@@ -7,6 +7,7 @@
 //        ├─ wires              one CAShapeLayer with every wire's curve
 //        ├─ cut wires          the wires an ⌥-drag will cut, highlighted
 //        ├─ node 0 … node N    one layer per node, drawn once with Core Graphics
+//        │   ├─ thumbnail      the node's swatch (M3c), an image set as is
 //        │   ├─ dim            covers the rows a dragged wire can't connect to
 //        │   └─ selection      outline, hidden unless selected
 //        ├─ dragged wire       the wire being dragged (M2d), over the nodes
@@ -19,11 +20,14 @@
 // only when the zoom crosses a resolution step (so text stays sharp) or a
 // level-of-detail threshold, and then only for nodes on or near the screen;
 // wires are rebuilt only when nodes move. Dragging a wire changes only the
-// small layers above, and the dim layers' paths: no node is redrawn.
+// small layers above, and the dim layers' paths: no node is redrawn. A new
+// swatch only replaces its thumbnail layer's image: the node isn't
+// redrawn either, so swatches arriving during an edit cost almost nothing.
 //
 // Introduces (SWIFT): subclassing `CALayer` and overriding `draw(in:)`,
 // `withObservationTracking`, CoreText from Swift, `CATransaction`,
-// `log2`/`ceil` and `pow`, `@discardableResult`.
+// `log2`/`ceil` and `pow`, `@discardableResult`; `nonisolated` on one
+// method of a main-actor type (M3c).
 
 import AppKit
 import CoreText
@@ -33,6 +37,8 @@ import SwiftUI
 
 /// The graph, drawn with Core Animation layers.
 public final class LayerGraphView: GraphEventView {
+    /// Shown by every node with a thumbnail that has no swatch of its own
+    /// (the M0d spike's benchmark, which has no swatches).
     private let thumbnail: CGImage?
     private let contentLayer = CALayer()
     private let wiresLayer = CAShapeLayer()
@@ -52,7 +58,7 @@ public final class LayerGraphView: GraphEventView {
     private var drawnSelection: Set<Int> = []
     private var drawnCandidates: WireCandidates? = nil
 
-    public init(controller: GraphCanvasController, thumbnail: CGImage?) {
+    public init(controller: GraphCanvasController, thumbnail: CGImage? = nil) {
         self.thumbnail = thumbnail
         super.init(controller: controller)
 
@@ -147,6 +153,7 @@ public final class LayerGraphView: GraphEventView {
             _ = controller.hiddenWires
             _ = controller.cutLine
             _ = controller.cutWires
+            _ = controller.thumbnails
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.update()
@@ -200,6 +207,12 @@ public final class LayerGraphView: GraphEventView {
                 nodeLayer.contentsScale = detail.scale
                 nodeLayer.setNeedsDisplay()
             }
+        }
+
+        // Swatches: each node layer ignores an image it already shows, so
+        // this costs a comparison per node with a swatch.
+        for (id, thumbnail) in controller.thumbnails where id < nodeLayers.count {
+            nodeLayers[id].show(thumbnail)
         }
 
         // Selection outlines: only the nodes whose state changed.
@@ -299,7 +312,12 @@ public final class LayerGraphView: GraphEventView {
     /// `Color(red:green:blue:)`, so both renderers show the same colours.
     /// (`CGColor(red:green:blue:alpha:)` would use a generic RGB space and
     /// come out slightly lighter.)
-    static func cgColor(_ rgb: (CGFloat, CGFloat, CGFloat), alpha: CGFloat = 1) -> CGColor {
+    ///
+    /// SWIFT: `nonisolated`: callable from any thread, although the view
+    /// is main-actor-only (NSView). NodeLayer, a CALayer drawn wherever
+    /// Core Animation chooses, calls it; it touches no state, so that is
+    /// safe. Without it Swift 6 warned at every such call.
+    nonisolated static func cgColor(_ rgb: (CGFloat, CGFloat, CGFloat), alpha: CGFloat = 1) -> CGColor {
         CGColor(srgbRed: rgb.0, green: rgb.1, blue: rgb.2, alpha: alpha)
     }
 }
@@ -315,10 +333,14 @@ final class NodeLayer: CALayer {
     }
 
     private var node: GraphNode
-    private let thumbnail: CGImage?
+    /// The node's swatch, or nil while there is none yet.
+    private var thumbnail: NodeThumbnail?
     /// The detail the current image was drawn at. Starts at scale 0, which
     /// no real detail has, so every layer is drawn when it first comes into view.
     var detail = Detail(scale: 0, showsTitle: false, showsPortLabels: false)
+    /// Shows the swatch's image over the node's own drawing, which has an
+    /// empty disc where the sphere will be.
+    private let thumbnailLayer = CALayer()
     private let dimLayer = CAShapeLayer()
     private let selectionLayer = CAShapeLayer()
 
@@ -334,13 +356,28 @@ final class NodeLayer: CALayer {
         GraphLayout.frame(of: node).insetBy(dx: -margin, dy: 0)
     }
 
+    /// A layer for `node`, showing `thumbnail` (an image for every node
+    /// with a thumbnail, from the M0d spike) until ``show(_:)`` replaces it.
     init(node: GraphNode, thumbnail: CGImage?) {
         self.node = node
-        self.thumbnail = thumbnail
         super.init()
         frame = Self.layerFrame(for: node)
         // The node's own coordinates: (0, 0) is its top-left corner.
         let local = CGRect(x: Self.margin, y: 0, width: GraphLayout.nodeWidth, height: frame.height)
+        if node.hasThumbnail {
+            var placed: GraphNode = node
+            placed.position = CGPoint(x: Self.margin, y: 0)
+            thumbnailLayer.frame = GraphLayout.thumbnailFrame(of: placed)
+            // Scaled to fit, smoothly: the image has twice the points'
+            // pixels, and the canvas zooms.
+            thumbnailLayer.contentsGravity = .resizeAspect
+            thumbnailLayer.minificationFilter = .trilinear
+            thumbnailLayer.actions = ["contents": NSNull()]
+            addSublayer(thumbnailLayer)
+            if let thumbnail {
+                show(.image(thumbnail))
+            }
+        }
         dimLayer.fillColor = LayerGraphView.cgColor(GraphPalette.background, alpha: GraphPalette.dimOpacity)
         addSublayer(dimLayer)
         selectionLayer.path = GraphLayout.outlinePath(for: local)
@@ -351,6 +388,39 @@ final class NodeLayer: CALayer {
         addSublayer(selectionLayer)
         // Don't fade contents in and out when they are redrawn.
         actions = ["contents": NSNull()]
+    }
+
+    /// Shows `thumbnail` as the node's swatch. An image goes into the
+    /// thumbnail layer, without redrawing the node; becoming unavailable
+    /// (or available again) changes the disc drawn under it, so it redraws.
+    func show(_ thumbnail: NodeThumbnail) {
+        // SWIFT: Switching over a tuple matches both values at once. The
+        // patterns of one `case` must bind the same names, so the two
+        // "nothing changed" cases are written separately.
+        let wasUnavailable: Bool
+        switch (self.thumbnail, thumbnail) {
+        case (.image(let shown)?, .image(let image)) where shown === image:
+            // SWIFT: `===` asks whether two references point at the same
+            // object, like comparing pointers; CGImage is a class.
+            return
+        case (.unavailable?, .unavailable):
+            return
+        case (.unavailable?, _):
+            wasUnavailable = true
+        default:
+            wasUnavailable = false
+        }
+        self.thumbnail = thumbnail
+        switch thumbnail {
+        case .image(let image):
+            thumbnailLayer.contents = image
+            if wasUnavailable {
+                setNeedsDisplay()
+            }
+        case .unavailable:
+            thumbnailLayer.contents = nil
+            setNeedsDisplay()
+        }
     }
 
     /// Dims the rows a dragged wire can't connect to: with `candidates`
@@ -419,16 +489,8 @@ final class NodeLayer: CALayer {
         context.setFillColor(LayerGraphView.cgColor(GraphPalette.header(local.category)))
         context.fillPath()
 
-        if let thumbnail, local.hasThumbnail {
-            // CGContext.draw puts the image's first row at the bottom of the
-            // rectangle, so flip locally to keep it upright in y-down space.
-            let rect: CGRect = GraphLayout.thumbnailFrame(of: local)
-            context.saveGState()
-            context.translateBy(x: rect.minX, y: rect.maxY)
-            context.scaleBy(x: 1, y: -1)
-            context.interpolationQuality = .medium
-            context.draw(thumbnail, in: CGRect(origin: .zero, size: rect.size))
-            context.restoreGState()
+        if local.hasThumbnail {
+            drawThumbnailBackground(in: GraphLayout.thumbnailFrame(of: local), context: context)
         }
 
         for (index, port) in local.outputs.enumerated() {
@@ -491,6 +553,32 @@ final class NodeLayer: CALayer {
         }
     }
 
+    /// What is under the swatch: a disc the size of its sphere, so the
+    /// node's layout is the same before its swatch arrives; outlined, with
+    /// "No preview" across it, when there won't be one.
+    private func drawThumbnailBackground(in rect: CGRect, context: CGContext) {
+        // The swatch's sphere fills about 92% of its image
+        // (SwatchRenderer's camera).
+        let radius: CGFloat = rect.width / 2 * 0.92
+        let disc = CGRect(x: rect.midX - radius, y: rect.midY - radius, width: 2 * radius, height: 2 * radius)
+        if case .unavailable? = thumbnail {
+            context.setStrokeColor(LayerGraphView.cgColor(GraphPalette.secondaryText, alpha: 0.5))
+            context.setLineWidth(1)
+            context.setLineDash(phase: 0, lengths: [3, 3])
+            context.strokeEllipse(in: disc)
+            context.setLineDash(phase: 0, lengths: [])
+            if detail.showsPortLabels {
+                let width: CGFloat = Self.textWidth("No preview", font: Self.labelFont)
+                Self.drawText("No preview", font: Self.labelFont, color: GraphPalette.secondaryText,
+                              at: CGPoint(x: rect.midX - width / 2, y: rect.midY), alignRight: false,
+                              maxWidth: rect.width, in: context)
+            }
+        } else {
+            context.setFillColor(LayerGraphView.cgColor(GraphPalette.thumbnailPlaceholder))
+            context.fillEllipse(in: disc)
+        }
+    }
+
     static func drawPin(at point: CGPoint, type: PortType, in context: CGContext) {
         let r: CGFloat = GraphLayout.portRadius
         context.setFillColor(LayerGraphView.cgColor(GraphPalette.pin(type)))
@@ -509,6 +597,13 @@ final class NodeLayer: CALayer {
     /// this one declaration. Use it only with a reason like this one.
     nonisolated(unsafe) static let titleFont: CTFont = CTFontCreateUIFontForLanguage(.emphasizedSystem, 12, nil)!
     nonisolated(unsafe) static let labelFont: CTFont = CTFontCreateUIFontForLanguage(.system, 10, nil)!
+
+    /// The width of `string` drawn in `font`, on one line.
+    static func textWidth(_ string: String, font: CTFont) -> CGFloat {
+        let line: CTLine = CTLineCreateWithAttributedString(NSAttributedString(string: string,
+                                                                               attributes: [.font: font]))
+        return CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+    }
 
     /// Draws one line of text, vertically centred on `point.y`, starting at
     /// (or, if `alignRight`, ending at) `point.x`. Text wider than
@@ -557,9 +652,11 @@ final class NodeLayer: CALayer {
 /// Puts a LayerGraphView into SwiftUI.
 public struct LayerGraphRepresentable: NSViewRepresentable {
     let controller: GraphCanvasController
+    /// The image every node shows until it has a swatch of its own (the
+    /// M0d spike); the app passes nil and sets the controller's thumbnails.
     let thumbnail: CGImage?
 
-    public init(controller: GraphCanvasController, thumbnail: CGImage?) {
+    public init(controller: GraphCanvasController, thumbnail: CGImage? = nil) {
         self.controller = controller
         self.thumbnail = thumbnail
     }

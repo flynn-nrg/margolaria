@@ -188,3 +188,30 @@ struct CanvasKeyTests {
         #expect(frame.midX == 100 && frame.minY + GraphLayout.headerHeight / 2 == 100)
     }
 }
+
+// Swatches (M3c).
+extension GraphCanvasControllerTests {
+    @Test("The nodes near the view, for swatches: on screen or within half a screen, nearest the middle first")
+    func nodesNearView() {
+        // A row of nodes 300 points apart.
+        let nodes: [GraphNode] = (0..<10).map { i in
+            GraphNode(id: i, title: "n\(i)", category: .math, position: CGPoint(x: Double(i) * 300, y: 0),
+                      inputs: [], outputs: [], hasThumbnail: true)
+        }
+        let controller = GraphCanvasController(model: GraphModel(nodes: nodes, wires: []))
+        // Before the view has a size: none.
+        #expect(controller.nodesNearView().isEmpty)
+        controller.viewSize = CGSize(width: 600, height: 400)
+        controller.zoom = 1
+        controller.offset = CGPoint(x: -900, y: 100)
+        // On screen: x 900–1500, so nodes 3 to 4 (and 5 touching the edge);
+        // within half a screen, 600–1800: 2 to 5. Nearest the middle (1200)
+        // first: node 4 (1200–1420 → 1310), then 3.
+        let near: [Int] = controller.nodesNearView()
+        #expect(Set(near) == [2, 3, 4, 5])
+        #expect(near.first == 4)
+        // Zoomed out below the minimum: none.
+        controller.zoom = 0.3
+        #expect(controller.nodesNearView(minimumZoom: 0.4).isEmpty)
+    }
+}

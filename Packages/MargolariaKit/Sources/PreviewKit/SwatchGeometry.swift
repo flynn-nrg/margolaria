@@ -78,7 +78,11 @@ struct SwatchGeometry {
             let theta: Float = v * Float.pi            // 0 at the north pole
             for segment in 0...segments {
                 let u: Float = Float(segment) / Float(segments)
-                let phi: Float = u * 2 * Float.pi      // around the Y axis
+                // Around the Y axis, starting behind the sphere (-Z): the
+                // middle of a texture (u = 0.5) faces +Z, as on the
+                // viewport's sphere (MGStormRenderer.mm), so a texture sits
+                // the same way in both (M3c; until then u = 0 faced +Z).
+                let phi: Float = u * 2 * Float.pi - Float.pi
 
                 // Y is up. With u increasing, points go anticlockwise when
                 // seen from above.

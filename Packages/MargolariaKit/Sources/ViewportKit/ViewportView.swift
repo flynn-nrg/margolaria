@@ -23,7 +23,9 @@
 // M3b, `oldValue` in `didSet`, and observers not running in `init`.
 
 import AppKit
+import ColorKit
 import MetalKit
+import PreviewKit
 import SwiftUI
 
 /// What a viewport shows: a .mtlx file, or a MaterialX document as text.
@@ -54,7 +56,7 @@ public struct ViewportView: View {
 
     /// How Storm's light is shown on the screen, or nil to let Storm encode
     /// sRGB itself (also what happens if OCIO is unavailable).
-    public let viewTransform: ViewportViewTransform?
+    public let viewTransform: ViewTransform?
 
     /// What the viewport currently shows.
     ///
@@ -81,7 +83,7 @@ public struct ViewportView: View {
     /// free; the automatic one is `internal`. Code in other modules (the app)
     /// needs this explicit `public init`.
     public init(source: ViewportSource, materialName: String? = nil, environment: ViewportEnvironment = .studio,
-                viewTransform: ViewportViewTransform? = .standard) {
+                viewTransform: ViewTransform? = .standard) {
         self.source = source
         self.materialName = materialName
         self.environment = environment
@@ -186,7 +188,7 @@ private struct StormView: NSViewRepresentable {
     let text: String?
     let materialName: String?
     let environment: ViewportEnvironment
-    let viewTransform: ViewportViewTransform?
+    let viewTransform: ViewTransform?
     /// Told whether the latest text could be shown: nil if so, otherwise why not.
     let onUpdate: (String?) -> Void
 
@@ -255,7 +257,7 @@ final class StormMTKView: MTKView {
     }
 
     /// The view transform, or nil to show Storm's sRGB as it is.
-    var viewTransform: ViewportViewTransform? {
+    var viewTransform: ViewTransform? {
         didSet {
             if viewTransform != oldValue {
                 configurePass()
@@ -284,7 +286,7 @@ final class StormMTKView: MTKView {
     /// How long after the last camera move the smooth frame is drawn.
     private static let settleDelay: TimeInterval = 0.15
 
-    init(renderer: MGStormRenderer, environment: ViewportEnvironment, viewTransform: ViewportViewTransform?) {
+    init(renderer: MGStormRenderer, environment: ViewportEnvironment, viewTransform: ViewTransform?) {
         self.renderer = renderer
         self.environment = environment
         self.viewTransform = viewTransform

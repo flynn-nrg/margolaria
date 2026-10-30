@@ -69,7 +69,11 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `switch` as an expression | `let t = switch x { case .a: "A" case .b: "B" }`: the value of the chosen case | A ternary over many cases | `ViewportSettings.swift` |
 | `Float.exponent`, `Float(sign:exponent:significand:)` | A float's binary exponent, and building `2^e` exactly | `frexp`, `ldexp` | `StudioEnvironment.swift` (`rgbe`) |
 | `static let x = { ... }()` | A constant computed by a closure, once, on first use | A function-local static initialised by a lambda | `StudioEnvironment.swift` (`fileURL`) |
-| `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` |
+| `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
+| `Dictionary(uniqueKeysWithValues:)` | Builds a dictionary from (key, value) pairs; traps on a repeated key (`uniquingKeysWith:` decides instead) | Filling a `std::map` from a vector of pairs | `GraphPanel.swift` (`requestSwatches`) |
+| `Hasher` | Swift's hash function, used by hand: `combine` values, then `finalize()` to an `Int`. Seeded randomly per process, so hashes are only compared within one run | `std::hash` combined with `boost::hash_combine` | `SwatchPlan.swift` |
+| `Float16` | A 16-bit float, the same as Metal's `half` | `_Float16` | `SwatchEnvironment.swift` |
+| CryptoKit's `SHA256` | Hashes bytes into a digest; here, to key a cache by a long text without keeping it | CommonCrypto's `CC_SHA256` | `SwatchRenderer.swift` (`key(for:)`) |
 
 ## Functions and closures
 
@@ -101,7 +105,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `enumerated()` | Pairs each element with its index | Go's `for i, x := range xs` | `DisplayPass.swift` |
 | `joined(separator:)` | Concatenates strings | Go's `strings.Join` | `DisplayPass.swift` |
 | `&variable` to a pointer parameter | Lends a C API a pointer to a `var` for the length of the call | `&x` in C | `DisplayPass.swift` (`setFragmentBytes`) |
-| `withUnsafeMutableBytes` | Lends a writable raw pointer to an array's storage for the length of a closure | Passing `vec.data()` to a C function that fills it | `ViewTransformTests.swift` |
+| `withUnsafeMutableBytes` | Lends a writable raw pointer to an array's storage for the length of a closure | Passing `vec.data()` to a C function that fills it | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
 | `oldValue` in `didSet` | The value before the assignment; observers don't run for assignments in the type's own `init` | Comparing in a custom setter | `ViewportView.swift` (`StormMTKView.environment`) |
 
 ## Protocols and extensions
@@ -153,6 +157,12 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `MainActor.assumeIsolated { }` | "I know I'm on the main thread" (e.g. in a main-run-loop Timer); checked at run time, traps if wrong | `assert([NSThread isMainThread])` | `GraphBenchmark.swift` |
 | `@ObservationIgnored` | Excludes a property of an `@Observable` class from observation (callbacks, bookkeeping) | — | `GraphCanvasController.swift` |
 | `nonisolated(unsafe)` | Turns off the concurrency check for one declaration (a thread-safe but non-`Sendable` value). Always explain why. | — | `LayerGraphView.swift` (`NodeLayer.titleFont`) |
+| `actor` | A class whose methods never run at the same time; callers `await` their turn instead of blocking on a lock. Its code runs on background threads | An object guarded by one mutex, with a work queue | `SwatchService.swift` |
+| Cancelling a `Task` | `let t = Task { ... }` keeps a handle; `t.cancel()` asks it to stop, and the code checks `Task.isCancelled` and returns (cooperative). `await t.value` waits for it | A cancellation flag polled by a worker | `SwatchService.swift` (`SwatchCache`) |
+| `withTaskGroup` | Runs child tasks concurrently and waits for all; `for await` takes their results as they finish. No child outlives the group | `dispatch_group` with a results queue; Go's `errgroup` | `SwatchService.swift` (`render`) |
+| `@MainActor @Sendable` closures | A closure that may be passed to another actor and always runs on the main thread: how background work hands results to the UI | A block dispatched to the main queue | `SwatchService.swift` (`deliver`) |
+| Completion handlers as `async` | An Objective-C method with a completion block is also callable as `try await` (`makeLibrary(source:options:)`) | Wrapping a callback API in a future | `SwatchRenderer.swift` (`SwatchPipeline.compile`) |
+| `nonisolated` on a member | One method of a `@MainActor` type that any thread may call, because it touches no state | A free function | `LayerGraphView.swift` (`cgColor`) |
 
 ## SwiftUI
 
@@ -219,7 +229,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Objective-C classes | Import as Swift classes: `-initWithX:error:` becomes `init(x:) throws`, `nullable` becomes `?` | `MGStormRenderer.h`, `Snapshot.swift` |
 | Out-parameter structs | A C++ `T&` parameter is an `inout` argument: pass a `var` with `&` | `MXDocument.swift` (`generateMSL`) |
 | `Array(cxxVector)` | Copies an imported C++ vector into a Swift array, so it outlives the C++ object | `GPUShader.swift` |
-| Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` |
+| Option dictionaries | Objective-C APIs taking `NSDictionary` options take `[Key: Any]` in Swift; enum values go in as their `rawValue` | `MTKTextureLoader` in `SwatchRenderer.swift` (`image(at:)`) |
+| Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` (since M3c `ViewTransform.swift`) |
 
 ## Testing
 
@@ -231,3 +242,4 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Traits | `.serialized`, `.enabled(if:)`: change how a test or suite runs | `StormRendererTests.swift`, `MXCorpusTests.swift` |
 | `Issue.record` | Records a failure with a message, without stopping the test | `MXCorpusTests.swift` |
 | `#filePath` | The path of the current source file, like `__FILE__` | `MXCorpusTests.swift` |
+| `async` tests, collecting from callbacks | A test can be `async` and `await`; results from a `@Sendable` callback go into a `@MainActor` class instance (a `var` can't be captured) | `SwatchCacheTests.swift` (`Collected`) |

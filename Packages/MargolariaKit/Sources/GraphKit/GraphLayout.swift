@@ -222,6 +222,8 @@ public enum GraphLayout {
 public enum GraphPalette {
     public static let background: (CGFloat, CGFloat, CGFloat) = (0.13, 0.13, 0.14)
     public static let nodeBody: (CGFloat, CGFloat, CGFloat) = (0.22, 0.22, 0.24)
+    /// The disc where a swatch will appear, until it does.
+    public static let thumbnailPlaceholder: (CGFloat, CGFloat, CGFloat) = (0.27, 0.27, 0.29)
     public static let text: (CGFloat, CGFloat, CGFloat) = (0.88, 0.88, 0.9)
     public static let secondaryText: (CGFloat, CGFloat, CGFloat) = (0.6, 0.6, 0.63)
     public static let wire: (CGFloat, CGFloat, CGFloat) = (0.62, 0.62, 0.66)

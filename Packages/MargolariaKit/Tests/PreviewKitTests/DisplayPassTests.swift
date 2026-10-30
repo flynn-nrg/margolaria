@@ -1,11 +1,12 @@
-// ViewTransformTests.swift
+// DisplayPassTests.swift
 //
-// The viewport's view transform and studio lighting (M3b). The view
+// The view transform and the studio image (M3b; moved from ViewportKit's
+// tests in M3c, with DisplayPass and StudioEnvironment). The view
 // transform decodes Storm's sRGB and runs OCIO's Metal code on the GPU
 // (DisplayPass); these tests encode known colours as Storm does, run them
 // through it, and compare with OCIO's CPU processor, for every display and
-// view the viewport offers. The studio renders are saved as
-// PNGs, like the other Storm tests.
+// view offered. Swatches' frames (linear, premultiplied) are checked too.
+// The studio renders are in ViewportKit's StudioRenderTests.
 //
 // Introduces (SWIFT): `[T](repeating:count:)`, `withUnsafeMutableBytes`
 // (reading a GPU texture back into an array).
@@ -17,12 +18,12 @@ import Metal
 import simd
 import Testing
 // SWIFT: `@testable` also imports the module's `internal` declarations
-// (DisplayPass, StudioEnvironment), for tests only. It works because
+// (StudioEnvironment's soft boxes), for tests only. It works because
 // SwiftPM builds for testing with that enabled; release builds don't.
-@testable import ViewportKit
+@testable import PreviewKit
 
-@Suite("View transform and studio lighting", .serialized)
-struct ViewTransformTests {
+@Suite("Display pass and studio image", .serialized)
+struct DisplayPassTests {
     /// Scene-linear test colours: black, darks, 18% grey, white, beyond
     /// white (highlights), saturated primaries.
     static let colours: [SIMD3<Float>] = [
@@ -40,11 +41,21 @@ struct ViewTransformTests {
     /// Runs `encoded` (frame pixels, as Storm writes them) through a
     /// DisplayPass for `transform`, on the GPU, in 32-bit float textures,
     /// and returns what comes out.
-    func gpuConvert(_ encoded: [SIMD3<Float>], with transform: ViewportViewTransform) throws -> [SIMD3<Float>] {
+    func gpuConvert(_ encoded: [SIMD3<Float>], with transform: ViewTransform) throws -> [SIMD3<Float>] {
+        try gpuConvert(encoded.map { SIMD4($0, 1) }, encoding: .stormSRGB, with: transform).map {
+            SIMD3($0.x, $0.y, $0.z)
+        }
+    }
+
+    /// Runs RGBA frame pixels encoded as `encoding` through a DisplayPass,
+    /// and returns the RGBA that comes out.
+    func gpuConvert(_ encoded: [SIMD4<Float>], encoding: DisplayPass.Encoding,
+                    with transform: ViewTransform) throws -> [SIMD4<Float>] {
         let colours = encoded
         let device: any MTLDevice = try #require(MTLCreateSystemDefaultDevice())
         let queue: any MTLCommandQueue = try #require(device.makeCommandQueue())
-        let pass = try DisplayPass(device: device, pixelFormat: .rgba32Float, transform: transform.shader())
+        let pass = try DisplayPass(device: device, pixelFormat: .rgba32Float, encoding: encoding,
+                                   transform: transform.shader())
 
         // One row of texels, one per colour; same size in and out, so each
         // output pixel samples exactly one input texel.
@@ -53,7 +64,7 @@ struct ViewTransformTests {
         descriptor.usage = [.shaderRead, .renderTarget]
         let input: any MTLTexture = try #require(device.makeTexture(descriptor: descriptor))
         let output: any MTLTexture = try #require(device.makeTexture(descriptor: descriptor))
-        let texels: [Float] = colours.flatMap { [$0.x, $0.y, $0.z, 1] }
+        let texels: [Float] = colours.flatMap { [$0.x, $0.y, $0.z, $0.w] }
         texels.withUnsafeBytes { bytes in
             input.replace(region: MTLRegionMake2D(0, 0, colours.count, 1), mipmapLevel: 0,
                           withBytes: bytes.baseAddress!, bytesPerRow: colours.count * 16)
@@ -71,23 +82,25 @@ struct ViewTransformTests {
             output.getBytes(bytes.baseAddress!, bytesPerRow: colours.count * 16,
                             from: MTLRegionMake2D(0, 0, colours.count, 1), mipmapLevel: 0)
         }
-        return (0..<colours.count).map { SIMD3(result[$0 * 4], result[$0 * 4 + 1], result[$0 * 4 + 2]) }
+        return (0..<colours.count).map {
+            SIMD4(result[$0 * 4], result[$0 * 4 + 1], result[$0 * 4 + 2], result[$0 * 4 + 3])
+        }
     }
 
     @Test("The GPU view transform gives what OCIO's CPU processor gives, for every display and view offered")
     func gpuMatchesCPU() throws {
         let config: ColorConfiguration = try ColorConfiguration.studio.get()
-        #expect(ViewportViewTransform.displays == ["sRGB - Display", "Display P3 - Display"])
-        for display in ViewportViewTransform.displays {
-            for view in ViewportViewTransform.views(for: display) {
-                let transform = ViewportViewTransform(display: display, view: view)
+        #expect(ViewTransform.displays == ["sRGB - Display", "Display P3 - Display"])
+        for display in ViewTransform.displays {
+            for view in ViewTransform.views(for: display) {
+                let transform = ViewTransform(display: display, view: view)
                 // SWIFT: `.map(f)` on a SIMD3 isn't available, so encode
                 // each component by hand.
                 let encoded: [SIMD3<Float>] = Self.colours.map {
                     SIMD3(Self.stormSRGB($0.x), Self.stormSRGB($0.y), Self.stormSRGB($0.z))
                 }
                 let gpu: [SIMD3<Float>] = try gpuConvert(encoded, with: transform)
-                let cpu: ColorConverter = try config.converter(from: ViewportViewTransform.sceneSpace,
+                let cpu: ColorConverter = try config.converter(from: ViewTransform.sceneSpace,
                                                                display: display, view: view)
                 for (colour, fromGPU) in zip(Self.colours, gpu) {
                     let expected = SIMD3<Float>(cpu.convert(SIMD3<Double>(colour)))
@@ -103,7 +116,7 @@ struct ViewTransformTests {
 
     @Test("A negative component, which Storm's encoding turns into NaN, is shown as 0")
     func negativeComponents() throws {
-        let transform = ViewportViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
+        let transform = ViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
         let gpu: [SIMD3<Float>] = try gpuConvert([SIMD3(.nan, Self.stormSRGB(0.5), 0)], with: transform)
         let expected: SIMD3<Double> = try ColorConfiguration.studio.get()
             .converter(from: "lin_rec709", display: transform.display, view: transform.view)
@@ -111,11 +124,30 @@ struct ViewTransformTests {
         #expect(simd_reduce_max(simd_abs(gpu[0] - SIMD3<Float>(expected))) < 2e-4, "\(gpu[0])")
     }
 
+    @Test("Swatch frames, linear and premultiplied, are transformed as colours and keep their alpha")
+    func premultipliedFrames() throws {
+        let transform = ViewTransform(display: "sRGB - Display", view: "ACES 2.0 - SDR 100 nits (Rec.709)")
+        let colour = SIMD3<Float>(0.8, 0.4, 0.1)
+        // Opaque, a quarter covered (premultiplied: the colour times 0.25),
+        // and empty.
+        let frame: [SIMD4<Float>] = [SIMD4(colour, 1), SIMD4(colour * 0.25, 0.25), SIMD4(0, 0, 0, 0)]
+        let gpu: [SIMD4<Float>] = try gpuConvert(frame, encoding: .linearPremultiplied, with: transform)
+        let expected = SIMD3<Float>(try ColorConfiguration.studio.get()
+            .converter(from: ViewTransform.sceneSpace, display: transform.display, view: transform.view)
+            .convert(SIMD3<Double>(colour)))
+        // SWIFT: `SIMD4(x, w)` builds a 4-vector from a 3-vector and a scalar.
+        #expect(simd_reduce_max(simd_abs(gpu[0] - SIMD4(expected, 1))) < 2e-4, "\(gpu[0])")
+        // The partly covered pixel is the same colour, a quarter as opaque:
+        // the transform saw the colour, not the colour times coverage.
+        #expect(simd_reduce_max(simd_abs(gpu[1] - SIMD4(expected * 0.25, 0.25))) < 2e-4, "\(gpu[1])")
+        #expect(gpu[2] == SIMD4(0, 0, 0, 0))
+    }
+
     @Test("Supersampled frames are averaged as light, not as encoded values")
     func averagesLight() throws {
         let device: any MTLDevice = try #require(MTLCreateSystemDefaultDevice())
         let queue: any MTLCommandQueue = try #require(device.makeCommandQueue())
-        let transform = ViewportViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
+        let transform = ViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
         let pass = try DisplayPass(device: device, pixelFormat: .rgba32Float, transform: transform.shader())
         // A 2 × 2 frame, half black and half white, drawn into one pixel.
         let frame = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: 2, height: 2,
@@ -147,10 +179,10 @@ struct ViewTransformTests {
 
     @Test("The default view transform is ACES 2.0 on the sRGB display")
     func standard() {
-        #expect(ViewportViewTransform.standard
-            == ViewportViewTransform(display: "sRGB - Display", view: "ACES 2.0 - SDR 100 nits (Rec.709)"))
-        #expect(ViewportViewTransform.standard?.isAvailable == true)
-        #expect(!ViewportViewTransform(display: "Rec.2100-PQ - Display", view: "Raw").isAvailable)
+        #expect(ViewTransform.standard
+            == ViewTransform(display: "sRGB - Display", view: "ACES 2.0 - SDR 100 nits (Rec.709)"))
+        #expect(ViewTransform.standard?.isAvailable == true)
+        #expect(!ViewTransform(display: "Rec.2100-PQ - Display", view: "Raw").isAvailable)
     }
 
     @Test("The studio image is a valid Radiance file, all grey, with soft boxes brighter than the walls")
@@ -178,55 +210,5 @@ struct ViewTransformTests {
         let decoded: Float = Float(encoded[0]) / 256 * Float(sign: .plus, exponent: Int(encoded[3]) - 128,
                                                               significand: 1)
         #expect(abs(decoded - 6) < 6.0 / 128, "\(encoded) → \(decoded)")
-    }
-
-    /// A material with one OpenPBR surface: `inputs` are its <input> lines.
-    func material(_ name: String, _ inputs: String) throws -> URL {
-        let xml = """
-            <?xml version="1.0"?>
-            <materialx version="1.39">
-              <open_pbr_surface name="SR_\(name)" type="surfaceshader">
-            \(inputs)
-              </open_pbr_surface>
-              <surfacematerial name="M_\(name)" type="material">
-                <input name="surfaceshader" type="surfaceshader" nodename="SR_\(name)" />
-              </surfacematerial>
-            </materialx>
-            """
-        let url: URL = FileManager.default.temporaryDirectory.appendingPathComponent("studio_\(name).mtlx")
-        try xml.write(to: url, atomically: true, encoding: .utf8)
-        return url
-    }
-
-    @Test("Under the studio light a white sphere is neutral, lit from the upper left, and a mirror shows the soft boxes")
-    func studioRenders() throws {
-        let untoneMapped = ViewportViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
-
-        let white = try MGStormRenderer(materialXFile: material("white", """
-                <input name="base_color" type="color3" value="1, 1, 1" />
-                <input name="specular_weight" type="float" value="0" />
-            """))
-        white.use(.studio)
-        let diffuse: CGImage = try #require(white.snapshot(width: 256, height: 256, viewTransform: untoneMapped))
-        print("Studio, white diffuse: \(try Fixtures.save(diffuse, as: "studio_white.png").path)")
-        // The upper left faces the key light; the lower right is in shadow.
-        let lit = Fixtures.pixel(diffuse, x: 95, y: 95)
-        let shadow = Fixtures.pixel(diffuse, x: 170, y: 170)
-        #expect(abs(Int(lit.r) - Int(lit.b)) <= 1 && abs(Int(lit.r) - Int(lit.g)) <= 1, "neutral: \(lit)")
-        #expect(Int(lit.r) > Int(shadow.r) + 60, "lit \(lit), shadow \(shadow)")
-
-        let mirror = try MGStormRenderer(materialXFile: material("mirror", """
-                <input name="base_color" type="color3" value="1, 1, 1" />
-                <input name="base_metalness" type="float" value="1" />
-                <input name="specular_roughness" type="float" value="0.02" />
-            """))
-        mirror.use(.studio)
-        let chrome: CGImage = try #require(mirror.snapshot(width: 256, height: 256, viewTransform: untoneMapped))
-        print("Studio, mirror: \(try Fixtures.save(chrome, as: "studio_mirror.png").path)")
-
-        // The same mirror with the default view transform (ACES 2.0), to
-        // compare by eye.
-        let aces: CGImage = try #require(mirror.snapshot(width: 256, height: 256))
-        print("Studio, mirror, ACES 2.0: \(try Fixtures.save(aces, as: "studio_mirror_aces.png").path)")
     }
 }

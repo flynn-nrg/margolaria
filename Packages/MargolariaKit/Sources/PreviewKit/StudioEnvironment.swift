@@ -16,7 +16,9 @@
 // the same light.
 //
 // The image is written once, as a Radiance .hdr file (the format of
-// OpenUSD's own default environment), in the temporary folder.
+// OpenUSD's own default environment), in the temporary folder. The
+// viewport's dome light and the swatches (SwatchEnvironment) both read it;
+// it moved here from ViewportKit in M3c.
 //
 // Introduces (SWIFT): `Float.exponent` and `Float(sign:exponent:significand:)`,
 // building `Data` from bytes, `static let` initialised by a closure.
@@ -25,7 +27,7 @@ import Foundation
 import simd
 
 /// The studio environment image.
-enum StudioEnvironment {
+public enum StudioEnvironment {
     /// Image size: 1024 × 512 texels, about 0.35° each, finer than any
     /// detail in the image (the soft boxes have soft edges).
     static let width: Int = 1024
@@ -40,7 +42,7 @@ enum StudioEnvironment {
     /// SWIFT: `static let x = { ... }()` runs the closure once, the first
     /// time `x` is read, and keeps the result: a lazily computed constant.
     /// Swift makes this thread-safe (like C++'s function-local statics).
-    static let fileURL: URL? = {
+    public static let fileURL: URL? = {
         let url: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("Margolaria-studio-environment-2.hdr")
         if FileManager.default.fileExists(atPath: url.path) {
@@ -158,7 +160,7 @@ enum StudioEnvironment {
     /// the last straight up, the middle row the horizon. Going along a row,
     /// the image goes round the Y axis from -Z, through +X (a quarter of the
     /// way), +Z (half way) and -X (three quarters). Found by rendering a
-    /// mirror sphere (ViewTransformTests): an image's first stored row is
+    /// mirror sphere (StudioRenderTests): an image's first stored row is
     /// usually its top, but Storm reads .hdr files bottom row first.
     static func direction(column: Int, row: Int) -> SIMD3<Float> {
         // Texel centres: u and v from 0 to 1.

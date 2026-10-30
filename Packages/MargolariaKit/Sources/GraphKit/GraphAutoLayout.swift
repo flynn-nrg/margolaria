@@ -129,6 +129,46 @@ public enum GraphAutoLayout {
         }
     }
 
+    /// Moves nodes down, as little as possible, until none overlaps
+    /// another; nodes that don't overlap anything stay where they are.
+    ///
+    /// For positions saved in a document: they were made in another editor,
+    /// or with shorter nodes (before swatches, M3c, or with fewer inputs
+    /// shown), so taller nodes can run into their neighbours. The canvas
+    /// resolves that on screen only; the document keeps its positions
+    /// until a node is moved, or the level arranged.
+    ///
+    /// Nodes are taken from the top down (left to right at the same
+    /// height). Each is pushed below every node already placed that it
+    /// overlaps, with `gap` between them, so a column keeps its order, and
+    /// nodes side by side don't affect each other.
+    public static func separate(_ model: inout GraphModel, gap: CGFloat = rowGap) {
+        // SWIFT: `indices.sorted { }` sorts node IDs by the tuple
+        // (top, left, ID): by height, then from the left, then file order.
+        let order: [Int] = model.nodes.indices.sorted { a, b in
+            let pa: CGPoint = model.nodes[a].position
+            let pb: CGPoint = model.nodes[b].position
+            return (pa.y, pa.x, a) < (pb.y, pb.x, b)
+        }
+        var placed: [CGRect] = []
+        for id in order {
+            var frame: CGRect = GraphLayout.frame(of: model.nodes[id])
+            // Pushing below one node can bring it onto another placed
+            // further down, so look again until nothing overlaps. Each
+            // push moves it below a placed node, so this ends.
+            var moved: Bool = true
+            while moved {
+                moved = false
+                for other in placed where other.intersects(frame.insetBy(dx: 0, dy: -gap / 2)) {
+                    frame.origin.y = other.maxY + gap
+                    moved = true
+                }
+            }
+            model.nodes[id].position.y = frame.minY
+            placed.append(frame)
+        }
+    }
+
     /// The top edge that would put `node`'s outputs level with the inputs
     /// they connect to, averaged over its wires. Nodes with nothing
     /// downstream (the rightmost column) are stacked in file order instead.

@@ -12,6 +12,7 @@
 // Introduces (SWIFT): adding tests to a suite from another file with an
 // `extension`.
 
+import ColorKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -45,7 +46,7 @@ enum Examples {
 // same time as the other Storm tests.
 extension StormRendererTests {
     /// The sRGB curve alone, as the viewport showed before M3b.
-    static let untoneMapped = ViewportViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
+    static let untoneMapped = ViewTransform(display: "sRGB - Display", view: "Un-tone-mapped")
 
     @Test("Every material in MaterialX's examples renders",
           .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),

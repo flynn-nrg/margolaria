@@ -65,12 +65,18 @@ public struct DocumentGraph: Sendable {
     }
 
     /// Places every node without a saved position with GraphAutoLayout,
-    /// leaving the others where the document put them.
+    /// leaving the others where the document put them; then moves nodes
+    /// down where they overlap (GraphAutoLayout.separate), on screen only.
     public mutating func layout() {
         var laidOut: GraphModel = model
         GraphAutoLayout.apply(to: &laidOut)
         for id in model.nodes.indices where !positioned.contains(id) {
             model.nodes[id].position = laidOut.nodes[id].position
+        }
+        // Auto-layout never overlaps nodes; saved positions can, with
+        // nodes taller than when they were saved (M3c).
+        if !positioned.isEmpty {
+            GraphAutoLayout.separate(&model)
         }
     }
 
@@ -83,8 +89,14 @@ public struct DocumentGraph: Sendable {
 /// Builds a ``DocumentGraph`` from an MXGraph.
 public enum GraphBuilder {
     /// Builds the canvas for `graph`. Nodes whose path is in `expanded`
-    /// show all their inputs, not only the set ones.
-    public static func build(_ graph: MXGraph, expanded: Set<String> = []) -> DocumentGraph {
+    /// show all their inputs, not only the set ones; nodes for which
+    /// `hasThumbnail` is true have room for a swatch (M3c; the app decides,
+    /// with PreviewKit, which nodes can show one).
+    ///
+    /// SWIFT: A closure parameter with a default value, `{ _ in false }`:
+    /// callers that don't care leave it out. `_ in` ignores the argument.
+    public static func build(_ graph: MXGraph, expanded: Set<String> = [],
+                             hasThumbnail: (MXNode) -> Bool = { _ in false }) -> DocumentGraph {
         var nodes: [GraphNode] = []
         var paths: [String] = []
         var kinds: [ElementKind] = []
@@ -137,7 +149,7 @@ public enum GraphBuilder {
                                    position: position,
                                    inputs: shown.map { port(for: $0) },
                                    outputs: node.outputs.map { GraphPort(name: $0.name, type: PortType($0.type)) },
-                                   hasThumbnail: false,
+                                   hasThumbnail: hasThumbnail(node),
                                    // Included nodes say so, after their category.
                                    subtitle: node.isIncluded ? node.category + " · included" : node.category,
                                    hiddenInputs: isExpanded ? [] : unset.map { port(for: $0) },
