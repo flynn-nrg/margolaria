@@ -23,6 +23,7 @@
 import AppKit
 import MXKit
 import Observation
+import PreviewKit
 import SwiftUI
 
 /// One open MaterialX document.
@@ -101,6 +102,15 @@ final class MaterialXDocument: NSDocument {
     /// False if the MaterialX data libraries failed to load. Then nothing can
     /// be validated, and the UI says so instead of claiming the document is valid.
     private(set) var libraryLoaded: Bool = false
+
+    /// The canvas's swatches (M3c): kept here, with the document, so that
+    /// every graph level shows the swatches already drawn, and the
+    /// inspector can say why one failed. Nil if swatches can't be drawn
+    /// (no Metal device, or MaterialX's libraries missing).
+    ///
+    /// SWIFT: `@ObservationIgnored`: the cache is observable itself; the
+    /// reference to it never changes.
+    @ObservationIgnored let swatches: SwatchCache? = SwatchService.shared.map { SwatchCache(service: $0) }
 
     /// True for a new document (File > New) until the user has picked
     /// what it starts from (ContentView's template sheet). Documents read

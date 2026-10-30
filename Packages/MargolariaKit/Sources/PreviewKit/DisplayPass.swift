@@ -1,7 +1,9 @@
 // DisplayPass.swift
 //
-// The last step of every viewport frame: draws Storm's frame into the
-// screen's texture, doing two things on the way.
+// The last step of every viewport frame and every swatch: draws a rendered
+// frame into the screen's texture (or the swatch's image), doing two
+// things on the way. Moved here from ViewportKit in M3c, when the swatches
+// started using it too.
 //
 //  1. Anti-aliasing by supersampling (M1c). Storm renders the frame at twice
 //     the width and height, and each screen pixel is the average of the
@@ -20,6 +22,13 @@
 // samples the frame at its centre with bilinear filtering (at exactly 2×,
 // the shared corner of four frame pixels, so their average), and the
 // frame's sRGB values go to the screen as they are.
+//
+// Swatches (M3c) are different in two ways, chosen with `Encoding`: their
+// frames hold linear light as it is, and they are transparent around the
+// sphere, with colours premultiplied by alpha (the edge pixels, partly
+// covered, are a mix of sphere and nothing). The pass divides by alpha
+// before the transform, which works on colours, not on coverage, and
+// multiplies again after.
 //
 // Why not Storm's own MSAA: UsdImagingGLEngine has no option for it, and
 // setting the HDX_MSAA_SAMPLE_COUNT environment variable made no difference
@@ -40,9 +49,19 @@ import Metal
 
 /// Draws a frame into a texture of the same size or half of it, with
 /// bilinear filtering, through an optional OCIO view transform.
-final class DisplayPass {
+public final class DisplayPass {
     /// How much larger than the screen Storm renders, in each direction.
-    static let factor: Int = 2
+    public static let factor: Int = 2
+
+    /// How the frames' pixels are encoded.
+    public enum Encoding: Sendable {
+        /// Storm's: linear light encoded with the sRGB curve, unclamped,
+        /// opaque (see MGStormRenderer.h).
+        case stormSRGB
+        /// Linear light as it is, with colours premultiplied by alpha:
+        /// the swatches'.
+        case linearPremultiplied
+    }
 
     private let pipeline: any MTLRenderPipelineState
     private let sampler: any MTLSamplerState
@@ -78,14 +97,24 @@ final class DisplayPass {
 
         """
 
-    /// Compiles the shaders for drawing into textures of `pixelFormat`, and
-    /// creates the transform's lookup tables. With no transform, pixels are
-    /// copied as they are (encoded as sRGB, by Storm).
+    /// Compiles the shaders for drawing frames encoded as `encoding` into
+    /// textures of `pixelFormat`, and creates the transform's lookup
+    /// tables. With no transform, Storm's pixels are copied as they are
+    /// (encoded as sRGB, by Storm), and linear ones are encoded with the
+    /// sRGB curve.
     ///
     /// - Throws: Metal's error if compilation fails, or
     ///   ``DisplayPassError`` if a lookup table can't be created.
-    init(device: any MTLDevice, pixelFormat: MTLPixelFormat, transform: GPUShader? = nil) throws {
-        let source: String = Self.vertexSource + (transform.map(Self.fragmentSource) ?? Self.plainFragmentSource)
+    public init(device: any MTLDevice, pixelFormat: MTLPixelFormat, encoding: Encoding = .stormSRGB,
+                transform: GPUShader? = nil) throws {
+        let fragment: String
+        // SWIFT: `if let` binds the optional for the first branch only.
+        if let transform {
+            fragment = Self.fragmentSource(transform, encoding: encoding)
+        } else {
+            fragment = encoding == .stormSRGB ? Self.plainFragmentSource : Self.linearFragmentSource
+        }
+        let source: String = Self.vertexSource + fragment
         // SWIFT: `makeLibrary(source:options:)` runs the Metal compiler
         // inside the app. It is allowed under the Hardened Runtime; Storm
         // compiles its own shaders the same way.
@@ -120,15 +149,29 @@ final class DisplayPass {
         }
         """
 
+    /// The fragment shader for linear frames without a transform: sample,
+    /// and encode with the sRGB curve (clamped: the screen can't show
+    /// more than white), keeping alpha.
+    private static let linearFragmentSource: String = """
+        fragment float4 display(Varyings in [[stage_in]],
+                                texture2d<float> frame [[texture(0)]],
+                                sampler bilinear [[sampler(0)]]) {
+            float4 pixel = frame.sample(bilinear, in.uv);
+            float3 light = pixel.a > 0.0 ? saturate(pixel.rgb / pixel.a) : float3(0.0);
+            float3 encoded = select(1.055 * pow(light, 1.0 / 2.4) - 0.055, light * 12.92, light < 0.0031308);
+            return float4(encoded * pixel.a, pixel.a);
+        }
+        """
+
     /// OCIO's code for `transform`, then a fragment shader that samples the
-    /// frame, decodes Storm's sRGB, and passes the light through OCIO's
-    /// function.
+    /// frame, decodes it into linear light, and passes the light through
+    /// OCIO's function.
     ///
     /// OCIO's function takes each lookup table and its sampler as
     /// arguments. The fragment shader receives the tables as textures 1,
     /// 2, ... and makes the samplers itself (`constexpr sampler`: a sampler
     /// written into the shader, so Swift needn't create them).
-    private static func fragmentSource(_ transform: GPUShader) -> String {
+    private static func fragmentSource(_ transform: GPUShader, encoding: Encoding) -> String {
         // SWIFT: `enumerated()` pairs each element with its index, like
         // Go's `for i, t := range textures`.
         let parameters: [String] = transform.textures.enumerated().map { index, table in
@@ -140,6 +183,30 @@ final class DisplayPass {
             return "    constexpr sampler \(table.samplerName)(filter::\(filter), address::clamp_to_edge);\n"
         }
         let arguments: [String] = transform.textures.map { "\($0.name), \($0.samplerName), " }
+
+        // What reads one frame pixel as light, and what finishes the
+        // transformed colour.
+        let decode: String
+        let finish: String
+        switch encoding {
+        case .stormSRGB:
+            decode = "float4(linearFromStormSRGB(frame.read(corner + uint2(x, y)).rgb), 1.0)"
+            // Alpha is 1: Storm's frame is opaque (it clears to an opaque
+            // grey).
+            finish = "return \(transform.functionName)(\(arguments.joined())float4(sum.rgb / count, 1.0));"
+        case .linearPremultiplied:
+            decode = "frame.read(corner + uint2(x, y))"
+            // Divide by alpha, transform, multiply again. Fully
+            // transparent pixels stay transparent black.
+            finish = """
+                float alpha = sum.a / count;
+                    if (alpha <= 0.0) {
+                        return float4(0.0);
+                    }
+                    float4 display = \(transform.functionName)(\(arguments.joined())float4(sum.rgb / sum.a, 1.0));
+                    return float4(display.rgb * alpha, alpha);
+                """
+        }
 
         // SWIFT: `joined(separator:)` concatenates an array of strings,
         // like Go's strings.Join.
@@ -160,18 +227,18 @@ final class DisplayPass {
                                     texture2d<float> frame [[texture(0)]],
                                     constant uint &factor [[buffer(0)]]\(parameters.joined())) {
             \(samplers.joined())
-                // The frame pixels this screen pixel covers, decoded, averaged.
+                // The frame pixels this screen pixel covers, decoded, summed.
+                // OCIO is then given alpha 1: it treats alpha as a fourth
+                // channel, not as coverage.
                 uint2 corner = uint2(in.position.xy) * factor;
-                float3 light = float3(0.0);
+                float4 sum = float4(0.0);
                 for (uint y = 0; y < factor; ++y) {
                     for (uint x = 0; x < factor; ++x) {
-                        light += linearFromStormSRGB(frame.read(corner + uint2(x, y)).rgb);
+                        sum += \(decode);
                     }
                 }
-                // Alpha is 1: the frame is opaque (Storm clears to an opaque
-                // grey), and OCIO treats alpha as a fourth channel.
-                float4 pixel = float4(light / float(factor * factor), 1.0);
-                return \(transform.functionName)(\(arguments.joined())pixel);
+                float count = float(factor * factor);
+                \(finish)
             }
             """
     }
@@ -226,7 +293,7 @@ final class DisplayPass {
 
     /// Encodes drawing `source` over the whole of `destination`, which is
     /// the same size or half of it in each direction.
-    func encode(from source: any MTLTexture, to destination: any MTLTexture, in commandBuffer: any MTLCommandBuffer) {
+    public func encode(from source: any MTLTexture, to destination: any MTLTexture, in commandBuffer: any MTLCommandBuffer) {
         let pass = MTLRenderPassDescriptor()
         pass.colorAttachments[0].texture = destination
         // Every pixel is overwritten, so the old contents needn't be loaded.
@@ -253,6 +320,6 @@ final class DisplayPass {
 
 /// Errors the Metal API reports as nil rather than by throwing, and
 /// lookup tables Metal can't hold.
-enum DisplayPassError: Error {
+public enum DisplayPassError: Error {
     case metal(String)
 }

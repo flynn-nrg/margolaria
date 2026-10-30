@@ -1,17 +1,19 @@
 // Snapshot.swift
 //
 // Renders a still image with MGStormRenderer, offscreen. Used by the tests to
-// check a render without opening a window, and a starting point for the
-// thumbnails in M3. Finished the same way as the viewport's frames, by
-// DisplayPass: rendered at twice the size and scaled down, and converted
-// for the screen by an OCIO view transform (M3b).
+// check a render without opening a window. (The canvas's swatches don't use
+// Storm: they are PreviewKit's, M3c.) Finished the same way as the
+// viewport's frames, by DisplayPass: rendered at twice the size and scaled
+// down, and converted for the screen by an OCIO view transform (M3b).
 //
 // Introduces (SWIFT): importing an Objective-C module, how Objective-C names
 // and nullability appear in Swift, `extension`, `public`, `while` loops,
 // Core Image interop with Metal.
 
+import ColorKit
 import CoreImage
 import Metal
+import PreviewKit
 
 // SWIFT: ViewportBridge is an Objective-C module (its header is in
 // Sources/ViewportBridge/include). Swift imports Objective-C classes directly:
@@ -43,7 +45,7 @@ extension MGStormRenderer {
     /// module. The default access level, `internal`, is visible only inside
     /// the module, like a symbol that isn't exported from a C library.
     public func snapshot(width: Int, height: Int, maxPasses: Int = 20,
-                         viewTransform: ViewportViewTransform? = .standard) -> CGImage? {
+                         viewTransform: ViewTransform? = .standard) -> CGImage? {
         // SWIFT: `flatMap` on an optional runs the closure only when there
         // is a value; `try?` turns each failure into nil.
         let transformed: DisplayPass? = viewTransform.flatMap { transform in

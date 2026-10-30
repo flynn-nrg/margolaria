@@ -24,6 +24,7 @@
 
 import GraphKit
 import MXKit
+import PreviewKit
 import SwiftUI
 
 struct InspectorPanel: View {
@@ -182,6 +183,16 @@ private struct NodeHeader: View {
                     // SWIFT: Lets the text wrap onto as many lines as it
                     // needs instead of being cut off.
                     .fixedSize(horizontal: false, vertical: true)
+            }
+            // A swatch that couldn't be drawn (M3c) says why here: the
+            // canvas only shows "No preview".
+            if case .failed(let message)? = document.swatches?.swatch(for: node.path) {
+                Label("No preview: \(message)", systemImage: "circle.dashed")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+                    .help(message)
             }
             if node.isIncluded {
                 Label("From an included file: read-only", systemImage: "lock")

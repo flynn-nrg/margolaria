@@ -14,6 +14,7 @@
 // Introduces (SWIFT): `Picker` with an optional selection, `@AppStorage`,
 // `Section` in a menu-style picker.
 
+import ColorKit
 import MXKit
 import SwiftUI
 import ViewportKit
@@ -40,10 +41,10 @@ struct ViewportPanel: View {
     @AppStorage("viewportView") private var view: String = ""
 
     /// The view transform to use: the one chosen if the config still
-    /// offers it, otherwise the config's default (nil without OCIO).
-    private var viewTransform: ViewportViewTransform? {
-        let chosen = ViewportViewTransform(display: display, view: view)
-        return chosen.isAvailable ? chosen : .standard
+    /// offers it, otherwise the config's default (nil without OCIO). The
+    /// canvas's swatches read the same settings (GraphPanel).
+    private var viewTransform: ViewTransform? {
+        ViewTransform.preferred(display: display, view: view)
     }
 
     /// The document's materials (top-level elements of type "material"), in
@@ -114,12 +115,12 @@ struct ViewportPanel: View {
 
     /// A menu of every view of every display the viewport offers, one
     /// section per display, with `current` ticked.
-    private func viewTransformPicker(showing current: ViewportViewTransform) -> some View {
+    private func viewTransformPicker(showing current: ViewTransform) -> some View {
         // SWIFT: A `Binding` is a getter and a setter that a control reads
         // and writes through. `$display` would bind one stored value; this
         // one is made from two closures, so the picker can choose a display
         // and a view together, stored in two settings.
-        let selection = Binding<ViewportViewTransform>(
+        let selection = Binding<ViewTransform>(
             get: { current },
             set: { chosen in
                 display = chosen.display
@@ -127,12 +128,12 @@ struct ViewportPanel: View {
             }
         )
         return Picker("View", selection: selection) {
-            ForEach(ViewportViewTransform.displays, id: \.self) { display in
+            ForEach(ViewTransform.displays, id: \.self) { display in
                 // SWIFT: In a menu-style picker, a `Section` is a group with
                 // a heading, separated from the next by a line.
                 Section(display) {
-                    ForEach(ViewportViewTransform.views(for: display), id: \.self) { view in
-                        Text(view).tag(ViewportViewTransform(display: display, view: view))
+                    ForEach(ViewTransform.views(for: display), id: \.self) { view in
+                        Text(view).tag(ViewTransform(display: display, view: view))
                     }
                 }
             }

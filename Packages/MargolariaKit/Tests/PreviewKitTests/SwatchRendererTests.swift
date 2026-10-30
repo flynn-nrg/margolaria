@@ -88,9 +88,8 @@ struct SwatchRendererTests {
             shader = try document.generateMSL(for: "M_BrushedCopper", library: library)
         }
         let generated: MXGeneratedShader = try #require(shader)
-        // The first render compiles the MSL from scratch. The renderer
-        // doesn't cache pipelines yet, so the second render builds the
-        // pipeline again, but the system's shader cache makes that cheap.
+        // The first render compiles the MSL from scratch. The second finds
+        // the pipeline in the renderer's cache (M3c) and only draws.
         let first: Duration = try clock.measure {
             _ = try renderer.image(generated, size: 256)
         }
@@ -98,7 +97,9 @@ struct SwatchRendererTests {
             _ = try renderer.image(generated, size: 256)
         }
         print("Copper swatch timing: generate \(generate), first render (cold compile) \(first), second render (cached) \(second)")
-        #expect(second < .seconds(5))
+        #expect(renderer.hasPipeline(for: generated))
+        // About 2 ms: drawing, the view transform and reading the image back.
+        #expect(second < .milliseconds(50), "\(second)")
     }
 
     @Test("A float node renders as grey noise on a sphere")
@@ -174,12 +175,14 @@ struct SwatchRendererTests {
         try Fixtures.save(image, as: "swatch_checker.png")
 
         // Along the equator, the colour must switch between red and blue.
+        // (Relative tests: ACES 2.0, the default view transform, shows pure
+        // red as about 190, not 255.)
         var sawRed = false
         var sawBlue = false
         for x in stride(from: 40, to: 216, by: 4) {
             let p = Fixtures.pixel(image, x: x, y: 128)
-            if p.r > 200 && p.b < 50 { sawRed = true }
-            if p.b > 200 && p.r < 50 { sawBlue = true }
+            if p.r > p.b + 120 { sawRed = true }
+            if p.b > p.r + 120 { sawBlue = true }
         }
         #expect(sawRed && sawBlue)
     }

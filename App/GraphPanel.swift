@@ -27,14 +27,35 @@
 // back up. The sidebar opens levels and selects nodes through `level` and
 // `focus` (see ContentView).
 //
+// Swatches (M3c): nodes with an output a swatch can show have one, drawn in
+// the background by PreviewKit (SwatchCache, kept by the document). After
+// every rebuild the level asks for its swatches again: only those whose
+// fingerprint changed (the nodes downstream of an edit) are drawn, and the
+// new canvas starts with the ones already drawn. Only nodes on or near the
+// screen are drawn, nearest the middle first, and none while zoomed out
+// too far to read them; panning and zooming ask for the rest, shortly
+// after the camera stops. They use the viewport's light and view
+// transform, from the same user defaults as its menus. The bar above the
+// canvas hides them, for a more compact graph.
+//
+// Arranging (M3c): saved positions can make nodes overlap (they are taller
+// with swatches than in the editor that saved them); the canvas pushes
+// them apart on screen (DocumentGraph.layout), without changing the
+// document. The bar's Arrange button lays the whole level out again and
+// saves the positions, as one undo step.
+//
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
 // holding view state, closures capturing a binding, `.dropDestination`,
-// `.popover` anchored to a point, `.allowsHitTesting`.
+// `.popover` anchored to a point, `.allowsHitTesting`; `Dictionary(uniqueKeysWithValues:)`
+// (M3c).
 
+import ColorKit
 import GraphKit
 import MXKit
+import PreviewKit
 import SwiftUI
+import ViewportKit
 
 /// One open graph level: what was built from the document, and the canvas
 /// controller showing it.
@@ -46,10 +67,30 @@ import SwiftUI
 final class GraphLevel {
     let graph: DocumentGraph
     let controller: GraphCanvasController
+    /// The MaterialX graph it was built from, for the swatches' fingerprints.
+    let source: MXGraph
+    /// Every swatch this level shows, with its fingerprint: computed once,
+    /// the first time they are asked for.
+    var swatchRequests: [SwatchRequest]? = nil
 
-    init(graph: DocumentGraph) {
+    init(graph: DocumentGraph, source: MXGraph) {
         self.graph = graph
+        self.source = source
         self.controller = GraphCanvasController(model: graph.model)
+    }
+
+    /// Shows `swatch` on the node at `path`, if it is on this level and
+    /// has room for one.
+    func show(_ swatch: Swatch, at path: String) {
+        guard let id = graph.nodeIndex(forPath: path), graph.model.nodes[id].hasThumbnail else {
+            return
+        }
+        switch swatch {
+        case .image(let image):
+            controller.thumbnails[id] = .image(image)
+        case .failed:
+            controller.thumbnails[id] = .unavailable
+        }
     }
 }
 
@@ -90,9 +131,27 @@ struct GraphPanel: View {
     /// A node to select once the level has been rebuilt: one just added.
     @State private var pendingSelection: String? = nil
 
+    /// Whether nodes show swatches (the bar's toggle), kept between launches.
+    @AppStorage("showsNodePreviews") private var showsPreviews: Bool = true
+
+    /// True after Arranging: the rebuilt level is framed, rather than
+    /// keeping the camera, because its nodes have all moved.
+    @State private var framesAfterRebuild: Bool = false
+
+    /// The swatches asked for when the camera stops moving (see
+    /// `cameraMoved`).
+    @State private var pendingSwatchRequest: Task<Void, Never>? = nil
+
+    /// The viewport's light and view transform (ViewportPanel's menus):
+    /// swatches use the same, so they agree with the viewport.
+    @AppStorage("viewportEnvironment") private var environment: ViewportEnvironment = .studio
+    @AppStorage("viewportDisplay") private var display: String = ""
+    @AppStorage("viewportView") private var view: String = ""
+
     var body: some View {
         VStack(spacing: 0) {
-            BreadcrumbBar(path: $levelPath)
+            BreadcrumbBar(path: $levelPath, showsPreviews: $showsPreviews, canPreview: document.swatches != nil,
+                          onArrange: level.map { shown in { arrange(shown) } })
             Divider()
             if let level {
                 LayerGraphRepresentable(controller: level.controller, thumbnail: nil)
@@ -159,9 +218,27 @@ struct GraphPanel: View {
             rebuild()
         }
         // Expanding or collapsing a node's inputs is view state, not an
-        // edit, but the canvas is built from it all the same.
+        // edit, but the canvas is built from it all the same. So is showing
+        // swatches, which makes nodes taller.
         .onChange(of: expandedPaths) {
             rebuild()
+        }
+        .onChange(of: showsPreviews) {
+            rebuild()
+        }
+        // Another light or view transform in the viewport: every swatch
+        // again, on the same canvas.
+        .onChange(of: swatchSettings) {
+            if let level {
+                requestSwatches(for: level)
+            }
+        }
+        // Panning and zooming bring other nodes near the screen.
+        .onChange(of: level?.controller.offset) {
+            cameraMoved()
+        }
+        .onChange(of: level?.controller.zoom) {
+            cameraMoved()
         }
         .onChange(of: focus) {
             applyFocus()
@@ -202,7 +279,12 @@ struct GraphPanel: View {
             failure = String(describing: error)
             return
         }
-        var graph: DocumentGraph = GraphBuilder.build(mxGraph, expanded: expandedPaths)
+        // SWIFT: The closure decides each node's `hasThumbnail`. `swatches
+        // != nil` is read once here, not for every node.
+        let previews: Bool = showsPreviews && document.swatches != nil
+        var graph: DocumentGraph = GraphBuilder.build(mxGraph, expanded: expandedPaths) { node in
+            previews && SwatchPlan.shaderPath(for: node) != nil
+        }
         graph.layout()
 
         // Rebuilding the level that is already shown (after an edit): keep
@@ -210,7 +292,7 @@ struct GraphPanel: View {
         // frames it instead.
         let previous: GraphLevel? = level?.graph.graphPath == levelPath ? level : nil
 
-        let newLevel = GraphLevel(graph: graph)
+        let newLevel = GraphLevel(graph: graph, source: mxGraph)
         // Double-clicking a nodegraph opens it.
         //
         // SWIFT: These closures capture `levelPath`, a binding: writing to it
@@ -271,21 +353,116 @@ struct GraphPanel: View {
             }
         }
 
-        if let previous {
+        if let previous, framesAfterRebuild {
+            // Arranged: every node moved, so frame them all, at the same
+            // view size, and keep the selection.
+            newLevel.controller.viewSize = previous.controller.viewSize
+            newLevel.controller.frame(.all)
+            let selectedPaths: [String] = previous.controller.selection.map { previous.graph.elementPaths[$0] }
+            newLevel.controller.selection = Set(selectedPaths.compactMap { graph.nodeIndex(forPath: $0) })
+        } else if let previous {
             newLevel.controller.zoom = previous.controller.zoom
             newLevel.controller.offset = previous.controller.offset
+            // The new canvas view sets it too, but only once it is laid
+            // out; the swatches asked for below need it now.
+            newLevel.controller.viewSize = previous.controller.viewSize
             let selectedPaths: [String] = previous.controller.selection.map { previous.graph.elementPaths[$0] }
             newLevel.controller.selection = Set(selectedPaths.compactMap { graph.nodeIndex(forPath: $0) })
         } else {
             newLevel.controller.frame(.all)
         }
+        framesAfterRebuild = false
         if let path = pendingSelection, let index = graph.nodeIndex(forPath: path) {
             newLevel.controller.selection = [index]
         }
         pendingSelection = nil
+        requestSwatches(for: newLevel)
         level = newLevel
         failure = nil
         applyFocus()
+    }
+
+    /// How swatches look now: the viewport's settings, at twice the
+    /// thumbnail's size in points (for Retina screens).
+    private var swatchSettings: SwatchSettings {
+        SwatchSettings(environmentURL: environment.imageURL,
+                       viewTransform: ViewTransform.preferred(display: display, view: view),
+                       pixelSize: Int(GraphLayout.thumbnailSize * 2))
+    }
+
+    /// Shows the swatches already drawn for `level`'s nodes, and asks for
+    /// those near the screen that are missing or out of date.
+    private func requestSwatches(for level: GraphLevel) {
+        guard let swatches = document.swatches, showsPreviews else {
+            return
+        }
+        let requests: [SwatchRequest]
+        if let known = level.swatchRequests {
+            requests = known
+        } else {
+            let customNodeDefs = Set(document.elements.filter { $0.category == "nodedef" }.map(\.name))
+            requests = SwatchPlan.requests(for: level.source, in: document.content, documentText: document.xml,
+                                           customNodeDefs: customNodeDefs)
+            level.swatchRequests = requests
+            // A rebuilt canvas starts with the swatches it had (even if
+            // about to change), rather than empty discs.
+            for request in requests {
+                if let swatch = swatches.swatch(for: request.nodePath) {
+                    level.show(swatch, at: request.nodePath)
+                }
+            }
+        }
+
+        // Only the nodes near the screen, nearest first; none below the
+        // zoom at which titles disappear, where a swatch is a few pixels.
+        // SWIFT: `Dictionary(uniqueKeysWithValues:)` builds a dictionary
+        // from (key, value) pairs; here, each request by its node's path.
+        let byPath = Dictionary(uniqueKeysWithValues: requests.map { ($0.nodePath, $0) })
+        let near: [SwatchRequest] = level.controller.nodesNearView(minimumZoom: GraphLayout.titleMinimumZoom)
+            .compactMap { byPath[level.graph.elementPaths[$0]] }
+        // SWIFT: `[weak level]`: a level replaced by the next edit is gone;
+        // swatches arriving for it then have nowhere to go, and the next
+        // level gets them from the cache.
+        swatches.update(near, xml: document.previewXML, settings: swatchSettings) { [weak level] path, swatch in
+            level?.show(swatch, at: path)
+        }
+    }
+
+    /// Asks for the swatches near the screen once the camera has been
+    /// still for a moment: while panning, the nodes passing by needn't
+    /// all be drawn.
+    private func cameraMoved() {
+        pendingSwatchRequest?.cancel()
+        // SWIFT: `try? await Task.sleep(for:)` waits without blocking; it
+        // throws if the task is cancelled meanwhile (the camera moved
+        // again), and the `guard` then gives up.
+        pendingSwatchRequest = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let level else {
+                return
+            }
+            requestSwatches(for: level)
+        }
+    }
+
+    /// Lays the whole level out again (GraphAutoLayout) and saves every
+    /// node's position, as one "Arrange" step. Nodes from included files
+    /// can't move; the others are arranged around them.
+    private func arrange(_ level: GraphLevel) {
+        var model: GraphModel = level.controller.model
+        GraphAutoLayout.apply(to: &model)
+        let positions: [(String, CGPoint)] = model.nodes.filter { !$0.isLocked }.map { node in
+            (level.graph.elementPaths[node.id], DocumentGraph.units(fromPoints: node.position))
+        }
+        guard !positions.isEmpty else {
+            return
+        }
+        framesAfterRebuild = true
+        document.edit("Arrange") { content in
+            for (path, position) in positions {
+                try content.setPosition(position, of: path)
+            }
+        }
     }
 
     /// Whether the node search is open, as a binding for `.popover`:
@@ -401,9 +578,15 @@ struct GraphPanel: View {
     }
 }
 
-/// "Document › NG_brass1": where the canvas is, each part clickable.
+/// "Document › NG_brass1": where the canvas is, each part clickable; and
+/// the swatches' toggle.
 private struct BreadcrumbBar: View {
     @Binding var path: String
+    @Binding var showsPreviews: Bool
+    /// False when swatches can't be drawn at all: the toggle is disabled.
+    let canPreview: Bool
+    /// Arranges the level shown; nil when there is none.
+    let onArrange: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 4) {
@@ -422,6 +605,23 @@ private struct BreadcrumbBar: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
+            Button {
+                onArrange?()
+            } label: {
+                Image(systemName: "rectangle.3.group")
+            }
+            .buttonStyle(.borderless)
+            .disabled(onArrange == nil)
+            .help("Arrange: lay out this level's nodes again, in columns, and save their positions")
+            // SWIFT: A `Toggle` styled as a button shows as a small button
+            // that stays pressed while on, like a toolbar toggle.
+            Toggle(isOn: $showsPreviews) {
+                Image(systemName: "circle.lefthalf.filled")
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .disabled(!canPreview)
+            .help(canPreview ? "Show a preview swatch on each node" : "Swatches need a Metal GPU and MaterialX's libraries")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)

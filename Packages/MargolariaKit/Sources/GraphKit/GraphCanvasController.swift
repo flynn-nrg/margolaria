@@ -88,6 +88,17 @@ public enum DanglingWire: Equatable, Sendable {
     case intoInput(InputSlot, type: PortType)
 }
 
+/// What a node's thumbnail shows (M3c). The app draws swatches in the
+/// background and sets them in ``GraphCanvasController/thumbnails`` as
+/// they arrive; until then a node shows an empty disc.
+public enum NodeThumbnail {
+    /// The swatch, transparent around the sphere.
+    case image(CGImage)
+    /// No swatch can be drawn for this node (its shader failed to generate
+    /// or compile); the app says why elsewhere (the inspector).
+    case unavailable
+}
+
 /// A request for the app's node search: Tab, or a wire dropped on empty
 /// canvas.
 public struct NodeSearchRequest: Equatable, Sendable {
@@ -142,6 +153,10 @@ public final class GraphCanvasController {
     /// The ⌥-drag cut line, and the wires it crosses (drawn highlighted).
     public private(set) var cutLine: CutLine? = nil
     public private(set) var cutWires: Set<GraphWire> = []
+
+    /// Each node's swatch, by node ID, for the nodes that have a thumbnail
+    /// (``GraphNode/hasThumbnail``). Nodes not in it show an empty disc.
+    public var thumbnails: [Int: NodeThumbnail] = [:]
 
     /// Bumped whenever node positions change, so renderers that cache
     /// geometry (Core Animation) know to update it.
@@ -296,6 +311,27 @@ public final class GraphCanvasController {
     public func visibleGraphRect(viewSize size: CGSize) -> CGRect {
         let origin: CGPoint = graphPoint(fromView: .zero)
         return CGRect(x: origin.x, y: origin.y, width: size.width / zoom, height: size.height / zoom)
+    }
+
+    /// The nodes on screen or within half a screen of it, nearest the
+    /// middle of the view first: the ones whose swatches to draw (M3c).
+    /// Empty before the view has a size, or below `minimumZoom`.
+    public func nodesNearView(minimumZoom: CGFloat = 0) -> [Int] {
+        guard viewSize.width > 0, viewSize.height > 0, zoom >= minimumZoom else {
+            return []
+        }
+        let visible: CGRect = visibleGraphRect(viewSize: viewSize)
+        let near: CGRect = visible.insetBy(dx: -visible.width / 2, dy: -visible.height / 2)
+        let centre = CGPoint(x: visible.midX, y: visible.midY)
+        // SWIFT: `filter` then `sorted(by:)` on the result; `hypot` is C's
+        // distance function.
+        let distance: (Int) -> CGFloat = { id in
+            let frame: CGRect = GraphLayout.frame(of: self.model.nodes[id])
+            return hypot(frame.midX - centre.x, frame.midY - centre.y)
+        }
+        return model.nodes.indices
+            .filter { GraphLayout.frame(of: model.nodes[$0]).intersects(near) }
+            .sorted { distance($0) < distance($1) }
     }
 
     // MARK: Hit testing

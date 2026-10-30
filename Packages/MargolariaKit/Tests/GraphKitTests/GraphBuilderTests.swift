@@ -51,6 +51,25 @@ enum Fixtures {
 
 @Suite("Graph builder")
 struct GraphBuilderTests {
+    @Test("Nodes have room for a thumbnail when the app says so, and the graph's own inputs and outputs never")
+    func thumbnails() throws {
+        let document: MXDocument = try Fixtures.document(Fixtures.url("brushed_copper.mtlx"))
+        // The app decides with PreviewKit's SwatchPlan; here, every node
+        // but the material.
+        let inner: DocumentGraph = GraphBuilder.build(try document.graph(at: "NG_copper")) { _ in true }
+        for node in inner.model.nodes {
+            #expect(node.hasThumbnail == (node.category != .graphInterface), "\(node.title)")
+        }
+        let root: DocumentGraph = GraphBuilder.build(try document.graph()) { $0.type != "material" }
+        #expect(root.model.nodes.map(\.hasThumbnail) == [true, true, false])
+        // Room for it: a thumbnail makes the node taller by its size and a
+        // margin, and moves its rows down as much.
+        let without: DocumentGraph = GraphBuilder.build(try document.graph())
+        let height: CGFloat = GraphLayout.frame(of: root.model.nodes[0]).height
+            - GraphLayout.frame(of: without.model.nodes[0]).height
+        #expect(height == GraphLayout.thumbnailSize + 8)
+    }
+
     @Test("The document root: nodes, collapsed inputs and wires")
     func root() throws {
         let document: MXDocument = try Fixtures.document(Fixtures.url("brushed_copper.mtlx"))
@@ -135,8 +154,10 @@ struct GraphAutoLayoutTests {
         let document: MXDocument = try Fixtures.document(url)
         var paths: [String] = [""]
         paths += document.nodeGraphs.map(\.path)
-        for path in paths {
-            var model: GraphModel = GraphBuilder.build(try document.graph(at: path)).model
+        // Without thumbnails, and with one on every node (M3c: the app
+        // gives most nodes one, which makes them taller).
+        for (path, thumbnails) in paths.flatMap({ [($0, false), ($0, true)] }) {
+            var model: GraphModel = GraphBuilder.build(try document.graph(at: path)) { _ in thumbnails }.model
             GraphAutoLayout.apply(to: &model)
 
             for wire in model.wires {
@@ -229,5 +250,40 @@ struct CanvasEditingTests {
         #expect(DocumentGraph.units(fromPoints: graph.model.nodes[0].position) == CGPoint(x: 2, y: 1))
         // The material had no position: placed by the auto-layout.
         #expect(graph.model.nodes[1].position != .zero)
+    }
+
+    @Test("Saved positions that make nodes overlap are pushed apart on screen, keeping columns and order")
+    func overlappingPositions() throws {
+        // Three nodes stacked one Graph Editor unit apart, as an editor
+        // with small nodes would save them, and one beside them; with
+        // swatches, our nodes are much taller than one unit.
+        let xml = """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <constant name="a" type="color3" xpos="0" ypos="0" />
+              <constant name="b" type="color3" xpos="0" ypos="1" />
+              <constant name="c" type="color3" xpos="0.2" ypos="2" />
+              <constant name="d" type="color3" xpos="3" ypos="0.5" />
+            </materialx>
+            """
+        let document = try MXDocument(xml: xml)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        var graph: DocumentGraph = GraphBuilder.build(try document.graph()) { _ in true }
+        let saved: [CGPoint] = graph.model.nodes.map(\.position)
+        graph.layout()
+        let frames: [CGRect] = graph.model.nodes.map { GraphLayout.frame(of: $0) }
+        for i in frames.indices {
+            for j in frames.indices where j > i {
+                #expect(!frames[i].intersects(frames[j]), "\(i) overlaps \(j)")
+            }
+        }
+        // Only moved down, and only those in the way: the first of the
+        // column and the one beside it stay put; nothing moves sideways.
+        #expect(graph.model.nodes[0].position == saved[0])
+        #expect(graph.model.nodes[3].position == saved[3])
+        #expect(graph.model.nodes.map(\.position.x) == saved.map(\.x))
+        #expect(frames[0].maxY < frames[1].minY && frames[1].maxY < frames[2].minY)
+        // The document keeps its positions.
+        #expect(try document.graph().nodes[1].position == CGPoint(x: 0, y: 1))
     }
 }
