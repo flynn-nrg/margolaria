@@ -119,6 +119,10 @@ public struct MXPort: Hashable, Sendable {
     /// ancestor's, or the nodedef's. Nil means the document's working
     /// space (lin_rec709 unless the document says otherwise).
     public let activeColorSpace: String?
+    /// The colour space the value would be in without the port's own
+    /// `colorspace`: its owner's or an ancestor's. Nil means the document's
+    /// working space. The inspector's colour space menu calls it "Default".
+    public let inheritedColorSpace: String?
     /// How the inspector shows the input: label, ranges, choices, help.
     public let ui: MXPortUI
 
@@ -140,6 +144,7 @@ public struct MXPort: Hashable, Sendable {
         isUniform = port.isUniform
         defaultValue = port.defaultValue.swiftString.nonEmpty
         activeColorSpace = port.activeColorSpace.swiftString.nonEmpty
+        inheritedColorSpace = port.inheritedColorSpace.swiftString.nonEmpty
         ui = MXPortUI(port)
     }
 

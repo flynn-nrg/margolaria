@@ -15,7 +15,8 @@
 // from closures), `Slider` with `onEditingChanged`, `ColorPicker` with a
 // `CGColor` (M2b; replaced by ColorPickerPopover in M3e), `CGColorSpace`
 // and converting colours between spaces,
-// `NSOpenPanel`, `.onExitCommand`, structs of closures.
+// `NSOpenPanel`, `.onExitCommand`, structs of closures, `Menu` with an
+// inline `Picker` (the colour space menu).
 
 import AppKit
 import ColorKit
@@ -34,6 +35,9 @@ struct InputActions {
     let scrub: (String) -> Void
     /// The drag is over: the next change is a new undo step.
     let endScrub: () -> Void
+    /// Sets the input's `colorspace` (nil removes it), and its value too
+    /// when one is given (a converted colour), as one undo step.
+    let setColorSpace: (_ colorSpace: String?, _ value: String?) -> Void
 }
 
 /// The editor for one input, chosen by its type and metadata.
@@ -335,12 +339,133 @@ struct ColorEditor: View {
                     .foregroundStyle(.orange)
                     .help("Outside the gamut of \(space.label): a component is negative. Open the picker to clip it.")
             }
-            Text(space.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .help(space.help)
+            ColorSpaceMenu(input: input, convertsValue: true, actions: actions)
             NumberField(text: input.value ?? "", type: input.valueType, onCommit: actions.commit)
         }
+    }
+}
+
+/// The colour space of a colour or image input, as a menu that changes it
+/// (PLAN.md §8.3, "Colour spaces of inputs").
+///
+/// For a colour value, choosing a space converts its numbers so the colour
+/// stays the same, and tags the input; "Reinterpret as" only retags it, so
+/// the same numbers mean another colour (for a value typed in the wrong
+/// space). For an image file, choosing a space only tags it. "Default"
+/// removes the input's own `colorspace`: it is then in its node's,
+/// nodegraph's or document's space.
+struct ColorSpaceMenu: View {
+    let input: MXPort
+    /// True for colour values (their numbers are converted); false for
+    /// image files (only tagged).
+    let convertsValue: Bool
+    let actions: InputActions
+
+    /// The spaces offered: MaterialX's standard ones that OCIO knows, and
+    /// the input's own if it is another (so the menu can show it chosen).
+    private var spaces: [InputColorSpace] {
+        var spaces: [InputColorSpace] = InputColorSpace.available()
+        if let own = input.colorSpace, !spaces.contains(where: { $0.name == own }) {
+            spaces.append(InputColorSpace(name: own, title: "not a standard MaterialX space"))
+        }
+        return spaces
+    }
+
+    /// The space "Default" stands for.
+    private var inherited: String {
+        input.inheritedColorSpace ?? InputColorSpace.documentDefault
+    }
+
+    /// The input's numbers, if it has a colour value OCIO can convert from
+    /// its space; nil otherwise (only reinterpreting is offered then).
+    private var convertible: [Double]? {
+        guard convertsValue, let numbers = MXValueText.numbers(input.value ?? ""),
+              (try? InputColorSpace.convert(numbers, from: input.activeColorSpace, to: nil)) != nil else {
+            return nil
+        }
+        return numbers
+    }
+
+    var body: some View {
+        let mapping: ColorSpaceMapping = ColorSpaceMapping(materialX: input.activeColorSpace)
+        let numbers: [Double]? = convertible
+        // SWIFT: A `Binding` whose setter makes the edit: the inline
+        // `Picker` below shows a checkmark on the current choice and calls
+        // `set` with the one chosen. "" stands for Default (no tag), as a
+        // Picker's tags can't be nil here.
+        let choice = Binding<String>(
+            get: { input.colorSpace ?? "" },
+            set: { name in
+                guard name != (input.colorSpace ?? "") else {
+                    return
+                }
+                let space: String? = name.isEmpty ? nil : name
+                if let numbers {
+                    convert(numbers, to: space)
+                } else {
+                    actions.setColorSpace(space, nil)
+                }
+            }
+        )
+        // SWIFT: `Menu` is a pop-up menu button; its first closure is the
+        // menu's content (buttons, pickers, nested menus), `label:` what
+        // the button shows.
+        Menu {
+            Picker(convertsValue ? "Convert to" : "Image colour space", selection: choice) {
+                Text("Default (\(inherited))").tag("")
+                Divider()
+                ForEach(spaces) { space in
+                    Text("\(space.name) — \(space.title)").tag(space.name)
+                }
+            }
+            // SWIFT: `.pickerStyle(.inline)` puts the choices in the menu
+            // itself, as a section with checkmarks, instead of a submenu.
+            .pickerStyle(.inline)
+            .disabled(convertsValue && numbers == nil)
+            if convertsValue {
+                Menu("Reinterpret as") {
+                    Button("Default (\(inherited))") {
+                        actions.setColorSpace(nil, nil)
+                    }
+                    Divider()
+                    ForEach(spaces) { space in
+                        Button("\(space.name) — \(space.title)") {
+                            actions.setColorSpace(space.name, nil)
+                        }
+                    }
+                }
+            }
+        } label: {
+            Text(mapping.label)
+                .font(.caption)
+        }
+        // SWIFT: `.borderlessButton` draws the menu as plain text with a
+        // small arrow, like a label; `.fixedSize()` keeps it as wide as
+        // its text instead of taking the row's spare room.
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help(help(mapping))
+    }
+
+    /// The tooltip: what the space is, and where it comes from.
+    private func help(_ mapping: ColorSpaceMapping) -> String {
+        let source: String = input.colorSpace == nil
+            ? "Default: no colorspace on the input, so it is in the space of its node, nodegraph or document."
+            : "Set on the input."
+        let action: String = convertsValue
+            ? "Choose a space to convert the colour to it, or reinterpret the numbers as another space."
+            : "Choose the space the image's colours are in."
+        return "\(mapping.help)\n\(source)\n\(action)"
+    }
+
+    /// Converts the colour's numbers to `space` (nil: the inherited one)
+    /// and tags the input with it, so the colour stays the same.
+    private func convert(_ numbers: [Double], to space: String?) {
+        guard let converted = try? InputColorSpace.convert(numbers, from: input.activeColorSpace,
+                                                          to: space ?? inherited) else {
+            return
+        }
+        actions.setColorSpace(space, MXValueText.text(converted, as: input.valueType))
     }
 }
 
@@ -443,6 +568,9 @@ struct FileEditor: View {
             CommitTextField(text: input.value ?? "", prompt: "No file", onCommit: actions.commit)
                 .help(input.fileURL?.path(percentEncoded: false) ?? "")
             Button("Choose…", action: choose)
+            // The space the image's colours are in: only a tag, since its
+            // numbers are in the file.
+            ColorSpaceMenu(input: input, convertsValue: false, actions: actions)
         }
     }
 

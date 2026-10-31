@@ -86,6 +86,45 @@ struct MXEditTests {
         #expect(try !input("base_color", of: "SR", in: document).isAuthored)
     }
 
+    @Test("Setting a colour space: tags the input, keeps the value; nil goes back to the inherited space")
+    func setColorSpace() throws {
+        let document = try document()
+        let before: MXPort = try input("base_color", of: "SR", in: document)
+        #expect(before.activeColorSpace == nil && before.inheritedColorSpace == nil)
+
+        try document.setColorSpace("srgb_texture", ofInput: "base_color", on: "SR")
+        var tagged: MXPort = try input("base_color", of: "SR", in: document)
+        #expect(tagged.colorSpace == "srgb_texture" && tagged.activeColorSpace == "srgb_texture")
+        #expect(tagged.inheritedColorSpace == nil)
+        #expect(tagged.value == "0.8, 0.2, 0.1")
+
+        // An input the file doesn't set yet is added, with its default.
+        try document.setColorSpace("acescg", ofInput: "specular_color", on: "SR")
+        tagged = try input("specular_color", of: "SR", in: document)
+        #expect(tagged.isAuthored && tagged.colorSpace == "acescg" && tagged.value == tagged.defaultValue)
+
+        try document.setColorSpace(nil, ofInput: "base_color", on: "SR")
+        #expect(try input("base_color", of: "SR", in: document).colorSpace == nil)
+        #expect(document.validationIssues().isEmpty)
+    }
+
+    @Test("The inherited colour space comes from the owner or the document")
+    func inheritedColorSpace() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39" colorspace="acescg">
+              <open_pbr_surface name="SR" type="surfaceshader">
+                <input name="base_color" type="color3" value="0.8, 0.2, 0.1" colorspace="srgb_texture" />
+              </open_pbr_surface>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        let tagged: MXPort = try input("base_color", of: "SR", in: document)
+        #expect(tagged.activeColorSpace == "srgb_texture" && tagged.inheritedColorSpace == "acescg")
+        let untagged: MXPort = try input("specular_color", of: "SR", in: document)
+        #expect(untagged.activeColorSpace == "acescg" && untagged.inheritedColorSpace == "acescg")
+    }
+
     @Test("Connecting: types must match, loops are refused")
     func connect() throws {
         let document = try document()

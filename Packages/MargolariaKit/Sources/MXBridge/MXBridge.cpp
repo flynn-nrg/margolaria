@@ -471,6 +471,7 @@ PortInfo DescribePort(const mx::PortElementPtr& port) {
     info.isUniform = port->getIsUniform();
     // Searches the port, then its ancestors, up to the document.
     info.activeColorSpace = port->getActiveColorSpace();
+    info.inheritedColorSpace = port->getParent()->getActiveColorSpace();
     MergeUIMetadata(port, info);
     return info;
 }
@@ -509,6 +510,7 @@ std::vector<PortInfo> MergeInputs(const mx::InterfaceElementPtr& element, const 
             } else {
                 info = DescribeDefaultInput(definition);
                 info.activeColorSpace = DefaultColorSpace(definition, element);
+                info.inheritedColorSpace = info.activeColorSpace;
             }
             info.defaultValue = definition->getValueString();
             // The document's input may override the nodedef's metadata
@@ -1225,6 +1227,21 @@ bool Document::resetInput(const std::string& elementPath, const std::string& inp
             RemoveInput(node, input);
         } else {
             element->removeChild(port->getName());
+        }
+    });
+}
+
+bool Document::setInputColorSpace(const std::string& elementPath, const std::string& inputName,
+                                  const std::string& colorSpace, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::PortElementPtr port = Port(EditableElement(document, elementPath), inputName, true);
+        if (!port->isA<mx::Input>()) {
+            throw Refusal("Only inputs have a colour space");
+        }
+        if (colorSpace.empty()) {
+            port->removeAttribute(mx::Element::COLOR_SPACE_ATTRIBUTE);
+        } else {
+            port->setColorSpace(colorSpace);
         }
     });
 }

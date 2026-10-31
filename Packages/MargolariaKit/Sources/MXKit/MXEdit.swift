@@ -97,6 +97,16 @@ extension MXDocument {
         }
     }
 
+    /// Sets an input's `colorspace` (nil removes it, so the input is in its
+    /// owner's space again), leaving its value as it is. `path` is the node
+    /// or nodegraph. To keep the colour the same, convert the value too
+    /// (ColorKit), with ``setValue(_:ofInput:on:)`` in the same edit.
+    public func setColorSpace(_ colorSpace: String?, ofInput input: String, on path: String) throws {
+        try perform { error in
+            handle.setInputColorSpace(std.string(path), std.string(input), std.string(colorSpace ?? ""), &error)
+        }
+    }
+
     /// Connects input `input` of the node at `target` to the node or
     /// nodegraph `source` in the same graph (its output `output`, if it has
     /// several). For an `<output>` element, `input` is "". Refused if the

@@ -160,4 +160,28 @@ struct ColorKitTests {
             try config.displayShader(from: "lin_rec709", display: "No Such Display", view: "Raw")
         }
     }
+
+    @Test("The standard MaterialX spaces the config knows are offered; converting keeps the colour and alpha")
+    func inputColorSpaces() throws {
+        let config = try studio()
+        // All but g18_ap1, which OCIO's built-in config doesn't have.
+        let available: [InputColorSpace] = InputColorSpace.available(in: config)
+        #expect(available.map(\.name) == InputColorSpace.standard.map(\.name).filter { $0 != "g18_ap1" })
+        // sRGB 0.5 is 0.2140 linear; alpha stays.
+        let linear: [Double] = try InputColorSpace.convert([0.5, 0.5, 0.5, 0.25], from: "srgb_texture", to: nil,
+                                                           configuration: config)
+        #expect(close(SIMD3(linear[0], linear[1], linear[2]), SIMD3(repeating: 0.214041), within: 1e-4))
+        #expect(linear[3] == 0.25)
+        // To ACEScg and back.
+        let colour: [Double] = [0.8, 0.3, 0.1]
+        for space in available {
+            let there: [Double] = try InputColorSpace.convert(colour, from: nil, to: space.name, configuration: config)
+            let back: [Double] = try InputColorSpace.convert(there, from: space.name, to: "lin_rec709",
+                                                             configuration: config)
+            #expect(close(SIMD3(back[0], back[1], back[2]), SIMD3(0.8, 0.3, 0.1), within: 1e-4), "\(space.name)")
+        }
+        #expect(throws: ColorError.self) {
+            try InputColorSpace.convert(colour, from: "no_such_space", to: nil, configuration: config)
+        }
+    }
 }
