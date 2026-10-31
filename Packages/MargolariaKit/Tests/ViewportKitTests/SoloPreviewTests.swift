@@ -97,6 +97,27 @@ struct SoloPreviewTests {
         #expect(abs(Int(pixel.r) - 231) <= 3 && abs(Int(pixel.g) - 89) <= 3 && abs(Int(pixel.b) - 89) <= 3, "\(pixel)")
     }
 
+    /// Storm ignores `colorspace` on <materialx>, though not on nodes,
+    /// nodegraphs and inputs; the preview text moves it down (MXBridge's
+    /// PreviewCopy). Without that, this red came out (192, 108, 95).
+    @Test("Storm honours the document's working space: the same colour in ACEScg looks the same")
+    func workingSpace() throws {
+        // (0.8, 0.1, 0.1) in lin_rec709, converted to ACEScg.
+        let acescg: [Double] = try InputColorSpace.convert([0.8, 0.1, 0.1], from: "lin_rec709", to: "acescg")
+        let text: String = acescg.map { String(Float($0)) }.joined(separator: ", ")
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39" colorspace="acescg">
+              <constant name="red" type="color3"><input name="value" type="color3" value="\(text)" /></constant>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        var renderer: MGStormRenderer? = nil
+        let red: CGImage = try #require(try Self.render(try document.soloPreview(for: "red"), with: &renderer))
+        let pixel = Fixtures.pixel(red, x: 32, y: 32)
+        #expect(abs(Int(pixel.r) - 231) <= 3 && abs(Int(pixel.g) - 89) <= 3 && abs(Int(pixel.b) - 89) <= 3, "\(pixel)")
+    }
+
     @Test("Every node of every example with a swatch can be soloed",
           .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
           arguments: Examples.files)

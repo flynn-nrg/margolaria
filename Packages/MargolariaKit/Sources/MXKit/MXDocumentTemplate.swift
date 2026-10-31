@@ -2,7 +2,7 @@
 //
 // What File > New starts from (M2e): a material ready to edit (a shader
 // feeding a surfacematerial, so the viewport shows it straight away), or
-// an empty document.
+// an empty document; in the working space chosen in the template sheet.
 //
 // Introduces (SWIFT): nothing new.
 
@@ -75,8 +75,21 @@ public enum MXDocumentTemplate: String, CaseIterable, Identifiable, Sendable {
         """#
     }
 
-    /// The template as a document.
-    public func makeDocument() throws -> MXDocument {
-        try MXDocument(xml: xml)
+    /// The document's XML with its working space, `colorspace` on
+    /// <materialx> (such as "acescg"); nil leaves it out (lin_rec709).
+    public func xml(workingSpace: String?) -> String {
+        guard let workingSpace else {
+            return xml
+        }
+        // SWIFT: `replacingOccurrences(of:with:)` replaces every match;
+        // the root's version attribute appears once.
+        return xml.replacingOccurrences(of: #"<materialx version="1.39""#,
+                                        with: #"<materialx version="1.39" colorspace="\#(workingSpace)""#)
+    }
+
+    /// The template as a document, in `workingSpace` (see
+    /// ``xml(workingSpace:)``).
+    public func makeDocument(workingSpace: String? = nil) throws -> MXDocument {
+        try MXDocument(xml: xml(workingSpace: workingSpace))
     }
 }

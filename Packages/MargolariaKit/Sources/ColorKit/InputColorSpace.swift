@@ -26,6 +26,13 @@ public struct InputColorSpace: Hashable, Identifiable, Sendable {
 
     public var id: String { name }
 
+    /// True for linear spaces (`lin_*` and ACEScg), the ones that make
+    /// sense as a document's working space: shading adds and multiplies
+    /// light, which only works on linear values.
+    public var isLinear: Bool {
+        name.hasPrefix("lin_") || name == "acescg"
+    }
+
     public init(name: String, title: String) {
         self.name = name
         self.title = title

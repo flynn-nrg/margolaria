@@ -3,6 +3,9 @@
 // The inspector (PLAN.md §4.1, region 5; M2b): the element selected on the
 // canvas, with every input, grouped by the nodedef's `uifolder`.
 //
+// With nothing selected: the document's version and working space. For a
+// nodegraph, its working space too (WorkingSpaceMenu.swift).
+//
 // For a node: its name (editable, to rename it), category, nodedef, type
 // variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
 // dot; the others show the nodedef's default, dimmed, and setting one adds
@@ -58,6 +61,10 @@ struct InspectorPanel: View {
                 // and sends the panel its own colour.
                 .id(selectedPath)
             } else {
+                // Nothing selected: the document's own settings.
+                DocumentSettings(document: document)
+                    .padding(12)
+                Divider()
                 ContentUnavailableView("No Selection", systemImage: "slider.horizontal.3",
                                        description: Text("Select one node on the canvas to see its inputs."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -128,6 +135,23 @@ private struct InspectedElementView: View {
             return true
         }
         return isReadOnly(graph)
+    }
+}
+
+// MARK: - Document
+
+/// What the inspector shows of the document itself: its MaterialX version
+/// and its working space.
+private struct DocumentSettings: View {
+    let document: MaterialXDocument
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ElementTitle(name: document.displayName ?? "Document",
+                         subtitle: "MaterialX \(document.content.documentVersion)")
+            WorkingSpaceMenu(document: document, path: "", isReadOnly: false)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -209,6 +233,12 @@ private struct NodeHeader: View {
                     .lineLimit(4)
                     .textSelection(.enabled)
                     .help(message)
+            }
+            // A nodegraph's own working space (PLAN.md §8.3).
+            if node.isNodeGraph {
+                WorkingSpaceMenu(document: document, path: node.path,
+                                 isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                    .padding(.top, 4)
             }
             if node.isIncluded {
                 Label("From an included file: read-only", systemImage: "lock")

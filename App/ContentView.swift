@@ -241,8 +241,8 @@ struct ContentView: View {
                 document.start(from: .empty)
             }
         })) {
-            TemplateSheet { template in
-                document.start(from: template)
+            TemplateSheet { template, workingSpace in
+                document.start(from: template, workingSpace: workingSpace)
             } onOpen: {
                 document.openExistingInstead()
             }

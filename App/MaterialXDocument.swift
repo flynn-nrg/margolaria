@@ -184,14 +184,19 @@ final class MaterialXDocument: NSDocument {
         Data(try content.xmlString().utf8)
     }
 
-    /// Starts the new document from `template` (the template sheet).
-    /// Not an edit: there is nothing to undo back to, and an untitled
-    /// document no one changes further still closes without asking.
-    func start(from template: MXDocumentTemplate) {
+    /// Starts the new document from `template` (the template sheet), in
+    /// `workingSpace` (nil: none written, MaterialX's default). Not an
+    /// edit: there is nothing to undo back to, and an untitled document no
+    /// one changes further still closes without asking.
+    func start(from template: MXDocumentTemplate, workingSpace: String? = nil) {
         isChoosingTemplate = false
+        // An empty document without a working space is what there is already.
+        if template == .empty && workingSpace == nil {
+            return
+        }
         // The templates are constants that the tests read, so this only
         // fails if one is broken; then the document stays empty.
-        guard template != .empty, let document = try? template.makeDocument() else {
+        guard let document = try? template.makeDocument(workingSpace: workingSpace) else {
             return
         }
         load(document)
