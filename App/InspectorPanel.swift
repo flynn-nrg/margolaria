@@ -465,7 +465,8 @@ struct InputRow: View {
         let document: MaterialXDocument = document
         let name: String = input.name
         let ownerPath: String = ownerPath
-        let editName: String = "Set \(label)"
+        let title: String = label
+        let editName: String = "Set \(title)"
         return InputActions(
             commit: { value in
                 document.edit(editName) { content in
@@ -479,6 +480,18 @@ struct InputRow: View {
             },
             endScrub: {
                 document.endContinuousEdit()
+            },
+            setColorSpace: { colorSpace, value in
+                let space: String = colorSpace ?? "Default"
+                let editName: String = value == nil ? "Set Colour Space of \(title)" : "Convert \(title) to \(space)"
+                document.edit(editName) { content in
+                    // The value first: setting it adds the input if the
+                    // document didn't set it yet.
+                    if let value {
+                        try content.setValue(value, ofInput: name, on: ownerPath)
+                    }
+                    try content.setColorSpace(colorSpace, ofInput: name, on: ownerPath)
+                }
             }
         )
     }

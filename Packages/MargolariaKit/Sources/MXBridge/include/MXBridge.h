@@ -159,6 +159,11 @@ struct PortInfo {
     /// the nearest ancestor's, or the nodedef's. Empty means the document's
     /// working space, usually lin_rec709.
     std::string activeColorSpace;
+    /// The colour space the value would be in without the port's own
+    /// `colorspace`: the owner's, or an ancestor's. Empty means the
+    /// document's working space. What "Default" means in the inspector's
+    /// colour space menu.
+    std::string inheritedColorSpace;
     /// `unit` and `unittype` ("meter", "distance"), for distance and angle inputs.
     std::string unit;
     std::string unitType;
@@ -389,6 +394,14 @@ public:
     /// would change which nodedef the node matches (type variants such as
     /// `ND_multiply_vector3FA`), the input stays, set to the default.
     bool resetInput(const std::string& elementPath, const std::string& inputName, std::string& errorMessage);
+
+    /// Sets the `colorspace` of an input of the node or nodegraph at
+    /// `elementPath`; "" removes it, so the input is in its owner's space
+    /// again. The value is left as it is: converting it, if wanted, is a
+    /// separate setInputValue. An input the document doesn't set yet is
+    /// added, with the nodedef's default value.
+    bool setInputColorSpace(const std::string& elementPath, const std::string& inputName,
+                            const std::string& colorSpace, std::string& errorMessage);
 
     /// Connects an input to the output of a node or nodegraph in the same
     /// graph, called `sourceName`. `sourceOutput` names the output when the

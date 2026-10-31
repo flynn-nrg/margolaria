@@ -223,6 +223,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
 | `@AppStorage("key")` | `@State` kept in user defaults: shared by every view that uses the key, and kept between launches (`NSUserDefaults`) | `ViewportPanel.swift` |
 | `Section` in a menu-style `Picker` | Groups the menu's items under a heading, with a separator | `ViewportPanel.swift` (view transform) |
+| `Menu` with an inline `Picker`, `.menuStyle(.borderlessButton)` | A pop-up menu button whose content mixes a checkmarked choice (`.pickerStyle(.inline)`), buttons and submenus; drawn as plain text with an arrow | `NSPopUpButton` with a pull-down menu | `InspectorFields.swift` (`ColorSpaceMenu`) |
 
 ## Swift ↔ C++
 
