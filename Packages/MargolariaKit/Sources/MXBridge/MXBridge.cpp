@@ -627,6 +627,22 @@ mx::DocumentPtr PreviewCopy(const mx::DocumentPtr& document) {
         element->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
     }
     preview->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+
+    // Storm ignores `colorspace` on <materialx> (UsdMtlx doesn't carry it
+    // over; PLAN.md §8.2), though it honours it on nodes, nodegraphs and
+    // inputs. So the document's working space moves down onto the
+    // top-level elements that don't have their own: the same colours, in
+    // a form Storm reads.
+    const std::string workingSpace = preview->getColorSpace();
+    if (!workingSpace.empty()) {
+        for (const mx::ElementPtr& child : preview->getChildren()) {
+            bool holdsColors = child->isA<mx::Node>() || child->isA<mx::NodeGraph>() || child->isA<mx::NodeDef>();
+            if (holdsColors && !child->hasColorSpace()) {
+                child->setColorSpace(workingSpace);
+            }
+        }
+        preview->removeAttribute(mx::Element::COLOR_SPACE_ATTRIBUTE);
+    }
     return preview;
 }
 
@@ -1481,6 +1497,97 @@ bool Document::setPosition(const std::string& path, float x, float y, std::strin
 
 std::string Document::documentVersion() const {
     return _impl ? _impl->document->getVersionString() : std::string();
+}
+
+namespace {
+
+/// Adds the colours of `owner`'s inputs that have no `colorspace`: colour
+/// values, and the file of an image node with a colour output.
+void AddColorUses(const mx::InterfaceElementPtr& owner, std::vector<ColorUse>& uses) {
+    const std::string ownerType = owner->getType();
+    const bool colorImage = owner->isA<mx::Node>() && (ownerType == "color3" || ownerType == "color4");
+    for (const mx::InputPtr& input : owner->getInputs()) {
+        if (input->hasColorSpace() || !input->hasValueString() || input->getValueString().empty()) {
+            continue;
+        }
+        const std::string type = input->getType();
+        if (type == "color3" || type == "color4" || (type == mx::FILENAME_TYPE_STRING && colorImage)) {
+            uses.push_back({owner->getNamePath(), input->getName(), type, input->getValueString()});
+        }
+    }
+}
+
+/// Adds the colours in the working space of `graph` (the document or a
+/// nodegraph), going down into nodegraphs that don't set their own.
+void CollectColorUses(const mx::ElementPtr& graph, std::vector<ColorUse>& uses) {
+    for (const mx::ElementPtr& child : graph->getChildren()) {
+        if (child->hasColorSpace() || IsIncluded(child)) {
+            continue;
+        }
+        if (mx::NodePtr node = child->asA<mx::Node>()) {
+            AddColorUses(node, uses);
+        } else if (mx::NodeGraphPtr nodeGraph = child->asA<mx::NodeGraph>()) {
+            if (nodeGraph->hasNodeDefString()) {
+                continue;
+            }
+            AddColorUses(nodeGraph, uses);
+            CollectColorUses(nodeGraph, uses);
+        }
+    }
+}
+
+/// The document (`path` "") or the nodegraph at `path`, or nullptr.
+mx::ElementPtr WorkingSpaceOwner(const mx::DocumentPtr& document, const std::string& path) {
+    if (path.empty()) {
+        return document;
+    }
+    mx::ElementPtr element = document->getDescendant(path);
+    return element && element->isA<mx::NodeGraph>() ? element : nullptr;
+}
+
+} // namespace
+
+WorkingSpaceInfo Document::workingSpace(const std::string& path) const {
+    WorkingSpaceInfo info;
+    mx::ElementPtr owner = _impl ? WorkingSpaceOwner(_impl->document, path) : nullptr;
+    if (!owner) {
+        return info;
+    }
+    info.own = owner->getColorSpace();
+    if (mx::ElementPtr parent = owner->getParent()) {
+        info.inherited = parent->getActiveColorSpace();
+    }
+    return info;
+}
+
+std::vector<ColorUse> Document::colorsInWorkingSpace(const std::string& path) const {
+    std::vector<ColorUse> uses;
+    mx::ElementPtr owner = _impl ? WorkingSpaceOwner(_impl->document, path) : nullptr;
+    if (!owner) {
+        return uses;
+    }
+    if (mx::NodeGraphPtr nodeGraph = owner->asA<mx::NodeGraph>()) {
+        if (nodeGraph->hasNodeDefString() || IsIncluded(nodeGraph)) {
+            return uses;
+        }
+        AddColorUses(nodeGraph, uses);
+    }
+    CollectColorUses(owner, uses);
+    return uses;
+}
+
+bool Document::setWorkingSpace(const std::string& path, const std::string& colorSpace, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr owner = path.empty() ? mx::ElementPtr(document) : EditableElement(document, path);
+        if (!owner->isA<mx::Document>() && !owner->isA<mx::NodeGraph>()) {
+            throw Refusal("Only the document and nodegraphs have a working space");
+        }
+        if (colorSpace.empty()) {
+            owner->removeAttribute(mx::Element::COLOR_SPACE_ATTRIBUTE);
+        } else {
+            owner->setColorSpace(colorSpace);
+        }
+    });
 }
 
 namespace {

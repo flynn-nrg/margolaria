@@ -158,6 +158,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Global/static non-`Sendable` values | `static let x: SomeClass` is rejected: any thread could reach it. Make it an instance property, a computed `static var` (cheap values such as regex literals), or, if it is truly thread-safe, `nonisolated(unsafe)` with a comment | — | `SwatchRenderer.swift`, `MXXMLText.swift`, `LayerGraphView.swift` |
 | `@MainActor` on a type | Every property and method runs on the main thread; callers from elsewhere must `await` | "Main thread only" in the docs, but checked | `GraphCanvasController.swift`, `GraphCanvasControllerTests.swift` (suite) |
 | `@MainActor` in a function type | `@MainActor (T) -> Void`: the closure runs on the main actor, so it may touch main-actor state | — | `GraphBenchmark.swift` (`Scenario`) |
+| Function types as parameters | `(([Double], String, String) throws -> [Double])?`: an optional function; function types have no argument labels, so calls are `convert(a, b, c)` | A C function pointer or a C++ `std::function` | `MXWorkingSpace.swift` (`setWorkingSpace`) |
 | `MainActor.assumeIsolated { }` | "I know I'm on the main thread" (e.g. in a main-run-loop Timer); checked at run time, traps if wrong | `assert([NSThread isMainThread])` | `GraphBenchmark.swift` |
 | `@ObservationIgnored` | Excludes a property of an `@Observable` class from observation (callbacks, bookkeeping) | — | `GraphCanvasController.swift` |
 | `nonisolated(unsafe)` | Turns off the concurrency check for one declaration (a thread-safe but non-`Sendable` value). Always explain why. | — | `LayerGraphView.swift` (`NodeLayer.titleFont`) |
@@ -224,6 +225,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@AppStorage("key")` | `@State` kept in user defaults: shared by every view that uses the key, and kept between launches (`NSUserDefaults`) | `ViewportPanel.swift` |
 | `Section` in a menu-style `Picker` | Groups the menu's items under a heading, with a separator | `ViewportPanel.swift` (view transform) |
 | `Menu` with an inline `Picker`, `.menuStyle(.borderlessButton)` | A pop-up menu button whose content mixes a checkmarked choice (`.pickerStyle(.inline)`), buttons and submenus; drawn as plain text with an arrow | `NSPopUpButton` with a pull-down menu | `InspectorFields.swift` (`ColorSpaceMenu`) |
+| `.confirmationDialog(_:isPresented:presenting:)` | Asks a question with several buttons; `presenting` hands each button the value it is about | `NSAlert` with several buttons | `WorkingSpaceMenu.swift` |
 
 ## Swift ↔ C++
 

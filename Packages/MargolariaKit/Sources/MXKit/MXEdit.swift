@@ -186,14 +186,15 @@ extension MXDocument {
         }
     }
 
-    // MARK: Private
+    // MARK: Internal
 
-    /// Runs one bridge edit, and turns a refusal into a thrown error.
+    /// Runs one bridge edit, and turns a refusal into a thrown error. Not
+    /// private: MXWorkingSpace.swift's edits use it too.
     ///
     /// SWIFT: The closure gets the error message as an `inout` parameter,
     /// so each edit above is one line: call the bridge, passing `&error`,
     /// and return its Bool.
-    private func perform(_ edit: (inout std.string) -> Bool) throws {
+    func perform(_ edit: (inout std.string) -> Bool) throws {
         var error = std.string()
         guard edit(&error) else {
             throw MXError.editRefused(error.swiftString)

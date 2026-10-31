@@ -205,6 +205,30 @@ struct NodeInfo {
     std::vector<PortInfo> outputs;
 };
 
+/// The working space of the document or of a nodegraph: the colour space
+/// its untagged colours are in.
+struct WorkingSpaceInfo {
+    /// Its own `colorspace`; empty if it has none.
+    std::string own;
+    /// What it would be in without one: for a nodegraph, its parent's
+    /// active space; for the document, always empty (MaterialX's default,
+    /// lin_rec709).
+    std::string inherited;
+};
+
+/// A colour that is in a working space because nothing between it and the
+/// document or nodegraph tags it with another: a color3 or color4 value,
+/// or the file of an image node whose output is a colour.
+struct ColorUse {
+    /// The node or nodegraph whose input it is.
+    std::string ownerPath;
+    std::string inputName;
+    /// "color3", "color4" or "filename".
+    std::string type;
+    /// The value: numbers, or the file name.
+    std::string value;
+};
+
 /// One level of a document's graph: the document root, or one nodegraph.
 struct GraphInfo {
     /// "" for the document root; otherwise the nodegraph's path.
@@ -454,6 +478,22 @@ public:
 
     /// The `version` attribute of the root element, such as "1.39".
     std::string documentVersion() const;
+
+    /// The working space of the document (`path` "") or of the nodegraph at
+    /// `path`. Throws nothing: an unknown path gives empty strings.
+    WorkingSpaceInfo workingSpace(const std::string& path) const;
+
+    /// The colours in the working space of the document (`path` "") or of
+    /// the nodegraph at `path`, which would change meaning if it changed:
+    /// colour values and colour images without a `colorspace` of their own
+    /// or on any element in between. Included elements, nodedefs and
+    /// nodegraphs that implement a nodedef are left out: they aren't
+    /// edited here.
+    std::vector<ColorUse> colorsInWorkingSpace(const std::string& path) const;
+
+    /// Sets the `colorspace` of the document (`path` "") or of the
+    /// nodegraph at `path`; "" removes it. Values are left as they are.
+    bool setWorkingSpace(const std::string& path, const std::string& colorSpace, std::string& errorMessage);
 
     /// Generates a Metal shader for the element at `elementPath`: a node, a
     /// node's output or a material, for example "NG_copper/grain" or

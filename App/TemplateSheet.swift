@@ -2,24 +2,28 @@
 //
 // The sheet a new document shows first (File > New, M2e): pick what it
 // starts from, an OpenPBR or Standard Surface material ready to edit, or
-// an empty document. Return takes the highlighted choice; Escape starts
-// empty. "Open…" is for when an existing file was wanted after all (the
+// an empty document, and its working space (Linear Rec.709 unless chosen
+// otherwise; the choice is remembered). Return takes the highlighted
+// choice; Escape starts empty. "Open…" is for when an existing file was wanted after all (the
 // app opens a new document at launch): the new one closes, and the Open
 // dialog appears.
 //
 // Introduces (SWIFT): `.keyboardShortcut(.defaultAction)` and
 // `.cancelAction`, `.buttonStyle(.plain)` with a custom selected look.
 
+import ColorKit
 import MXKit
 import SwiftUI
 
 struct TemplateSheet: View {
-    /// Called with the template chosen.
-    let onChoose: (MXDocumentTemplate) -> Void
+    /// Called with the template chosen and the working space.
+    let onChoose: (MXDocumentTemplate, String) -> Void
     /// Called for "Open…".
     let onOpen: () -> Void
 
     @State private var selection: MXDocumentTemplate = .openPBR
+    /// The working space of new documents, as last chosen.
+    @AppStorage("newDocumentWorkingSpace") private var workingSpace: String = MXWorkingSpace.documentDefault
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -39,10 +43,17 @@ struct TemplateSheet: View {
                     .buttonStyle(.plain)
                     // A double-click also chooses (the first click selected).
                     .simultaneousGesture(TapGesture(count: 2).onEnded {
-                        onChoose(template)
+                        onChoose(template, workingSpace)
                     })
                 }
             }
+            Picker("Working space", selection: $workingSpace) {
+                ForEach(InputColorSpace.available().filter(\.isLinear)) { space in
+                    Text("\(space.name) — \(space.title)").tag(space.name)
+                }
+            }
+            .help("The colour space of the document's colours that don't name one. "
+                  + "Linear Rec.709 is MaterialX's default; ACEScg is common in film and VFX pipelines.")
             HStack {
                 Button("Open…") {
                     onOpen()
@@ -50,13 +61,13 @@ struct TemplateSheet: View {
                 .help("Open an existing MaterialX file instead")
                 Spacer()
                 Button("Empty Document") {
-                    onChoose(.empty)
+                    onChoose(.empty, workingSpace)
                 }
                 // SWIFT: `.cancelAction` makes Escape press this button,
                 // `.defaultAction` Return (and draws it as the default).
                 .keyboardShortcut(.cancelAction)
                 Button("Create") {
-                    onChoose(selection)
+                    onChoose(selection, workingSpace)
                 }
                 .keyboardShortcut(.defaultAction)
             }

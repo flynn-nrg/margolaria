@@ -125,6 +125,92 @@ struct MXEditTests {
         #expect(untagged.activeColorSpace == "acescg" && untagged.inheritedColorSpace == "acescg")
     }
 
+    /// A document in ACEScg: a colour value and a colour image at the top,
+    /// a nodegraph inheriting the space (with an interface colour), one
+    /// with its own, and an input tagged on its own.
+    static let workingSpaceXML = """
+        <?xml version="1.0"?>
+        <materialx version="1.39" colorspace="acescg">
+          <constant name="red" type="color3"><input name="value" type="color3" value="0.5, 0.1, 0.1" /></constant>
+          <image name="tex" type="color3"><input name="file" type="filename" value="albedo.png" /></image>
+          <image name="bump" type="float"><input name="file" type="filename" value="height.png" /></image>
+          <constant name="tagged" type="color3">
+            <input name="value" type="color3" value="0.5, 0.5, 0.5" colorspace="srgb_texture" />
+          </constant>
+          <nodegraph name="NG">
+            <input name="tint" type="color4" value="0.2, 0.3, 0.4, 0.5" />
+            <constant name="inner" type="color3"><input name="value" type="color3" value="0.1, 0.2, 0.3" /></constant>
+            <output name="out" type="color3" nodename="inner" />
+          </nodegraph>
+          <nodegraph name="Own" colorspace="lin_rec709">
+            <constant name="mine" type="color3"><input name="value" type="color3" value="1, 0, 0" /></constant>
+            <output name="out" type="color3" nodename="mine" />
+          </nodegraph>
+        </materialx>
+        """
+
+    @Test("Working spaces: what each is, and which colours are in it")
+    func workingSpaces() throws {
+        let document = try MXDocument(xml: Self.workingSpaceXML)
+        #expect(document.workingSpace(of: "") == MXWorkingSpace(own: "acescg", inherited: nil))
+        #expect(document.workingSpace(of: "NG") == MXWorkingSpace(own: nil, inherited: "acescg"))
+        #expect(document.workingSpace(of: "NG").active == "acescg")
+        #expect(document.workingSpace(of: "Own").active == "lin_rec709")
+
+        // The colour value, the colour image (not the float one), and the
+        // nodegraph's colours; not the tagged input, nor the other graph's.
+        let uses: [String] = document.colorsInWorkingSpace(of: "").map { "\($0.ownerPath).\($0.inputName)" }
+        #expect(uses == ["red.value", "tex.file", "NG.tint", "NG/inner.value"])
+        #expect(document.colorsInWorkingSpace(of: "Own").map(\.inputName) == ["value"])
+    }
+
+    @Test("Changing a working space keeps the colours, or keeps the numbers")
+    func changeWorkingSpace() throws {
+        // A stand-in for OCIO: doubles the numbers, so conversions show.
+        // SWIFT: A class instance, so the closure can record into it.
+        final class Log { var conversions: [String] = [] }
+        let log = Log()
+        let double: ([Double], String, String) throws -> [Double] = { numbers, from, to in
+            log.conversions.append("\(from)→\(to)")
+            return numbers.map { $0 * 2 }
+        }
+        let document = try MXDocument(xml: Self.workingSpaceXML)
+        try document.setWorkingSpace("lin_rec709", of: "", convert: double)
+        #expect(document.workingSpace(of: "").active == "lin_rec709")
+        #expect(Set(log.conversions) == ["acescg→lin_rec709"])
+        #expect(try input("value", of: "red", in: document).value == "1.0, 0.2, 0.2")
+        // The image keeps its look by being tagged with the old space.
+        #expect(try input("file", of: "tex", in: document).colorSpace == "acescg")
+        #expect(try input("file", of: "bump", in: document).colorSpace == nil)
+        // Alpha too: the stand-in doubles everything.
+        #expect(try document.graph(at: "NG").interfaceInputs.first?.value == "0.4, 0.6, 0.8, 1.0")
+        #expect(try input("value", of: "tagged", in: document).value == "0.5, 0.5, 0.5")
+        #expect(try input("value", of: "Own/mine", in: document).value == "1, 0, 0")
+
+        // Without converting, only the tag changes; nil removes it.
+        let kept = try MXDocument(xml: Self.workingSpaceXML)
+        try kept.setWorkingSpace(nil, of: "")
+        #expect(kept.workingSpace(of: "") == MXWorkingSpace(own: nil, inherited: nil))
+        #expect(try input("value", of: "red", in: kept).value == "0.5, 0.1, 0.1")
+
+        // A nodegraph's own: converted from the document's space.
+        log.conversions = []
+        try kept.setWorkingSpace("acescg", of: "NG", convert: double)
+        #expect(log.conversions == ["lin_rec709→acescg", "lin_rec709→acescg"])
+        #expect(kept.workingSpace(of: "NG").own == "acescg")
+        #expect(throws: MXError.self) {
+            try kept.setWorkingSpace("acescg", of: "red")
+        }
+    }
+
+    @Test("Templates are written in the working space chosen")
+    func templateWorkingSpace() throws {
+        for template in MXDocumentTemplate.allCases {
+            #expect(try template.makeDocument(workingSpace: "acescg").workingSpace(of: "").own == "acescg")
+            #expect(try template.makeDocument().workingSpace(of: "").own == nil)
+        }
+    }
+
     @Test("Connecting: types must match, loops are refused")
     func connect() throws {
         let document = try document()
