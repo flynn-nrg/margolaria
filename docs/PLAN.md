@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer), M2 (editor) and M3 (previews & colour) done as of 2026-10-31; see `docs/spikes/` and `docs/milestones/`. M4 (authoring power) is next.
+Status: M0 (spikes), M1 (viewer), M2 (editor) and M3 (previews & colour) done as of 2026-10-31; see `docs/spikes/` and `docs/milestones/`. M4 (authoring power) is planned in §8.5.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -324,6 +324,40 @@ M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport'
 ### 8.4 After the features: keyboard shortcuts
 
 Decided 2026-10-30: once the milestones' features are in, add keyboard shortcuts for most actions, as users are expected to rely on them to work quickly (the canvas has A, F, U, S, Tab, Delete and ⌥-drag so far). Review every command then, give the frequent ones single keys on the canvas and menu shortcuts elsewhere, show them in the menus and tooltips, and check for clashes with macOS and with MaterialX's Graph Editor conventions (PLAN.md §4.2).
+
+### 8.5 M4 plan (authoring power)
+
+Drafted 2026-10-31. M4 turns the editor into a tool for building reusable pieces: nodegraphs made from a selection, their interface, node definitions made from them and shared through libraries, plus backdrops, editable XML and a command palette. Split into PRs like M3; nodegraphs, their interface and definitions come in that order, because each needs the one before. The other three don't depend on them.
+
+What exists already: entering nodegraphs and the breadcrumb, multi-selection on the canvas, adding nodes inside a nodegraph, connecting to a graph's interface inputs (M2), `xi:include`s kept as includes on save, and included elements read-only (M2a). Missing: making a nodegraph, adding interface inputs or outputs, copy and paste of nodes, anything that writes a `<nodedef>`, backdrops, and an editable XML tab (read-only since M1).
+
+**Design decisions:**
+
+| Topic | Decision | Why |
+|---|---|---|
+| Using a definition in another document | *Decided 2026-10-31.* Definitions live in their own `.mtlx` files (a `<nodedef>` and its `<nodegraph nodedef="…">` implementation). The Library panel lists, after MaterialX's libraries, those in the **user library folder** (`~/Library/Application Support/Margolaria/Libraries`) and in the **document's folder**. Using one adds an `xi:include` of its file to the document (a relative path when the file is under the document's folder, absolute otherwise), then the node. | Standard MaterialX: MaterialXView, the Graph Editor and USD resolve the include, as long as the path is reachable. M2 already keeps includes as includes, and the preview text inlines them, so Storm and the swatches need nothing new. Copies would drift apart; a search path alone would make documents depend on each tool's settings. |
+| Editing a definition | A definition is edited by opening its file, as a document. There, its nodedef and implementation graph are editable: the inspector edits the nodedef's inputs (defaults, UI metadata), lifting M2b's read-only rule for nodegraphs that implement a nodedef **in the same document**. Included definitions stay read-only. | One place to change a definition; documents that include it see the change when reopened. |
+| Making a nodegraph | ⌥⌘G (§4.2) collapses the selected nodes into a new nodegraph at their place: connections that cross the boundary become interface inputs (inbound) and outputs (outbound), named after the inputs and outputs they replace. Ungroup puts the nodes back. An empty nodegraph can also be added from the Library. All one undo step each. | The graph must render the same before and after, which is testable: Storm images compared (as SoloPreviewTests does). |
+| Copy and paste | ⌘C, ⌘X, ⌘V and ⌘D on canvas nodes, between levels and documents. The pasteboard holds MaterialX XML (a small document of the nodes and the connections between them; connections to nodes left behind are dropped), plus plain text, so pasting into a text editor gives the XML. Pasted names are made unique. | Needed to move nodes in and out of nodegraphs; XML on the pasteboard also works with other MaterialX tools. |
+| Interface | Promote an input to its graph's interface: the inspector's right-click → Promote, and ⌥-drag to the graph edge (§4.2). The new interface input takes the input's value, type, `colorspace` and the nodedef's UI metadata. Interface inputs and outputs can be added, renamed and removed, and their metadata edited (`uiname`, `uifolder`, `uimin`/`uimax`, `uisoftmin`/`uisoftmax`, `uistep`, `enum`, `doc`). | What a definition's inputs and inspector will look like is set here, before it becomes a nodedef. |
+| Making a definition | "Make Node Definition…" on a nodegraph opens a sheet: node name (the category, such as `my_tiles`), nodedef name (`ND_my_tiles_color3`, filled in), node group, version, and description. It writes a `<nodedef>` whose inputs and outputs are the graph's interface and outputs, marks the graph as its implementation (`nodedef="…"`, the interface's values moving to the nodedef as defaults), and can put an instance of the new node where the graph was used. "Save to Library…" writes the definition to its own file in a library folder. | MaterialX's own structure for nodegraph-implemented nodes; the Library and other tools then treat it like any standard node. |
+| Backdrops | MaterialX's `<backdrop>` elements (`contains`, `width`, `height`, `note`), saved in the document. ⌘G frames the selection. Moving a backdrop moves its nodes; it can be resized and its note edited; deleting it keeps the nodes. | In the specification, so they round-trip, unlike app-only metadata. |
+| XML editing | *Decided 2026-10-31.* The XML tab becomes editable. A bar under it says whether the text parses and validates, and where the first problem is. ⌘↩ (or Apply) replaces the document with the text as one undo step; Escape puts back the document's text. Half-typed XML is never applied. If the document changes meanwhile (a canvas edit, undo), the tab asks before overwriting either. The selected node's element is highlighted and scrolled to. | Most text is invalid while it is typed; applying on pauses would make undo steps of half-done edits. |
+| Command palette | ⌘K: every menu command, canvas action and inspector action that applies to the current selection, plus node search (Enter adds the node, as Tab does), fuzzy-matched, with each command's shortcut shown. | §4.1. It also gathers the commands that §8.4's shortcuts and M6's user scripts will be added to. |
+
+**PRs:**
+
+| PR | Scope | Done when |
+|---|---|---|
+| **M4a: Nodegraphs** | Collapse the selection into a nodegraph (⌥⌘G) and ungroup; empty nodegraphs from the Library; add, rename and remove a graph's outputs; copy, cut, paste and duplicate | Collapsing any connected group of nodes in every example (at least one per level), then ungrouping, keeps the document valid and the material's Storm render the same; undo restores the document exactly |
+| **M4b: Interface** | Promote inputs (menu and ⌥-drag); add, rename and remove interface inputs; their UI metadata in the inspector | Promoting every unconnected input of the examples' nodegraphs keeps each render the same; metadata round-trips through save |
+| **M4c1: Node definitions** | "Make Node Definition…"; editing a nodedef's inputs, defaults and metadata in its own document; instances of document-defined nodes in the Library | A nodegraph made into a definition and instanced renders the same as the graph did |
+| **M4c2: Libraries** | The user library folder and the document's folder in the Library panel; "Save to Library…"; using a definition adds its `xi:include` | **M4's exit criterion:** a definition built from an empty document (through the same calls as the UI, as BuildFromNothingTests does), saved to a library, used in a second document, renders, validates, and survives saving and reopening both |
+| **M4d: Backdrops** | `<backdrop>` on the canvas: ⌘G, move with contents, resize, note | Backdrops round-trip, move their nodes, and undo |
+| **M4e: XML editing** | The editable XML tab, as decided above | Applying every example's own text changes nothing; an applied edit is one undo step; invalid text is never applied |
+| **M4f: Command palette** | ⌘K, as decided above | Every menu command can be found and run from the palette |
+
+Left for later: choosing other library folders in Settings; nodedef versions (`version`, `isdefaultversion`) beyond writing one; namespaces; definitions implemented in code (`<implementation>` with source) rather than a nodegraph.
 
 ## 9. Open questions
 
