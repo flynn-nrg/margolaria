@@ -61,9 +61,14 @@ if [ -z "$TEAM" ]; then
 fi
 
 echo "==> Archiving Margolaria $VERSION (team $TEAM)"
+# ARCHS=arm64 on the command line: Config/Base.xcconfig sets it for the app,
+# but Swift package targets (MargolariaKit) don't read the project's
+# settings, and an archive builds them for Intel too, where some Swift
+# APIs (Float16) don't exist. Settings given here apply to every target.
 xcodebuild archive -quiet \
     -scheme Margolaria -configuration Release \
     -destination 'generic/platform=macOS' \
+    ARCHS=arm64 \
     -skipMacroValidation \
     -derivedDataPath "$ROOT/build/DerivedData" \
     -archivePath "$OUT/Margolaria.xcarchive"
