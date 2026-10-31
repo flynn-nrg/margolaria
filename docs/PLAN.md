@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer) and M2 (editor) done as of 2026-10-26; see `docs/spikes/` and `docs/milestones/`. M3 (previews & colour) is in progress, planned in §8.3: M3a (OpenColorIO), M3b (viewport lighting and view transform) and M3c (per-node thumbnails) done; M3d (solo preview), M3e (OCIO colour pickers) and colour spaces of inputs done; working space is under review.
+Status: M0 (spikes), M1 (viewer), M2 (editor) and M3 (previews & colour) done as of 2026-10-31; see `docs/spikes/` and `docs/milestones/`. M4 (authoring power) is next.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -280,7 +280,7 @@ Found in the working space PR (2026-10-31):
 
 - **Storm ignores `colorspace` on `<materialx>`.** UsdMtlx doesn't carry the document's working space over, though it honours `colorspace` on nodes, nodegraphs and inputs: a red in an ACEScg document showed as (192, 108, 95) instead of (231, 89, 89). The preview text (MXBridge's `PreviewCopy`) now moves the document's space down onto the top-level nodes, nodegraphs and nodedefs that don't set their own, which means the same in MaterialX. Saved files are unchanged. Worth reporting to OpenUSD with the others.
 
-### 8.3 M3 plan (previews & colour)
+### 8.3 M3 plan (previews & colour; done, see `docs/milestones/M3-previews.md`)
 
 M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport's view transform and the colour pickers both need it.
 
@@ -319,7 +319,7 @@ M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport'
 | **M3d: Solo preview** | Click a node to show its output in the viewport, until solo is left. Data swatches: value nodes whose type isn't a colour (float, vector2/3/4: roughness, masks, normals, positions) shown unconverted, through the config's Raw view; colours, shaders and materials keep the view transform (found in M3c: a roughness of 0.5 is currently tone-mapped like scene light) | Any node's output in the examples can be soloed |
 | **M3e: OCIO colour pickers** | Picking in a chosen space, converted to the input's; §8.2's out-of-gamut decision | Picks give the values OCIO's conversions give, in every space the picker offers |
 | **Colour spaces of inputs** (a separate PR, after M3e; done 2026-10-31) | A menu in place of the space's name beside each colour value and on every `file` input (`ColorSpaceMenu`). For colours, choosing a space converts the numbers with OCIO so the colour stays the same, and tags the input; "Reinterpret as" only retags; each is one undo step. On `file` inputs it only tags the image. "Default (…)" removes the input's `colorspace` and names the space it then inherits: its node's, nodegraph's or document's (MXPort `inheritedColorSpace`). Offered: MaterialX's standard spaces without aliases, except g18_ap1, which OCIO's built-in ACES config lacks; an input's own non-standard space is listed too. A colour in a space OCIO doesn't know can only be reinterpreted. | Found in M3e: new nodes have no `colorspace`, so every colour is in the document's working space (lin_rec709 unless the document says otherwise), and nothing in the app could change it |
-| **Working space** (a separate PR; under review 2026-10-31) | The inspector shows the document's working space when nothing is selected, and a nodegraph's when it is selected (`WorkingSpaceMenu`): the linear standard spaces OCIO knows, and "Default"/"Document's" to remove `colorspace`. If untagged colours depend on it, a dialog asks: Convert Colours (values converted, colour images tagged with the old space, so everything looks the same) or Keep Numbers; one undo step. Left out: included elements, nodedefs and nodegraphs implementing one, and inputs at their nodedef default (not authored). The template sheet has a "Working space" menu (Linear Rec.709 at first, then the last choice), written as `colorspace` on `<materialx>`. | Follows the input menu. Found on the way: Storm ignored the document's `colorspace` (§8.2) |
+| **Working space** (a separate PR; done 2026-10-31) | The inspector shows the document's working space when nothing is selected, and a nodegraph's when it is selected (`WorkingSpaceMenu`): the linear standard spaces OCIO knows, and "Default"/"Document's" to remove `colorspace`. If untagged colours depend on it, a dialog asks: Convert Colours (values converted, colour images tagged with the old space, so everything looks the same) or Keep Numbers; one undo step. Left out: included elements, nodedefs and nodegraphs implementing one, and inputs at their nodedef default (not authored). The template sheet has a "Working space" menu (Linear Rec.709 at first, then the last choice), written as `colorspace` on `<materialx>`. | Follows the input menu. Found on the way: Storm ignored the document's `colorspace` (§8.2) |
 
 ### 8.4 After the features: keyboard shortcuts
 
