@@ -35,6 +35,8 @@ SWIFT_VERSION = 6.0
 // Apple silicon only. SwiftUsd's macOS frameworks contain arm64 code and no
 // x86_64, so an Intel slice of the app could not link. Without this, Release
 // builds (which build every architecture, unlike Debug) fail at the link step.
+// Swift package targets don't read this file: scripts/release.sh passes
+// ARCHS=arm64 to xcodebuild as well, which applies to every target.
 ARCHS = arm64
 
 // --- Swift / C++ interoperability (required by SwiftUsd) ------------------
