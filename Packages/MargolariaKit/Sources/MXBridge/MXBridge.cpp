@@ -410,6 +410,17 @@ bool IsIncluded(const mx::ElementPtr& element) {
     return false;
 }
 
+/// The nodedef `graph` implements, if it is defined in the graph's own
+/// document (not the data libraries, not an included file): one whose
+/// inputs, defaults and metadata are edited here (M4c1). Null otherwise.
+mx::NodeDefPtr LocalNodeDef(const mx::NodeGraphPtr& graph) {
+    mx::NodeDefPtr nodeDef = graph->hasNodeDefString() ? graph->getNodeDef() : nullptr;
+    if (!nodeDef || nodeDef->getDocument() != graph->getDocument() || IsIncluded(nodeDef)) {
+        return nullptr;
+    }
+    return nodeDef;
+}
+
 /// Splits a comma-separated list ("OPAQUE, MASK, BLEND"), trimming spaces.
 std::vector<std::string> SplitList(const std::string& list) {
     std::vector<std::string> items;
@@ -582,10 +593,12 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     // A nodegraph that implements a nodedef (a "functional" graph) takes its
     // interface from the nodedef.
     mx::NodeDefPtr nodeDef = graph->getNodeDef();
+    info.isLocalDefinition = LocalNodeDef(graph) != nullptr;
     if (nodeDef) {
         info.nodeDefName = nodeDef->getName();
         info.nodeGroup = nodeDef->getNodeGroup();
         info.doc = nodeDef->getDocString();
+        info.nodeDefVersion = nodeDef->getVersionString();
     } else {
         info.doc = graph->getDocString();
     }
@@ -1119,8 +1132,11 @@ mx::PortElementPtr Port(const mx::ElementPtr& element, const std::string& inputN
             input = node->addInputFromNodeDef(inputName);
         } else if (mx::NodeGraphPtr graph = element->asA<mx::NodeGraph>()) {
             // A nodegraph that implements a nodedef takes its inputs and
-            // their defaults from the nodedef; they are changed there (M4).
-            if (mx::NodeDefPtr nodeDef = graph->getNodeDef()) {
+            // their defaults from the nodedef. One in this document is
+            // changed there (M4c1); others can't be changed here.
+            if (mx::NodeDefPtr nodeDef = LocalNodeDef(graph)) {
+                input = nodeDef->getInput(inputName);
+            } else if (mx::NodeDefPtr nodeDef = graph->getNodeDef()) {
                 throw Refusal("The inputs of " + graph->getName() + " are defined by " + nodeDef->getName() +
                               " and are changed there");
             }
@@ -1510,6 +1526,11 @@ bool Document::removeNode(const std::string& path, std::string& errorMessage) {
         mx::ElementPtr element = EditableElement(document, path);
         if (!(element->isA<mx::Node>() || element->isA<mx::NodeGraph>())) {
             throw Refusal(path + " is not a node or nodegraph");
+        }
+        // A definition's implementation goes with its definition (M4c1).
+        if (mx::NodeGraphPtr graph = element->asA<mx::NodeGraph>(); graph && graph->hasNodeDefString()) {
+            throw Refusal(graph->getName() + " implements " + graph->getNodeDefString() +
+                          ": delete the definition instead");
         }
         const std::string name = element->getName();
         mx::ElementPtr graph = element->getParent();
@@ -1977,11 +1998,83 @@ bool StormMisreads(const mx::NodeGraphPtr& graph) {
     return false;
 }
 
+std::vector<mx::NodePtr> InstancesOf(const mx::DocumentPtr& document, const mx::NodeDefPtr& nodeDef);
+
+/// True if `graph` or anything in it reads a file.
+bool ReadsFiles(const mx::ElementPtr& graph) {
+    for (const mx::ElementPtr& element : graph->traverseTree()) {
+        mx::InputPtr input = element->asA<mx::Input>();
+        if (input && input->getType() == mx::FILENAME_TYPE_STRING) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Replaces `node`, an instance of a nodedef implemented by `implementation`
+/// (a nodegraph), with the implementation's nodes, set and connected as
+/// the node was: a copy of the graph takes the node's place and name, with
+/// the nodedef's inputs given the node's values or connections (or the
+/// defaults), and is ungrouped.
+void ExpandInstance(const mx::NodePtr& node, const mx::NodeGraphPtr& implementation, const mx::NodeDefPtr& nodeDef) {
+    mx::GraphElementPtr parent = node->getParent()->asA<mx::GraphElement>();
+    const std::string name = node->getName();
+    node->setName(parent->createValidChildName("margolaria_expanded"));
+    mx::NodeGraphPtr graph = parent->addChildOfCategory(mx::NodeGraph::CATEGORY, name)->asA<mx::NodeGraph>();
+    graph->copyContentFrom(implementation);
+    graph->removeAttribute(mx::InterfaceElement::NODE_DEF_ATTRIBUTE);
+    for (const std::string& attribute : {mx::Element::XPOS_ATTRIBUTE, mx::Element::YPOS_ATTRIBUTE}) {
+        graph->removeAttribute(attribute);
+        if (node->hasAttribute(attribute)) {
+            graph->setAttribute(attribute, node->getAttribute(attribute));
+        }
+    }
+    if (node->hasColorSpace()) {
+        graph->setColorSpace(node->getColorSpace());
+    }
+    for (const mx::InputPtr& definition : nodeDef->getActiveInputs()) {
+        mx::InputPtr input = graph->addInput(definition->getName(), definition->getType());
+        mx::InputPtr set = node->getInput(definition->getName());
+        input->copyContentFrom(set ? set : definition);
+    }
+    // What read the node reads the graph's output of the same name.
+    const std::vector<mx::OutputPtr> outputs = graph->getOutputs();
+    for (const mx::PortElementPtr& port : SiblingPorts(parent)) {
+        if (port->getNodeName() != name) {
+            continue;
+        }
+        const std::string output = port->getOutputString();
+        ClearConnection(port);
+        port->setNodeGraphString(name);
+        port->setOutputString(output.empty() && !outputs.empty() ? outputs.front()->getName() : output);
+    }
+    parent->removeChild(node->getName());
+    StringVector paths;
+    Ungroup(graph, paths);
+}
+
 /// Ungroups, in a preview copy, the nodegraphs Storm would draw wrong
 /// (see StormMisreads), until none is left. Ungrouping keeps what the
 /// document computes (MXNodeGraphEditTests, CollapseRenderTests), so this
 /// is the same material in a shape Storm reads.
 void UngroupForStorm(const mx::DocumentPtr& preview) {
+    // Storm can't draw a node whose nodedef, defined in the document, is
+    // implemented by a nodegraph reading a file (M4c1, PLAN.md §8.2): the
+    // texture's uniform is left out of the shader, which doesn't compile.
+    // Such nodes become the implementation's nodes. (Over a copy of the
+    // children: getChildren() is the document's own list, which this changes.)
+    const std::vector<mx::ElementPtr> children = preview->getChildren();
+    for (const mx::ElementPtr& child : children) {
+        mx::NodeGraphPtr implementation = child->asA<mx::NodeGraph>();
+        mx::NodeDefPtr nodeDef = implementation && implementation->hasNodeDefString() ? implementation->getNodeDef()
+                                                                                       : nullptr;
+        if (!nodeDef || nodeDef->getDocument() != preview || !ReadsFiles(implementation)) {
+            continue;
+        }
+        for (const mx::NodePtr& instance : InstancesOf(preview, nodeDef)) {
+            ExpandInstance(instance, implementation, nodeDef);
+        }
+    }
     for (bool changed = true; changed;) {
         changed = false;
         // The document's own children: getNodeGraphs() would also list the
@@ -2104,18 +2197,42 @@ bool IsValueMetadata(const std::string& name) {
     return name == "uimin" || name == "uimax" || name == "uisoftmin" || name == "uisoftmax" || name == "uistep";
 }
 
-/// The nodegraph at `path`, whose inputs may be edited: not one that
-/// implements a nodedef, whose inputs are the nodedef's (M4c1).
-mx::NodeGraphPtr GraphWithOwnInputs(const mx::DocumentPtr& document, const std::string& path) {
+/// The nodegraph at `path`, and the element that holds its inputs: the
+/// graph itself, or the nodedef it implements when that is defined in
+/// this document (M4c1). Refused for a graph implementing a nodedef from
+/// the libraries or an included file.
+struct GraphInterface {
+    mx::NodeGraphPtr graph;
+    mx::InterfaceElementPtr owner;
+    /// The local nodedef, or null.
+    mx::NodeDefPtr nodeDef;
+};
+
+GraphInterface InterfaceOf(const mx::DocumentPtr& document, const std::string& path) {
     mx::NodeGraphPtr graph = path.empty() ? nullptr : EditableElement(document, path)->asA<mx::NodeGraph>();
     if (!graph) {
         throw Refusal("Only nodegraphs have inputs of their own");
     }
+    if (mx::NodeDefPtr nodeDef = LocalNodeDef(graph)) {
+        return {graph, nodeDef, nodeDef};
+    }
     if (graph->hasNodeDefString()) {
         throw Refusal("The inputs of " + graph->getName() + " are defined by " + graph->getNodeDefString() +
-                      " and are changed there");
+                      ", in the libraries or an included file");
     }
-    return graph;
+    return {graph, graph, nullptr};
+}
+
+/// The nodes of `document` that are instances of `nodeDef`.
+std::vector<mx::NodePtr> InstancesOf(const mx::DocumentPtr& document, const mx::NodeDefPtr& nodeDef) {
+    std::vector<mx::NodePtr> nodes;
+    for (const mx::ElementPtr& element : document->traverseTree()) {
+        mx::NodePtr node = element->asA<mx::Node>();
+        if (node && node->getCategory() == nodeDef->getNodeString() && node->getNodeDef() == nodeDef) {
+            nodes.push_back(node);
+        }
+    }
+    return nodes;
 }
 
 /// A value of `type` to start a new input with: zero, false, an identity
@@ -2146,6 +2263,19 @@ void RequireNewName(const mx::ElementPtr& graph, const std::string& name) {
 }
 
 /// The inputs of the nodes in `graph` that read its input `name`.
+std::vector<mx::InputPtr> InputsReading(const mx::NodeGraphPtr& graph, const std::string& name);
+
+/// A name for a new input of `target`, from `hint`: unique among the
+/// owner's children, and the graph's when the owner is its nodedef (so
+/// the canvas's node for it doesn't share a name with a node).
+std::string UniqueInterfaceName(const GraphInterface& target, const std::string& hint) {
+    std::string name = target.owner->createValidChildName(hint);
+    for (int i = 2; target.nodeDef && (target.graph->getChild(name) || target.owner->getChild(name)); ++i) {
+        name = mx::createValidName(hint) + std::to_string(i);
+    }
+    return name;
+}
+
 std::vector<mx::InputPtr> InputsReading(const mx::NodeGraphPtr& graph, const std::string& name) {
     std::vector<mx::InputPtr> inputs;
     for (const mx::NodePtr& node : graph->getNodes()) {
@@ -2171,7 +2301,8 @@ bool Document::promoteInput(const std::string& elementPath, const std::string& i
         if (!parent) {
             throw Refusal(node->getName() + " isn't in a nodegraph");
         }
-        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, parent->getNamePath());
+        GraphInterface target = InterfaceOf(document, parent->getNamePath());
+        mx::NodeGraphPtr graph = target.graph;
         mx::NodeDefPtr nodeDef = node->getNodeDef();
         mx::InputPtr definition = nodeDef ? nodeDef->getActiveInput(inputName) : nullptr;
         mx::InputPtr input = node->getInput(inputName);
@@ -2183,7 +2314,8 @@ bool Document::promoteInput(const std::string& elementPath, const std::string& i
         }
         const std::string type = input ? input->getType() : definition->getType();
 
-        mx::InputPtr interface = graph->addInput(graph->createValidChildName(nameHint.empty() ? inputName : nameHint), type);
+        mx::InputPtr interface = target.owner->addInput(UniqueInterfaceName(target, nameHint.empty() ? inputName : nameHint),
+                                                        type);
         // Its value: the input's own, or the nodedef's default.
         if (input && input->hasValueString()) {
             interface->setValueString(input->getValueString());
@@ -2228,9 +2360,9 @@ bool Document::promoteInput(const std::string& elementPath, const std::string& i
 bool Document::addGraphInput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
                              std::string& newName, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
+        GraphInterface target = InterfaceOf(document, graphPath);
         const std::string value = StartingValue(type);
-        mx::InputPtr input = graph->addInput(graph->createValidChildName(nameHint.empty() ? "in" : nameHint), type);
+        mx::InputPtr input = target.owner->addInput(UniqueInterfaceName(target, nameHint.empty() ? "in" : nameHint), type);
         if (!value.empty()) {
             input->setValueString(value);
         }
@@ -2241,33 +2373,44 @@ bool Document::addGraphInput(const std::string& graphPath, const std::string& na
 bool Document::renameGraphInput(const std::string& graphPath, const std::string& inputName, const std::string& newName,
                                 std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
-        mx::InputPtr input = graph->getInput(inputName);
+        GraphInterface target = InterfaceOf(document, graphPath);
+        mx::InputPtr input = target.owner->getInput(inputName);
         if (!input) {
-            throw Refusal(graph->getName() + " has no input " + inputName);
+            throw Refusal(target.graph->getName() + " has no input " + inputName);
         }
         if (newName == inputName) {
             return;
         }
-        RequireNewName(graph, newName);
-        for (const mx::InputPtr& reader : InputsReading(graph, inputName)) {
+        RequireNewName(target.owner, newName);
+        if (target.nodeDef) {
+            RequireNewName(target.graph, newName);
+        }
+        for (const mx::InputPtr& reader : InputsReading(target.graph, inputName)) {
             reader->setInterfaceName(newName);
         }
-        // What is connected to it from outside is written on the input
-        // itself, so nothing outside changes.
+        // A graph's: what is connected to it from outside is written on the
+        // input itself, so nothing outside changes. A nodedef's: its
+        // instances set the input by name.
+        if (target.nodeDef) {
+            for (const mx::NodePtr& instance : InstancesOf(document, target.nodeDef)) {
+                if (mx::InputPtr set = instance->getInput(inputName)) {
+                    set->setName(newName);
+                }
+            }
+        }
         input->setName(newName);
     });
 }
 
 bool Document::removeGraphInput(const std::string& graphPath, const std::string& inputName, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
-        mx::InputPtr input = graph->getInput(inputName);
+        GraphInterface target = InterfaceOf(document, graphPath);
+        mx::InputPtr input = target.owner->getInput(inputName);
         if (!input) {
-            throw Refusal(graph->getName() + " has no input " + inputName);
+            throw Refusal(target.graph->getName() + " has no input " + inputName);
         }
         // The nodes that read it keep its value, as ungrouping does.
-        for (const mx::InputPtr& reader : InputsReading(graph, inputName)) {
+        for (const mx::InputPtr& reader : InputsReading(target.graph, inputName)) {
             if (input->hasValueString()) {
                 ClearConnection(reader);
                 reader->setValueString(input->getValueString());
@@ -2278,17 +2421,23 @@ bool Document::removeGraphInput(const std::string& graphPath, const std::string&
                 Disconnect(reader);
             }
         }
-        graph->removeInput(inputName);
+        // Instances of a nodedef lose what they set it to.
+        if (target.nodeDef) {
+            for (const mx::NodePtr& instance : InstancesOf(document, target.nodeDef)) {
+                instance->removeInput(inputName);
+            }
+        }
+        target.owner->removeInput(inputName);
     });
 }
 
 bool Document::setInputMetadata(const std::string& graphPath, const std::string& inputName, const std::string& attribute,
                                 const std::string& value, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
-        mx::InputPtr input = graph->getInput(inputName);
+        GraphInterface target = InterfaceOf(document, graphPath);
+        mx::InputPtr input = target.owner->getInput(inputName);
         if (!input) {
-            throw Refusal(graph->getName() + " has no input " + inputName);
+            throw Refusal(target.graph->getName() + " has no input " + inputName);
         }
         const std::vector<std::string>& names = InterfaceMetadata();
         if (std::find(names.begin(), names.end(), attribute) == names.end()) {
@@ -2305,6 +2454,176 @@ bool Document::setInputMetadata(const std::string& graphPath, const std::string&
             throw Refusal("\"" + value + "\" is not a valid " + input->getType());
         }
         input->setAttribute(attribute, value);
+    });
+}
+
+// --- Node definitions (M4c1) --------------------------------------------------
+
+bool Document::makeNodeDefinition(const std::string& graphPath, const NodeDefSpec& spec, std::string& nodeDefName,
+                                  std::string& instancePath, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = EditableElement(document, graphPath)->asA<mx::NodeGraph>();
+        if (!graph || !graph->getParent()->isA<mx::Document>()) {
+            throw Refusal("Only a nodegraph at the top level of the document can become a node definition");
+        }
+        if (graph->hasNodeDefString()) {
+            throw Refusal(graph->getName() + " already implements " + graph->getNodeDefString());
+        }
+        const std::vector<mx::OutputPtr> outputs = graph->getOutputs();
+        if (outputs.empty()) {
+            throw Refusal(graph->getName() + " has no outputs: a node made from it would give nothing");
+        }
+        for (const std::string& name : {spec.node, spec.name}) {
+            if (name.empty() || mx::createValidName(name) != name) {
+                throw Refusal("\"" + name + "\" is not a valid MaterialX name (letters, digits and _ only)");
+            }
+        }
+        if (document->getChild(spec.name) || (document->getDataLibrary() && document->getDataLibrary()->getNodeDef(spec.name))) {
+            throw Refusal("There is already a " + spec.name);
+        }
+        // A standard node's name would make nodes of it ambiguous.
+        if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
+            if (!library->getMatchingNodeDefs(spec.node).empty()) {
+                throw Refusal(spec.node + " is a standard MaterialX node; choose another name");
+            }
+        }
+        for (const mx::NodeDefPtr& existing : document->getMatchingNodeDefs(spec.node)) {
+            if (existing->getDocument() == document && existing->getActiveOutputs().size() == outputs.size()) {
+                // Variants of one node must differ in their types; MaterialX
+                // matches nodes to nodedefs by them.
+                bool same = true;
+                for (size_t i = 0; i < outputs.size(); ++i) {
+                    same = same && existing->getActiveOutputs()[i]->getType() == outputs[i]->getType();
+                }
+                if (same) {
+                    throw Refusal(existing->getName() + " already defines " + spec.node + " with these outputs");
+                }
+            }
+        }
+
+        // The nodedef: the graph's inputs and outputs, its values as defaults.
+        mx::NodeDefPtr nodeDef = document->addNodeDef(spec.name, "", spec.node);
+        if (!spec.nodeGroup.empty()) {
+            nodeDef->setNodeGroup(spec.nodeGroup);
+        }
+        if (!spec.version.empty()) {
+            nodeDef->setVersionString(spec.version);
+            nodeDef->setDefaultVersion(true);
+        }
+        if (!spec.doc.empty()) {
+            nodeDef->setDocString(spec.doc);
+        } else if (!graph->getDocString().empty()) {
+            nodeDef->setDocString(graph->getDocString());
+        }
+        for (const mx::InputPtr& input : graph->getInputs()) {
+            mx::InputPtr definition = nodeDef->addInput(input->getName(), input->getType());
+            definition->copyContentFrom(input);
+            // Connections and positions belong to the graph's use, not its
+            // definition.
+            ClearConnection(definition);
+            definition->removeAttribute(mx::Element::XPOS_ATTRIBUTE);
+            definition->removeAttribute(mx::Element::YPOS_ATTRIBUTE);
+        }
+        for (const mx::OutputPtr& output : outputs) {
+            nodeDef->addOutput(output->getName(), output->getType());
+        }
+        // Before the graph, as MaterialX's libraries write them.
+        document->setChildIndex(nodeDef->getName(), document->getChildIndex(graph->getName()));
+
+        // Uses of the graph become a node of the new kind, under the
+        // graph's name, which the graph gives up.
+        const std::string useName = graph->getName();
+        std::vector<mx::PortElementPtr> readers;
+        for (const mx::PortElementPtr& port : SiblingPorts(document)) {
+            if (port->getNodeGraphString() == useName) {
+                readers.push_back(port);
+            }
+        }
+        // (getInputs() returns a new vector each time: one copy, for both ends.)
+        const std::vector<mx::InputPtr> inputs = graph->getInputs();
+        const bool used = !readers.empty() ||
+            std::any_of(inputs.begin(), inputs.end(), [](const mx::InputPtr& input) { return ReadsSibling(input); });
+        graph->setName(document->createValidChildName("NG_" + spec.node));
+        instancePath.clear();
+        if (used) {
+            const std::string type = outputs.size() == 1 ? outputs.front()->getType() : mx::MULTI_OUTPUT_TYPE_STRING;
+            mx::NodePtr instance = document->addNode(spec.node, useName, type);
+            instance->setNodeDefString(nodeDef->getName());
+            for (const std::string& attribute : {mx::Element::XPOS_ATTRIBUTE, mx::Element::YPOS_ATTRIBUTE,
+                                                 mx::Element::COLOR_SPACE_ATTRIBUTE}) {
+                if (graph->hasAttribute(attribute)) {
+                    instance->setAttribute(attribute, graph->getAttribute(attribute));
+                }
+            }
+            // What the graph's inputs read from outside, the node's read.
+            for (const mx::InputPtr& input : graph->getInputs()) {
+                if (ReadsSibling(input)) {
+                    mx::InputPtr set = instance->addInput(input->getName(), input->getType());
+                    CopyConnection(input, set);
+                }
+            }
+            for (const mx::PortElementPtr& port : readers) {
+                const std::string output = port->getOutputString();
+                ClearConnection(port);
+                port->setNodeName(useName);
+                // MaterialX names the output only for a node with several.
+                if (outputs.size() > 1) {
+                    port->setOutputString(output.empty() ? outputs.front()->getName() : output);
+                }
+            }
+            document->setChildIndex(useName, document->getChildIndex(graph->getName()) + 1);
+            instancePath = instance->getNamePath();
+        }
+
+        // The graph implements the nodedef: its interface is the nodedef's.
+        for (const mx::InputPtr& input : graph->getInputs()) {
+            graph->removeInput(input->getName());
+        }
+        graph->removeAttribute(mx::Element::DOC_ATTRIBUTE);
+        graph->setNodeDefString(nodeDef->getName());
+        nodeDefName = nodeDef->getName();
+    });
+}
+
+bool Document::removeNodeDefinition(const std::string& graphPath, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = EditableElement(document, graphPath)->asA<mx::NodeGraph>();
+        mx::NodeDefPtr nodeDef = graph ? LocalNodeDef(graph) : nullptr;
+        if (!nodeDef) {
+            throw Refusal(graphPath + " doesn't implement a node definition in this document");
+        }
+        const size_t count = InstancesOf(document, nodeDef).size();
+        if (count > 0) {
+            throw Refusal(std::to_string(count) + (count == 1 ? " node uses " : " nodes use ") + nodeDef->getNodeString() +
+                          ": delete " + (count == 1 ? "it" : "them") + " first");
+        }
+        document->removeChild(graph->getName());
+        document->removeChild(nodeDef->getName());
+    });
+}
+
+bool Document::setNodeDefAttribute(const std::string& graphPath, const std::string& attribute, const std::string& value,
+                                   std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = EditableElement(document, graphPath)->asA<mx::NodeGraph>();
+        mx::NodeDefPtr nodeDef = graph ? LocalNodeDef(graph) : nullptr;
+        if (!nodeDef) {
+            throw Refusal(graphPath + " doesn't implement a node definition in this document");
+        }
+        if (attribute != "nodegroup" && attribute != "doc" && attribute != "version") {
+            throw Refusal(attribute + " is not a node definition attribute the inspector edits");
+        }
+        if (value.empty()) {
+            nodeDef->removeAttribute(attribute);
+            if (attribute == "version") {
+                nodeDef->removeAttribute(mx::InterfaceElement::DEFAULT_VERSION_ATTRIBUTE);
+            }
+            return;
+        }
+        nodeDef->setAttribute(attribute, value);
+        if (attribute == "version") {
+            nodeDef->setDefaultVersion(true);
+        }
     });
 }
 

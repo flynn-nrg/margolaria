@@ -496,7 +496,7 @@ struct MXEditTests {
         #expect(try document.xmlString().contains("xi:include"))
     }
 
-    @Test("A nodegraph implementing a nodedef doesn't take values of its own")
+    @Test("A nodegraph implementing a nodedef takes values only in its nodedef, and only one in this document")
     func functionalNodeGraph() throws {
         let document = try MXDocument(xml: """
             <?xml version="1.0"?>
@@ -510,9 +510,22 @@ struct MXEditTests {
               </nodegraph>
             </materialx>
             """)
-        // Its defaults belong to the nodedef, which M4 edits.
+        // Its defaults belong to the nodedef: in this document, they are
+        // changed there (M4c1).
+        try document.setValue("0.7", ofInput: "amount", on: "NG_tint")
+        #expect(try document.xmlString().contains(#"<input name="amount" type="float" value="0.7" />"#))
+        // A library's nodedef can't be changed.
+        let library = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodegraph name="NG_add" nodedef="ND_add_float">
+                <output name="out" type="float" interfacename="in1" />
+              </nodegraph>
+            </materialx>
+            """)
+        library.setDataLibrary(try MXLibrary.bundled.get())
         #expect(throws: MXError.self) {
-            try document.setValue("0.7", ofInput: "amount", on: "NG_tint")
+            try library.setValue("0.7", ofInput: "in1", on: "NG_add")
         }
     }
 

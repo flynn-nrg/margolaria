@@ -181,7 +181,7 @@ struct MXInterfaceEditTests {
         #expect(try interface("mode", in: document).metadata.isEmpty)
     }
 
-    @Test("A nodegraph that implements a nodedef has no inputs of its own to change")
+    @Test("A nodegraph implementing a nodedef in this document changes the nodedef; a library's can't be changed")
     func implementation() throws {
         let document = try MXDocument(xml: """
             <?xml version="1.0"?>
@@ -200,14 +200,31 @@ struct MXInterfaceEditTests {
             </materialx>
             """)
         document.setDataLibrary(try MXLibrary.bundled.get())
+        try document.promote(input: "in2", on: "NG_dim/scale")
+        try document.addInput(type: "float", to: "NG_dim")
+        try document.setMetadata(.uiName, to: "Amount", ofInput: "amount", on: "NG_dim")
+        let xml: String = try document.xmlString()
+        // All in the nodedef; the graph keeps no inputs of its own.
+        #expect(xml.contains(#"<input name="in2" type="float" value="2" />"#))
+        #expect(xml.contains(#"uiname="Amount""#))
+        #expect(try document.graph(at: "NG_dim").interfaceInputs.map(\.name) == ["amount", "in2", "in"])
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        let library = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodegraph name="NG_add" nodedef="ND_add_float">
+                <add name="sum" type="float" />
+                <output name="out" type="float" nodename="sum" />
+              </nodegraph>
+            </materialx>
+            """)
+        library.setDataLibrary(try MXLibrary.bundled.get())
         #expect(throws: MXError.self) {
-            try document.promote(input: "in2", on: "NG_dim/scale")
+            try library.addInput(type: "float", to: "NG_add")
         }
         #expect(throws: MXError.self) {
-            try document.addInput(type: "float", to: "NG_dim")
-        }
-        #expect(throws: MXError.self) {
-            try document.setMetadata(.uiName, to: "Amount", ofInput: "amount", on: "NG_dim")
+            try library.promote(input: "in1", on: "NG_add/sum")
         }
     }
 

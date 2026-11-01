@@ -226,6 +226,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `ScrollViewReader` | A proxy that scrolls a `ScrollView` to the child with a given `.id` | `NodeSearchPopup.swift` |
 | `.allowsHitTesting(false)` | Clicks go through the view to whatever is under it | `GraphPanel.swift` (empty-canvas hint) |
 | `.keyboardShortcut(.defaultAction)` / `.cancelAction` | Return (or Escape) presses the button; the default one is drawn highlighted | `TemplateSheet.swift` |
+| `.sheet(isPresented:)`, `@Environment(\.dismiss)` | A modal sheet over the window while a binding is true; inside it, `dismiss()` closes it | `-beginSheet:completionHandler:`, `-endSheet:` | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
+| `Form` | Lays labelled controls out in two columns, labels right-aligned, as in settings windows | An `NSGridView` of labels and fields | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
+| `TextField(axis: .vertical)` with `.lineLimit(2...4)` | A text field that grows to several lines as the text wraps | An `NSTextView` that resizes | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
 | `.buttonStyle(.plain)` | A button without the standard look, drawing only its label: for rows that show their own selection | `TemplateSheet.swift` |
 | `let _ = x` in `body` | Reads a property so the view observes it, without using the value | `InspectorPanel.swift` (`document.revision`) |
 | `@AppStorage("key")` | `@State` kept in user defaults: shared by every view that uses the key, and kept between launches (`NSUserDefaults`) | `ViewportPanel.swift` |
