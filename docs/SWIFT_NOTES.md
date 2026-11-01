@@ -67,6 +67,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Double` vs `Float`; `String(Float(x))` | 64- and 32-bit floats, never converted implicitly. `String(_:)` on a Float prints the shortest text that reads back as the same Float | `double`/`float`; `%g` with round-trip precision | `MXValue.swift` (`MXValueText`) |
 | Enums with raw values | `enum E: String { case studio }`: each case has a fixed value (`.rawValue`), and `E(rawValue:)` reads one back, nil if unknown | A C enum with explicit values, plus a parse function | `ViewportSettings.swift` (`ViewportEnvironment`) |
 | Raw values unlike the case names | `case uiName = "uiname"`: Swift's camelCase for the case, the file's spelling for the value | `#define` names vs their strings | `MXInterfaceEdit.swift` (`MXInputMetadata`) |
+| `pathComponents`, `starts(with:)` | A path as an array of its parts; whether one array begins with another, to tell a file is inside a folder | Comparing `NSString` path components | `MXLibraryFiles.swift` (`href`) |
+| `FileManager.url(for:in:appropriateFor:create:)` | Finds a standard folder (Application Support, Caches...), creating it if asked | `NSSearchPathForDirectoriesInDomains` | `MXLibraryFiles.swift` |
 | `filter` on a dictionary | Keeps the key-value pairs for which the closure is true, and returns a dictionary | — | `MXGraph.swift` (`MXPort.metadata`) |
 | `switch` as an expression | `let t = switch x { case .a: "A" case .b: "B" }`: the value of the chosen case | A ternary over many cases | `ViewportSettings.swift` |
 | `Float.exponent`, `Float(sign:exponent:significand:)` | A float's binary exponent, and building `2^e` exactly | `frexp`, `ldexp` | `StudioEnvironment.swift` (`rgbe`) |
@@ -189,6 +191,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@Observable` in a view | A plain `let` of an `@Observable` object is enough: SwiftUI tracks what `body` reads | `CanvasGraphView.swift`, `ContentView.swift` |
 | `NSViewRepresentable` | Wraps an AppKit view for SwiftUI: `makeNSView` once, `updateNSView` on changes | `ViewportView.swift` |
 | `.task(id:)` | Run work when the view appears and whenever `id` changes | `ViewportView.swift` |
+| `.onReceive(NotificationCenter.default.publisher(for:))` | Runs a closure for each notification posted with that name, while the view is shown | `addObserver:selector:name:object:` | `LibraryPanel.swift` |
+| `NSSavePanel` | The Save dialog: folder, file name and types to start with, as a sheet on the window | The same class in ObjC | `InspectorPanel.swift` (`saveToLibrary`) |
+| Tuples as list rows | `ForEach(rows, id: \.definition.name)`: a key path into a tuple's labelled part gives each row its identity | — | `LibraryPanel.swift` |
 | `WindowGroup`, `.fileImporter` | A plain (non-document) window; the system Open panel | `Spikes/M0bViewport/ViewportSpikeApp.swift` |
 | `LazyVGrid`, `ForEach` | A grid that creates cells as they scroll into view; one view per element of a collection | `Spikes/M0cSwatches/SwatchSpikeApp.swift` |
 | `@Observable` | A class whose property reads are tracked; views that read a property redraw when it changes. Replaces `ObservableObject` + `@Published` | KVO, without the strings | `GraphCanvasController.swift` |

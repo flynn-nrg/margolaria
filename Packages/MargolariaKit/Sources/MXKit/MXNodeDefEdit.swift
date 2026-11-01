@@ -96,11 +96,14 @@ extension MXDocument {
         }
     }
 
-    /// The path of the nodegraph implementing `nodeDef`, if it is defined in
-    /// this document: what double-clicking a node of it opens.
+    /// The path of the nodegraph implementing `nodeDef`, if it is in this
+    /// document: made here, or included from a library file (M4c2), where
+    /// it is read-only. What double-clicking a node of it opens. Nil for
+    /// the data libraries' definitions.
     public func implementation(of nodeDef: String) -> String? {
         let nodes: [MXNode] = (try? graph(at: "").nodes) ?? []
-        return nodes.first(where: { $0.isLocalDefinition && $0.nodeDefName == nodeDef })?.path
+        return nodes.first(where: { $0.isNodeGraph && $0.nodeDefName == nodeDef && ($0.isLocalDefinition || $0.isIncluded) })?
+            .path
     }
 
     /// Sets an attribute of the nodedef the nodegraph at `graph` implements,

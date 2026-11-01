@@ -67,7 +67,8 @@
 // Definitions (M4c1): a nodegraph implementing a definition isn't drawn on
 // the top-level canvas: it is the body of a kind of node, which nothing
 // reads directly. Double-clicking a node of a definition made in this
-// document opens it, and the breadcrumb says "<node> (definition)".
+// document, or included from a library file (read-only, M4c2), opens it,
+// and the breadcrumb says "<node> (definition)".
 //
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
@@ -144,7 +145,7 @@ struct GraphPanel: View {
 
     /// A node to add in the middle of the canvas (a nodedef's name), from
     /// the Library tab. Cleared once added.
-    @Binding var nodeToAdd: String?
+    @Binding var nodeToAdd: NodeDefinitionDrag?
 
     /// The element shown alone in the viewport (M3d), by path.
     @Binding var soloPath: String?
@@ -205,7 +206,7 @@ struct GraphPanel: View {
                         guard let item = items.first else {
                             return false
                         }
-                        addNode(item.nodeDef, atView: location, in: level)
+                        addNode(item.nodeDef, atView: location, in: level, from: item.libraryFile)
                         return true
                     }
                     // The node search, pointing at where the node will go.
@@ -278,7 +279,7 @@ struct GraphPanel: View {
         }
         // A node from the Library tab, added in the middle of the canvas.
         .onChange(of: nodeToAdd) {
-            guard let nodeDef = nodeToAdd else {
+            guard let item = nodeToAdd else {
                 return
             }
             nodeToAdd = nil
@@ -287,7 +288,8 @@ struct GraphPanel: View {
                 return
             }
             let size: CGSize = level.controller.viewSize
-            addNode(nodeDef, atView: CGPoint(x: size.width / 2, y: size.height / 2), in: level)
+            addNode(item.nodeDef, atView: CGPoint(x: size.width / 2, y: size.height / 2), in: level,
+                    from: item.libraryFile)
         }
         // SWIFT: Reading `level?.controller.selection` here, in `body`, makes
         // SwiftUI observe it (the controller is `@Observable`), so this runs
@@ -356,7 +358,8 @@ struct GraphPanel: View {
                 levelPath = path
             } else if let nodeDef = newLevel.source.nodes.first(where: { $0.path == path })?.nodeDefName,
                       let implementation = document.content.implementation(of: nodeDef) {
-                // A node of a definition made here opens its implementation.
+                // A node of a definition made here, or included, opens its
+                // implementation.
                 levelPath = implementation
             }
         }
@@ -585,8 +588,12 @@ struct GraphPanel: View {
     /// Adds a node of the nodedef `nodeDef` at `point` (view coordinates),
     /// as one undo step, and selects it. With `wire`, the node goes beside
     /// the wire's end and its `port` is connected to the wire.
+    ///
+    /// A node from a library file (M4c2) first includes the file in the
+    /// document (`xi:include`, relative to the document's folder when the
+    /// file is inside it), in the same undo step.
     private func addNode(_ nodeDef: String, atView point: CGPoint, in level: GraphLevel,
-                         connecting wire: DanglingWire? = nil, port: String? = nil) {
+                         connecting wire: DanglingWire? = nil, port: String? = nil, from library: URL? = nil) {
         let position: CGPoint = DocumentGraph.units(fromPoints: level.controller.newNodePosition(atView: point,
                                                                                                  for: wire))
         let positions: [String: CGPoint] = autoLayoutPositions(in: level)
@@ -605,7 +612,11 @@ struct GraphPanel: View {
         let definition: MXNodeDefinition? = document.catalog.definition(named: nodeDef)
         let name: String = definition?.node ?? nodeDef
         let graph: DocumentGraph = level.graph
+        let folder: URL? = document.fileURL?.deletingLastPathComponent()
         document.edit("Add \(name)") { content in
+            if let library {
+                try content.include(library: library, from: folder)
+            }
             for (path, saved) in positions {
                 try content.setPosition(saved, of: path)
             }
@@ -832,7 +843,7 @@ private struct BreadcrumbBar: View {
                 crumb(definitions[target] ?? parts[i], target: target)
             }
             Spacer()
-            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition made here, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

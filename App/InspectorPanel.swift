@@ -15,7 +15,8 @@
 // Node Definition…" button, whose sheet names the new kind of node. A
 // nodegraph implementing a definition made in this document keeps its
 // inputs, defaults and presentation editable (they are the nodedef's), and
-// shows the definition's group, version and description.
+// shows the definition's group, version and description, and Save to
+// Library… (M4c2), which writes it to a file other documents can use.
 //
 // For a node: its name (editable, to rename it), category, nodedef, type
 // variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
@@ -41,6 +42,7 @@ import GraphKit
 import MXKit
 import PreviewKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct InspectorPanel: View {
     let document: MaterialXDocument
@@ -254,15 +256,19 @@ private struct NodeHeader: View {
                     // needs instead of being cut off.
                     .fixedSize(horizontal: false, vertical: true)
             }
-            // A node of a definition made here (M4c1): open its body.
+            // A node of a definition made here (M4c1), or included from a
+            // library (M4c2, read-only): open its body.
             if !node.isNodeGraph, let nodeDef = node.nodeDefName,
                let implementation = document.content.implementation(of: nodeDef) {
-                Button("Edit Definition", systemImage: "shippingbox") {
+                let isIncluded: Bool = document.content.isIncluded(implementation)
+                Button(isIncluded ? "Show Definition" : "Edit Definition", systemImage: "shippingbox") {
                     onOpen(implementation)
                 }
                 .controlSize(.small)
-                .help("Open the nodegraph that defines \(node.category) (or double-click the node). "
-                    + "Changes apply to every node of it.")
+                .help(isIncluded ? "Open the nodegraph that defines \(node.category), read-only: it comes from a library file "
+                                   + "(or double-click the node). Change it in the document that made it, and save it to the library again."
+                                 : "Open the nodegraph that defines \(node.category) (or double-click the node). "
+                                   + "Changes apply to every node of it.")
             }
             // Solo (M3d): the node alone in the viewport, or back to the
             // material. For every node with a swatch, and materials.
@@ -493,13 +499,60 @@ private struct DefinitionSettings: View {
             field("Group", .nodeGroup, value: graph.nodeGroup, prompt: "texture2d")
             field("Version", .version, value: graph.nodeDefVersion, prompt: "1.0")
             field("Description", .documentation, value: graph.documentation, prompt: "What the node does")
-            Button("Delete Definition", systemImage: "trash", role: .destructive) {
-                deleteDefinition()
+            HStack {
+                Button("Save to Library…", systemImage: "books.vertical") {
+                    saveToLibrary()
+                }
+                .help("Write the definition to a file of its own, in My Library (Documents › Margolaria › Libraries, "
+                    + "or any folder), "
+                    + "so other documents can use it from the Library tab")
+                Button("Delete Definition", systemImage: "trash", role: .destructive) {
+                    deleteDefinition()
+                }
+                .help("Remove the definition and this nodegraph; only once no node uses it")
             }
             .controlSize(.small)
-            .help("Remove the definition and this nodegraph; only once no node uses it")
         }
         .font(.callout)
+    }
+
+    /// Asks where to save the definition (My Library by default, named
+    /// after its node) and writes its library file. Not an edit: the
+    /// document doesn't change. Library panels then list it.
+    ///
+    /// SWIFT/AppKit: `NSSavePanel` is the standard Save dialog; as a sheet
+    /// on the window, its completion handler gets the button pressed.
+    private func saveToLibrary() {
+        let text: String
+        do {
+            text = try document.content.libraryText(forDefinitionAt: graph.path)
+        } catch {
+            document.presentError(error)
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Save to Library"
+        panel.message = "Documents use the definition from this file, through an include."
+        panel.directoryURL = MXLibraryFolders.user
+        let node: String = document.catalog.definition(named: graph.nodeDefName ?? "")?.node ?? graph.name
+        panel.nameFieldStringValue = node + ".mtlx"
+        panel.allowedContentTypes = [UTType(filenameExtension: "mtlx") ?? .xml]
+        let save: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else {
+                return
+            }
+            do {
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                NotificationCenter.default.post(name: .margolariaLibrariesChanged, object: nil)
+            } catch {
+                document.presentError(error)
+            }
+        }
+        if let window = document.windowControllers.first?.window {
+            panel.beginSheetModal(for: window, completionHandler: save)
+        } else {
+            save(panel.runModal())
+        }
     }
 
     /// Removes the definition and its graph, as one step, and goes back to

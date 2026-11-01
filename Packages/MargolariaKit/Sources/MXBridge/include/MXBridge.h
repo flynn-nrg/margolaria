@@ -626,6 +626,24 @@ public:
     bool setNodeDefAttribute(const std::string& graphPath, const std::string& attribute, const std::string& value,
                              std::string& errorMessage);
 
+    // --- Libraries (M4c2) -----------------------------------------------------
+
+    /// The nodedef the nodegraph at `graphPath` implements (in this
+    /// document) and the graph, as a MaterialX document of their own: what
+    /// a library file holds. File names are made absolute. Refused if the
+    /// graph uses nodes of another definition made in this document.
+    bool writeNodeDefinition(const std::string& graphPath, std::string& xml, std::string& errorMessage) const;
+
+    /// Adds the elements of the MaterialX file at `filePath` (a library) to
+    /// the document as included from `href`: saving writes
+    /// `<xi:include href="...">` rather than copies, and they are read-only
+    /// here. `href` is relative to the document's file, or absolute. Does
+    /// nothing for a file already included; refused if one of its names is
+    /// taken by an element of the document. Sets `nodeDefNames` to the
+    /// file's nodedefs.
+    bool includeLibrary(const std::string& filePath, const std::string& href, StringVector& nodeDefNames,
+                        std::string& errorMessage);
+
     /// The nodes and nodegraphs `names` of the graph at `parentPath`, as a
     /// small MaterialX document (`xml`), for the pasteboard: connections
     /// between them are kept, connections to anything else dropped

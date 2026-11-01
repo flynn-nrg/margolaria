@@ -2627,6 +2627,104 @@ bool Document::setNodeDefAttribute(const std::string& graphPath, const std::stri
     });
 }
 
+// --- Libraries (M4c2) ---------------------------------------------------------
+
+bool Document::writeNodeDefinition(const std::string& graphPath, std::string& xml, std::string& errorMessage) const {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr element = document->getDescendant(graphPath);
+        mx::NodeGraphPtr graph = element ? element->asA<mx::NodeGraph>() : nullptr;
+        mx::NodeDefPtr nodeDef = graph ? LocalNodeDef(graph) : nullptr;
+        if (!nodeDef) {
+            throw Refusal(graphPath + " doesn't implement a node definition in this document");
+        }
+        // Nodes of other definitions made here would be missing from the file.
+        for (const mx::ElementPtr& inner : graph->traverseTree()) {
+            mx::NodePtr node = inner->asA<mx::Node>();
+            mx::NodeDefPtr used = node ? node->getNodeDef() : nullptr;
+            if (used && used != nodeDef && used->getDocument() == document) {
+                throw Refusal(nodeDef->getNodeString() + " uses " + used->getNodeString() +
+                              ", defined in this document: save that to a library first, and use it from there");
+            }
+        }
+        mx::DocumentPtr library = mx::createDocument();
+        // The space untagged colours are in, if not the default.
+        if (!graph->getActiveColorSpace().empty()) {
+            library->setColorSpace(graph->getActiveColorSpace());
+        }
+        for (const mx::ElementPtr& source : {mx::ElementPtr(nodeDef), mx::ElementPtr(graph)}) {
+            mx::ElementPtr copy = library->addChildOfCategory(source->getCategory(), source->getName());
+            copy->copyContentFrom(source);
+            copy->removeAttribute(mx::Element::XPOS_ATTRIBUTE);
+            copy->removeAttribute(mx::Element::YPOS_ATTRIBUTE);
+            // Files by absolute path: the library may be anywhere.
+            for (const mx::ElementPtr& descendant : copy->traverseTree()) {
+                mx::ValueElementPtr value = descendant->asA<mx::ValueElement>();
+                if (value && value->getType() == mx::FILENAME_TYPE_STRING && value->hasValueString()) {
+                    mx::ElementPtr original = document->getDescendant(descendant->getNamePath());
+                    if (mx::ValueElementPtr from = original ? original->asA<mx::ValueElement>() : nullptr) {
+                        value->setValueString(AbsoluteFilename(from));
+                    }
+                }
+            }
+            for (const mx::ElementPtr& descendant : copy->traverseTree()) {
+                descendant->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+            }
+        }
+        mx::XmlWriteOptions options;
+        options.writeXIncludeEnable = false;
+        xml = mx::writeToXmlString(library, &options);
+    });
+}
+
+bool Document::includeLibrary(const std::string& filePath, const std::string& href, StringVector& nodeDefNames,
+                              std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::DocumentPtr library = mx::createDocument();
+        mx::FilePath path(filePath);
+        const mx::XmlReadOptions options = ReadOptions();
+        mx::readFromXmlFile(library, path, mx::FileSearchPath(path.getParentPath()), &options);
+
+        // Already included (under this name, or found by the same path):
+        // nothing to add. Another element with one of its names: refused.
+        std::vector<mx::ElementPtr> added;
+        nodeDefNames.clear();
+        for (const mx::ElementPtr& child : library->getChildren()) {
+            if (mx::ElementPtr existing = document->getChild(child->getName())) {
+                if (IsIncluded(existing) && existing->getCategory() == child->getCategory()) {
+                    if (child->isA<mx::NodeDef>()) {
+                        nodeDefNames.push_back(child->getName());
+                    }
+                    continue;
+                }
+                throw Refusal("This document already has a " + child->getName() + ": rename it to use " +
+                              path.getBaseName());
+            }
+        }
+        for (const mx::ElementPtr& child : library->getChildren()) {
+            if (document->getChild(child->getName())) {
+                continue;
+            }
+            mx::ElementPtr copy = document->addChildOfCategory(child->getCategory(), child->getName());
+            copy->copyContentFrom(child);
+            // Written back as `<xi:include href="...">` when saving (M2a).
+            copy->setSourceUri(href);
+            for (const mx::ElementPtr& descendant : copy->traverseTree()) {
+                if (descendant != copy) {
+                    descendant->setSourceUri("");
+                }
+            }
+            if (child->isA<mx::NodeDef>()) {
+                nodeDefNames.push_back(child->getName());
+            }
+            added.push_back(copy);
+        }
+        // Included elements first, where MaterialX's own files put them.
+        for (size_t i = 0; i < added.size(); ++i) {
+            document->setChildIndex(added[i]->getName(), static_cast<int>(i));
+        }
+    });
+}
+
 bool Document::copyNodes(const std::string& parentPath, const StringVector& names, bool keepsInterface,
                          std::string& xml, std::string& errorMessage) const {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
