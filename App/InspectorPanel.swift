@@ -4,7 +4,9 @@
 // canvas, with every input, grouped by the nodedef's `uifolder`.
 //
 // With nothing selected: the document's version and working space. For a
-// nodegraph, its working space too (WorkingSpaceMenu.swift).
+// nodegraph, its working space too (WorkingSpaceMenu.swift), and its
+// outputs, which can be added, renamed and removed (M4a); a selected graph
+// output can be renamed and removed too.
 //
 // For a node: its name (editable, to rename it), category, nodedef, type
 // variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
@@ -105,8 +107,12 @@ private struct InspectedElementView: View {
                 InputList(document: document, inputs: [input], ownerPath: graphPath,
                           sourceGraph: parent(of: graphPath), isReadOnly: isGraphReadOnly(graphPath), onShow: onShow)
             case .graphOutput(let output, let graphPath):
-                ElementTitle(name: output.name,
-                             subtitle: "Output of \(graphPath.isEmpty ? "the document" : graphPath) · \(output.type)")
+                if graphPath.isEmpty || isGraphReadOnly(graphPath) {
+                    ElementTitle(name: output.name,
+                                 subtitle: "Output of \(graphPath.isEmpty ? "the document" : graphPath) · \(output.type)")
+                } else {
+                    GraphOutputHeader(document: document, output: output, graphPath: graphPath, onShow: onShow)
+                }
                 Divider()
                 // An <output> has no value, only what it is connected to.
                 InputRow(document: document, input: output, ownerPath: graphPath, sourceGraph: graphPath,
@@ -234,10 +240,14 @@ private struct NodeHeader: View {
                     .textSelection(.enabled)
                     .help(message)
             }
-            // A nodegraph's own working space (PLAN.md §8.3).
+            // A nodegraph's own working space (PLAN.md §8.3), and its
+            // outputs (M4a).
             if node.isNodeGraph {
                 WorkingSpaceMenu(document: document, path: node.path,
                                  isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                    .padding(.top, 4)
+                GraphOutputList(document: document, graph: node,
+                                isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
             }
             if node.isIncluded {
@@ -289,6 +299,131 @@ private struct NodeHeader: View {
         document.edit("Rename \(node.name)") { content in
             let newPath: String = try content.renameNode(at: path, to: name)
             onShow(newPath)
+        }
+    }
+}
+
+// MARK: - Graph outputs (M4a)
+
+/// A nodegraph's outputs: each one's name (editable) and type, a button to
+/// remove it, and a menu to add one.
+private struct GraphOutputList: View {
+    let document: MaterialXDocument
+    let graph: MXNode
+    let isReadOnly: Bool
+
+    /// The types offered for a new output: values first, then shaders.
+    static let types: [String] = ["color3", "color4", "float", "vector2", "vector3", "vector4", "integer", "boolean",
+                                  "BSDF", "EDF", "VDF", "surfaceshader", "displacementshader", "volumeshader"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Outputs")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            if graph.outputs.isEmpty {
+                Text("None yet: nothing can read this nodegraph.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(graph.outputs, id: \.name) { output in
+                HStack(spacing: 6) {
+                    if isReadOnly {
+                        Text(output.name)
+                    } else {
+                        CommitTextField(text: output.name) { name in
+                            rename(output.name, to: name)
+                        }
+                        .textFieldStyle(.roundedBorder)
+                        .help("The output's name. Type a new one and press Return to rename it.")
+                    }
+                    Text(output.type)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !isReadOnly {
+                        Button("Remove \(output.name)", systemImage: "minus.circle") {
+                            remove(output.name)
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("Remove this output, disconnecting what reads it")
+                    }
+                }
+            }
+            if !isReadOnly {
+                // SWIFT: A `Menu` whose items are buttons, one per type.
+                Menu("Add Output") {
+                    ForEach(Self.types, id: \.self) { type in
+                        Button(type) {
+                            add(type)
+                        }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Add an output to the nodegraph; connect it inside, to the node whose result it gives")
+            }
+        }
+    }
+
+    private func add(_ type: String) {
+        let path: String = graph.path
+        document.edit("Add Output to \(graph.name)") { content in
+            try content.addOutput(type: type, to: path)
+        }
+    }
+
+    private func rename(_ output: String, to name: String) {
+        let path: String = graph.path
+        document.edit("Rename \(output)") { content in
+            try content.renameOutput(output, of: path, to: name)
+        }
+    }
+
+    private func remove(_ output: String) {
+        let path: String = graph.path
+        document.edit("Remove Output \(output)") { content in
+            try content.removeOutput(output, of: path)
+        }
+    }
+}
+
+/// A selected graph output, inside its nodegraph: its name (editable),
+/// type, and a button to remove it.
+private struct GraphOutputHeader: View {
+    let document: MaterialXDocument
+    let output: MXPort
+    let graphPath: String
+    let onShow: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            CommitTextField(text: output.name, onCommit: rename)
+                .font(.headline)
+                .textFieldStyle(.plain)
+                .help("The output's name. Type a new one and press Return to rename it.")
+            Text("Output of \(graphPath) · \(output.type)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Remove Output", systemImage: "minus.circle") {
+                let name: String = output.name
+                let path: String = graphPath
+                document.edit("Remove Output \(name)") { content in
+                    try content.removeOutput(name, of: path)
+                }
+            }
+            .controlSize(.small)
+            .help("Remove this output, disconnecting what reads it")
+        }
+    }
+
+    /// Renames the output, and keeps it selected under its new name.
+    private func rename(to name: String) {
+        let old: String = output.name
+        let path: String = graphPath
+        document.edit("Rename \(old)") { content in
+            try content.renameOutput(old, of: path, to: name)
+            onShow(path + "/" + name)
         }
     }
 }

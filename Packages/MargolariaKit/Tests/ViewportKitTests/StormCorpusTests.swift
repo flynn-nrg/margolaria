@@ -10,7 +10,7 @@
 // the test is skipped. With VIEWPORT_SNAPSHOT_DIR set, every render is saved.
 //
 // Introduces (SWIFT): adding tests to a suite from another file with an
-// `extension`.
+// `extension`; two argument lists, for every combination (M4a).
 
 import ColorKit
 import CoreGraphics
@@ -76,15 +76,18 @@ extension StormRendererTests {
 
 extension StormUpdateTests {
     /// M2c renders the document from MXKit's preview text instead of the
-    /// file. For every example, both must show the same materials, and the
-    /// same image (within rounding): includes inlined and texture paths
-    /// made absolute correctly.
-    @Test("Every example renders the same from its preview text as from its file",
+    /// file; M4a from the viewport's text, which also ungroups nodegraphs
+    /// Storm misdraws. For every example, both must show the same
+    /// materials as the file, and the same image (within rounding):
+    /// includes inlined and texture paths made absolute correctly, and
+    /// nothing changed by ungrouping.
+    @Test("Every example renders the same from its preview and viewport texts as from its file",
           .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
-          arguments: Examples.files)
-    func previewTextMatchesFile(_ url: URL) throws {
+          arguments: Examples.files, [false, true])
+    func previewTextMatchesFile(_ url: URL, viewport: Bool) throws {
         let fromFile = try MGStormRenderer(materialXFile: url)
-        let text: String = try MXDocument.read(from: url).previewXMLString()
+        let document = try MXDocument.read(from: url)
+        let text: String = viewport ? try document.viewportXMLString() : try document.previewXMLString()
         let fromText = try MGStormRenderer(materialXString: text)
         #expect(fromText.materialPaths == fromFile.materialPaths)
 

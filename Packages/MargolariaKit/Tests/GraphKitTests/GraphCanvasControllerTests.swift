@@ -256,4 +256,31 @@ extension GraphCanvasControllerTests {
         _ = controller.mouseUp()
         #expect(soloed.count == 2)
     }
+
+    @Test("Menu commands apply to the selection: locked nodes aren't changed, Ungroup needs one nodegraph")
+    func commands() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 10))
+        var requests: [GraphCommandRequest] = []
+        controller.onCommand = { requests.append($0) }
+        controller.canPaste = { false }
+
+        #expect(!controller.canPerform(.copy), "nothing selected")
+        #expect(!controller.perform(.copy, at: .zero))
+        #expect(!controller.perform(.paste, at: .zero), "nothing to paste")
+
+        controller.model.nodes[2].isLocked = true
+        controller.selection = [1, 2]
+        #expect(controller.perform(.copy, at: CGPoint(x: 5, y: 6)))
+        #expect(controller.perform(.collapse, at: .zero))
+        #expect(requests.map(\.command) == [.copy, .collapse])
+        #expect(requests[0].nodes == [1, 2], "locked nodes can be copied")
+        #expect(requests[0].location == CGPoint(x: 5, y: 6))
+        #expect(requests[1].nodes == [1], "but not grouped")
+
+        #expect(!controller.canPerform(.ungroup), "two nodes")
+        controller.selection = [3]
+        #expect(!controller.canPerform(.ungroup), "not a nodegraph")
+        controller.model.nodes[3].category = .nodeGraph
+        #expect(controller.canPerform(.ungroup))
+    }
 }

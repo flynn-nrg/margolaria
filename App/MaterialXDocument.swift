@@ -83,6 +83,11 @@ final class MaterialXDocument: NSDocument {
     /// shows unsaved changes. Empty if MaterialX could not write it.
     private(set) var previewXML: String = ""
 
+    /// The same for the viewport's renderer, Storm (MXKit's
+    /// `viewportXMLString()`, M4a): nodegraphs Storm would draw wrong are
+    /// ungrouped. The swatches draw nodes by path, so they use `previewXML`.
+    private(set) var viewportXML: String = ""
+
     /// Problems found by validation and Margolaria's checks. Empty when the
     /// document is fine, or when the data libraries could not be loaded
     /// (see `libraryLoaded`).
@@ -404,6 +409,7 @@ final class MaterialXDocument: NSDocument {
         // `??` ("nil-coalescing") substitutes `y` when the left side is nil.
         xml = (try? document.xmlString()) ?? "<!-- MaterialX could not write this document -->"
         previewXML = (try? document.previewXMLString()) ?? ""
+        viewportXML = (try? document.viewportXMLString()) ?? ""
     }
 
     /// An empty MaterialX document, for File > New.

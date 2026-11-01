@@ -6,7 +6,8 @@
 // light around the sphere, and the OCIO view transform (M3b).
 //
 // The viewport shows the document as it is in memory (M2c), edits included,
-// saved or not: after each edit it gets the new text (`previewXML`), and
+// saved or not: after each edit it gets the new text (`viewportXML`: the
+// preview text with the nodegraphs Storm misdraws ungrouped, M4a), and
 // Storm shows the change in the next frame. Values update while a slider
 // is dragged: an update costs about 3 ms on top of a 10 ms frame
 // (StormUpdateTests), so no throttling is needed.
@@ -152,8 +153,8 @@ struct ViewportPanel: View {
             if let solo {
                 ViewportView(source: .text(solo.xml), materialName: solo.materialName,
                              environment: environment, viewTransform: shownTransform(for: solo))
-            } else if !materials.isEmpty, !document.previewXML.isEmpty {
-                ViewportView(source: .text(document.previewXML), materialName: materialName,
+            } else if !materials.isEmpty, !document.viewportXML.isEmpty {
+                ViewportView(source: .text(document.viewportXML), materialName: materialName,
                              environment: environment, viewTransform: viewTransform)
             } else {
                 ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",

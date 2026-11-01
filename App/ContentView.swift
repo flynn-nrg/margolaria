@@ -121,11 +121,11 @@ struct ContentView: View {
                         ElementRow(element: element)
                     }
                 case .library:
-                    LibraryPanel(catalog: document.catalog) { definition in
+                    LibraryPanel(catalog: document.catalog) { nodeDef in
                         if viewMode == .text {
                             viewMode = .split
                         }
-                        nodeToAdd = definition.name
+                        nodeToAdd = nodeDef
                     }
                 }
             }

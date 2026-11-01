@@ -14,11 +14,14 @@
 //     Space + drag;
 //   - zoom around the pointer: pinch, mouse wheel, or ⌥-scroll.
 // Tab asks the app for its node search (M2e). The right button is kept
-// free for a context menu.
+// free for a context menu. Copy, Cut, Paste, Duplicate, Collapse into
+// Nodegraph and Ungroup come from the menus, through the responder chain
+// (M4a).
 //
 // Introduces (SWIFT): `open class` vs `final class`, `isFlipped` override as
 // a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option
-// sets, building an NSMenu in code with `#selector` actions.
+// sets, building an NSMenu in code with `#selector` actions;
+// `NSMenuItemValidation` in an extension (M4a).
 
 import AppKit
 
@@ -149,6 +152,58 @@ public class GraphEventView: NSView {
     @objc public func delete(_ sender: Any?) {
         controller.deleteSelection()
     }
+
+    // MARK: Menu commands (M4a)
+
+    /// Edit > Copy: the selected nodes, as MaterialX, to the pasteboard.
+    /// The app does the work (GraphCanvasController.onCommand), as for
+    /// the actions below.
+    @objc public func copy(_ sender: Any?) {
+        perform(.copy)
+    }
+
+    /// Edit > Cut: copies the selected nodes, then deletes them.
+    @objc public func cut(_ sender: Any?) {
+        perform(.cut)
+    }
+
+    /// Edit > Paste: adds the nodes on the pasteboard under the pointer.
+    @objc public func paste(_ sender: Any?) {
+        perform(.paste)
+    }
+
+    /// Edit > Duplicate (⌘D). Not `duplicate(_:)`, which is NSDocument's
+    /// File > Duplicate: the canvas, first in the responder chain, would
+    /// take it.
+    @objc public func duplicateNodes(_ sender: Any?) {
+        perform(.duplicate)
+    }
+
+    /// Graph > Collapse into Nodegraph (⌥⌘G).
+    @objc public func collapseIntoNodeGraph(_ sender: Any?) {
+        perform(.collapse)
+    }
+
+    /// Graph > Ungroup Nodegraph (⇧⌥⌘G).
+    @objc public func ungroupNodeGraph(_ sender: Any?) {
+        perform(.ungroup)
+    }
+
+    private func perform(_ command: GraphCommand) {
+        if !controller.perform(command, at: pointerLocation()) {
+            NSSound.beep()
+        }
+    }
+
+    /// The commands above, by action, for enabling their menu items.
+    fileprivate static let commands: [Selector: GraphCommand] = [
+        #selector(copy(_:)): .copy,
+        #selector(cut(_:)): .cut,
+        #selector(paste(_:)): .paste,
+        #selector(duplicateNodes(_:)): .duplicate,
+        #selector(collapseIntoNodeGraph(_:)): .collapse,
+        #selector(ungroupNodeGraph(_:)): .ungroup,
+    ]
 
     /// Keeps the controller's idea of the view size current, for framing.
     /// AppKit calls this whenever the view's size changes.
@@ -296,5 +351,23 @@ public class GraphEventView: NSView {
 
     public override func magnify(with event: NSEvent) {
         controller.zoom(by: 1 + event.magnification, at: location(of: event))
+    }
+}
+
+// SWIFT: Conforming in an extension keeps the protocol's method together
+// with the conformance. `NSMenuItemValidation` is AppKit's protocol for
+// it: AppKit asks the object that will receive a menu item's action
+// before showing the menu, and greys the item out if it says no.
+extension GraphEventView: NSMenuItemValidation {
+    /// Enables a menu item whose action this view implements only when it
+    /// would do something: Copy with nothing selected is greyed out.
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if let action = menuItem.action, let command = Self.commands[action] {
+            return controller.canPerform(command)
+        }
+        if menuItem.action == #selector(delete(_:)) {
+            return controller.selection.contains { !controller.model.nodes[$0].isLocked }
+        }
+        return true
     }
 }
