@@ -60,6 +60,10 @@
 // one. Nodegraphs are only at the top level: MaterialX 1.39.5 can't
 // connect to a nodegraph inside another (PLAN.md §8.2).
 //
+// Interface (M4b): inside a nodegraph, ⌥-dragging an unconnected input out
+// to the left of its node, onto empty canvas, makes it one of the graph's
+// inputs (as the inspector's Promote does).
+//
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
 // holding view state, closures capturing a binding, `.dropDestination`,
@@ -377,6 +381,19 @@ struct GraphPanel: View {
                 return
             }
             perform(request, in: newLevel)
+        }
+        // Inside a nodegraph, ⌥-dragging an input to the graph's edge
+        // promotes it (M4b).
+        if !levelPath.isEmpty {
+            newLevel.controller.onPromoteInput = { [weak newLevel] slot in
+                guard let newLevel else {
+                    return
+                }
+                let path: String = newLevel.graph.elementPaths[slot.node]
+                document.edit("Promote \(slot.name)") { content in
+                    try content.promote(input: slot.name, on: path)
+                }
+            }
         }
         newLevel.controller.canPaste = {
             NodePasteboard.text() != nil
@@ -785,7 +802,7 @@ private struct BreadcrumbBar: View {
                 crumb(parts[i], target: parts[0...i].joined(separator: "/"))
             }
             Spacer()
-            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

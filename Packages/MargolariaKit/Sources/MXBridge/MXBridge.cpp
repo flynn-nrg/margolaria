@@ -623,6 +623,12 @@ void UngroupForStorm(const mx::DocumentPtr& preview);
 
 namespace {
 
+/// True if `port` reads from a node or nodegraph (as ReadsSibling, which
+/// comes later in this file).
+bool ReadsSiblingPort(const mx::PortElementPtr& port) {
+    return !port->getNodeName().empty() || !port->getNodeGraphString().empty();
+}
+
 /// A copy of `document` for a renderer reading it from memory: absolute
 /// file paths, `fileprefix` applied (see writeForPreview). It keeps the
 /// document's data library, so nodedefs can still be looked up.
@@ -646,6 +652,29 @@ mx::DocumentPtr PreviewCopy(const mx::DocumentPtr& document) {
         element->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
     }
     preview->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+
+    // Storm ignores the colour space of a file that a node reads through
+    // its nodegraph's input (`interfacename`), on either input (M4b,
+    // PLAN.md §8.2): the texture came out unconverted. So such inputs
+    // take the file and its space themselves, which means the same.
+    for (const mx::ElementPtr& element : preview->traverseTree()) {
+        mx::InputPtr input = element->asA<mx::Input>();
+        if (!input || input->getType() != mx::FILENAME_TYPE_STRING || !input->hasInterfaceName() ||
+            !input->getParent()->isA<mx::Node>()) {
+            continue;
+        }
+        mx::NodeGraphPtr graph = input->getParent()->getParent()->asA<mx::NodeGraph>();
+        mx::InputPtr interface = graph ? graph->getInput(input->getInterfaceName()) : nullptr;
+        if (!interface || !interface->hasValueString() || ReadsSiblingPort(interface)) {
+            continue;
+        }
+        const std::string colorSpace = interface->getActiveColorSpace();
+        input->removeAttribute(mx::ValueElement::INTERFACE_NAME_ATTRIBUTE);
+        input->setValueString(interface->getValueString());
+        if (!colorSpace.empty() && !input->hasColorSpace()) {
+            input->setColorSpace(colorSpace);
+        }
+    }
 
     // Storm ignores `colorspace` on <materialx> (UsdMtlx doesn't carry it
     // over; PLAN.md §8.2), though it honours it on nodes, nodegraphs and
@@ -2054,6 +2083,228 @@ bool Document::removeGraphOutput(const std::string& graphPath, const std::string
             Disconnect(port);
         }
         graph->removeOutput(outputName);
+    });
+}
+
+// --- A nodegraph's interface (M4b) ------------------------------------------
+
+namespace {
+
+/// The metadata of an interface input that the inspector edits, and that
+/// promoting copies from the node's input or its nodedef.
+const std::vector<std::string>& InterfaceMetadata() {
+    static const std::vector<std::string> names = {
+        "uiname", "uifolder", "uimin", "uimax", "uisoftmin", "uisoftmax", "uistep",
+        "enum", "enumvalues", "doc", "uiadvanced", "unit", "unittype", "defaultgeomprop"};
+    return names;
+}
+
+/// True for metadata whose value is a value of the input's type.
+bool IsValueMetadata(const std::string& name) {
+    return name == "uimin" || name == "uimax" || name == "uisoftmin" || name == "uisoftmax" || name == "uistep";
+}
+
+/// The nodegraph at `path`, whose inputs may be edited: not one that
+/// implements a nodedef, whose inputs are the nodedef's (M4c1).
+mx::NodeGraphPtr GraphWithOwnInputs(const mx::DocumentPtr& document, const std::string& path) {
+    mx::NodeGraphPtr graph = path.empty() ? nullptr : EditableElement(document, path)->asA<mx::NodeGraph>();
+    if (!graph) {
+        throw Refusal("Only nodegraphs have inputs of their own");
+    }
+    if (graph->hasNodeDefString()) {
+        throw Refusal("The inputs of " + graph->getName() + " are defined by " + graph->getNodeDefString() +
+                      " and are changed there");
+    }
+    return graph;
+}
+
+/// A value of `type` to start a new input with: zero, false, an identity
+/// matrix, or "" for strings and files. Throws for types an input can't have.
+std::string StartingValue(const std::string& type) {
+    static const std::map<std::string, std::string> values = {
+        {"float", "0"}, {"integer", "0"}, {"boolean", "false"},
+        {"color3", "0, 0, 0"}, {"color4", "0, 0, 0, 1"},
+        {"vector2", "0, 0"}, {"vector3", "0, 0, 0"}, {"vector4", "0, 0, 0, 0"},
+        {"matrix33", "1, 0, 0, 0, 1, 0, 0, 0, 1"},
+        {"matrix44", "1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1"},
+        {"string", ""}, {"filename", ""}};
+    auto found = values.find(type);
+    if (found == values.end()) {
+        throw Refusal("A nodegraph's input can't be a " + type);
+    }
+    return found->second;
+}
+
+/// Checks that `name` can be a new name for a child of `graph`.
+void RequireNewName(const mx::ElementPtr& graph, const std::string& name) {
+    if (name.empty() || mx::createValidName(name) != name) {
+        throw Refusal("\"" + name + "\" is not a valid MaterialX name (letters, digits and _ only)");
+    }
+    if (graph->getChild(name)) {
+        throw Refusal("There is already a " + name + " in " + graph->getName());
+    }
+}
+
+/// The inputs of the nodes in `graph` that read its input `name`.
+std::vector<mx::InputPtr> InputsReading(const mx::NodeGraphPtr& graph, const std::string& name) {
+    std::vector<mx::InputPtr> inputs;
+    for (const mx::NodePtr& node : graph->getNodes()) {
+        for (const mx::InputPtr& input : node->getInputs()) {
+            if (input->getInterfaceName() == name) {
+                inputs.push_back(input);
+            }
+        }
+    }
+    return inputs;
+}
+
+} // namespace
+
+bool Document::promoteInput(const std::string& elementPath, const std::string& inputName, const std::string& nameHint,
+                            std::string& newName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodePtr node = EditableElement(document, elementPath)->asA<mx::Node>();
+        if (!node) {
+            throw Refusal("Only a node's inputs can become its nodegraph's");
+        }
+        mx::NodeGraphPtr parent = node->getParent()->asA<mx::NodeGraph>();
+        if (!parent) {
+            throw Refusal(node->getName() + " isn't in a nodegraph");
+        }
+        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, parent->getNamePath());
+        mx::NodeDefPtr nodeDef = node->getNodeDef();
+        mx::InputPtr definition = nodeDef ? nodeDef->getActiveInput(inputName) : nullptr;
+        mx::InputPtr input = node->getInput(inputName);
+        if (!input && !definition) {
+            throw Refusal(node->getName() + " has no input " + inputName);
+        }
+        if (input && (ReadsSibling(input) || input->hasInterfaceName())) {
+            throw Refusal(inputName + " is connected: only an input with a value can become the graph's");
+        }
+        const std::string type = input ? input->getType() : definition->getType();
+
+        mx::InputPtr interface = graph->addInput(graph->createValidChildName(nameHint.empty() ? inputName : nameHint), type);
+        // Its value: the input's own, or the nodedef's default.
+        if (input && input->hasValueString()) {
+            interface->setValueString(input->getValueString());
+        } else if (definition && definition->hasValueString()) {
+            interface->setValueString(definition->getValueString());
+        }
+        // The space the value is in, if the graph's differs.
+        std::string colorSpace;
+        if (input && input->hasColorSpace()) {
+            colorSpace = input->getColorSpace();
+        } else if (node->hasColorSpace()) {
+            colorSpace = node->getColorSpace();
+        } else if (definition && definition->hasColorSpace()) {
+            colorSpace = definition->getColorSpace();
+        }
+        if (!colorSpace.empty() && SpaceName(colorSpace) != SpaceName(graph->getActiveColorSpace())) {
+            interface->setColorSpace(colorSpace);
+        }
+        // How the inspector shows it: the input's metadata, else the nodedef's.
+        for (const std::string& name : InterfaceMetadata()) {
+            if (input && input->hasAttribute(name)) {
+                interface->setAttribute(name, input->getAttribute(name));
+            } else if (definition && definition->hasAttribute(name)) {
+                interface->setAttribute(name, definition->getAttribute(name));
+            }
+        }
+        if ((input && IsUniform(input)) || (definition && definition->getIsUniform())) {
+            interface->setIsUniform(true);
+        }
+
+        if (!input) {
+            input = node->addInputFromNodeDef(inputName);
+        }
+        ClearConnection(input);
+        input->removeAttribute(mx::ValueElement::VALUE_ATTRIBUTE);
+        input->removeAttribute(mx::Element::COLOR_SPACE_ATTRIBUTE);
+        input->setInterfaceName(interface->getName());
+        newName = interface->getName();
+    });
+}
+
+bool Document::addGraphInput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
+                             std::string& newName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
+        const std::string value = StartingValue(type);
+        mx::InputPtr input = graph->addInput(graph->createValidChildName(nameHint.empty() ? "in" : nameHint), type);
+        if (!value.empty()) {
+            input->setValueString(value);
+        }
+        newName = input->getName();
+    });
+}
+
+bool Document::renameGraphInput(const std::string& graphPath, const std::string& inputName, const std::string& newName,
+                                std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
+        mx::InputPtr input = graph->getInput(inputName);
+        if (!input) {
+            throw Refusal(graph->getName() + " has no input " + inputName);
+        }
+        if (newName == inputName) {
+            return;
+        }
+        RequireNewName(graph, newName);
+        for (const mx::InputPtr& reader : InputsReading(graph, inputName)) {
+            reader->setInterfaceName(newName);
+        }
+        // What is connected to it from outside is written on the input
+        // itself, so nothing outside changes.
+        input->setName(newName);
+    });
+}
+
+bool Document::removeGraphInput(const std::string& graphPath, const std::string& inputName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
+        mx::InputPtr input = graph->getInput(inputName);
+        if (!input) {
+            throw Refusal(graph->getName() + " has no input " + inputName);
+        }
+        // The nodes that read it keep its value, as ungrouping does.
+        for (const mx::InputPtr& reader : InputsReading(graph, inputName)) {
+            if (input->hasValueString()) {
+                ClearConnection(reader);
+                reader->setValueString(input->getValueString());
+                if (input->hasColorSpace() && !reader->hasColorSpace()) {
+                    reader->setColorSpace(input->getColorSpace());
+                }
+            } else {
+                Disconnect(reader);
+            }
+        }
+        graph->removeInput(inputName);
+    });
+}
+
+bool Document::setInputMetadata(const std::string& graphPath, const std::string& inputName, const std::string& attribute,
+                                const std::string& value, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnInputs(document, graphPath);
+        mx::InputPtr input = graph->getInput(inputName);
+        if (!input) {
+            throw Refusal(graph->getName() + " has no input " + inputName);
+        }
+        const std::vector<std::string>& names = InterfaceMetadata();
+        if (std::find(names.begin(), names.end(), attribute) == names.end()) {
+            throw Refusal(attribute + " is not metadata the inspector edits");
+        }
+        if (value.empty()) {
+            input->removeAttribute(attribute);
+            if (attribute == "enum") {
+                input->removeAttribute("enumvalues");
+            }
+            return;
+        }
+        if (IsValueMetadata(attribute) && !mx::Value::createValueFromStrings(value, input->getType())) {
+            throw Refusal("\"" + value + "\" is not a valid " + input->getType());
+        }
+        input->setAttribute(attribute, value);
     });
 }
 

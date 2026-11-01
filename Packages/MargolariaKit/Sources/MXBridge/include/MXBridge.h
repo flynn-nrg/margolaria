@@ -540,6 +540,48 @@ public:
     /// disconnecting what read it.
     bool removeGraphOutput(const std::string& graphPath, const std::string& outputName, std::string& errorMessage);
 
+    // --- A nodegraph's interface (M4b) ----------------------------------------
+    //
+    // A nodegraph's own inputs are what it shows as a node: values set
+    // there, or connections from outside, reach the nodes inside that read
+    // them (`interfacename`). Not for a nodegraph that implements a
+    // nodedef: its inputs are the nodedef's (M4c1).
+
+    /// Makes the input `inputName` of the node at `elementPath` (inside a
+    /// nodegraph) one of the graph's inputs: a new graph input, named
+    /// `nameHint` or after the input (made unique), takes its type, value
+    /// (or the nodedef's default), colour space, `uniform` and metadata
+    /// (uiname, uifolder, ranges, enum, doc, unit...: the input's, else the
+    /// nodedef's), and the input reads it. Refused for a connected input.
+    /// Sets `newName`.
+    bool promoteInput(const std::string& elementPath, const std::string& inputName, const std::string& nameHint,
+                      std::string& newName, std::string& errorMessage);
+
+    /// Adds an input of `type` to the nodegraph at `graphPath`, named
+    /// `nameHint` ("in" if empty, made unique), with zero for its value.
+    /// Sets `newName`.
+    bool addGraphInput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
+                       std::string& newName, std::string& errorMessage);
+
+    /// Renames the input `inputName` of the nodegraph at `graphPath`, and
+    /// the `interfacename` of the inputs inside that read it.
+    bool renameGraphInput(const std::string& graphPath, const std::string& inputName, const std::string& newName,
+                          std::string& errorMessage);
+
+    /// Removes the input `inputName` of the nodegraph at `graphPath`. The
+    /// inputs inside that read it take its value instead (or go back to
+    /// their default if it has none).
+    bool removeGraphInput(const std::string& graphPath, const std::string& inputName, std::string& errorMessage);
+
+    /// Sets the metadata `attribute` of the input `inputName` of the
+    /// nodegraph at `graphPath`: one of uiname, uifolder, uimin, uimax,
+    /// uisoftmin, uisoftmax, uistep (values of the input's type), enum,
+    /// enumvalues (comma-separated lists), doc, uiadvanced ("true"), unit,
+    /// unittype, defaultgeomprop. "" removes it (and `enum` takes
+    /// `enumvalues` with it).
+    bool setInputMetadata(const std::string& graphPath, const std::string& inputName, const std::string& attribute,
+                          const std::string& value, std::string& errorMessage);
+
     /// The nodes and nodegraphs `names` of the graph at `parentPath`, as a
     /// small MaterialX document (`xml`), for the pasteboard: connections
     /// between them are kept, connections to anything else dropped

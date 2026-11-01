@@ -283,4 +283,45 @@ extension GraphCanvasControllerTests {
         controller.model.nodes[3].category = .nodeGraph
         #expect(controller.canPerform(.ungroup))
     }
+
+    @Test("⌥-dragging an unconnected input out to the left promotes it; elsewhere ⌥-drag cuts")
+    func promoteDrag() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 10))
+        controller.zoom = 1
+        controller.offset = .zero
+        // An input with no wire.
+        let model: GraphModel = controller.model
+        guard let node = model.nodes.first(where: { node in
+            node.inputs.indices.contains { model.wire(into: PortReference(node: node.id, index: $0)) == nil }
+        }) else {
+            Issue.record("the synthetic graph has an unconnected input")
+            return
+        }
+        let index: Int = node.inputs.indices.first { model.wire(into: PortReference(node: node.id, index: $0)) == nil }!
+        let pin: CGPoint = GraphLayout.inputPoint(of: node, index: index)
+        let frame: CGRect = GraphLayout.frame(of: node)
+        // Far to the left, where nothing is.
+        let outside = CGPoint(x: frame.minX - 2000, y: pin.y)
+
+        // Without a handler, ⌥ cuts.
+        controller.mouseDown(at: pin, extend: false, cut: true)
+        controller.mouseDragged(to: outside)
+        #expect(controller.cutLine != nil)
+        controller.mouseUp()
+
+        var promoted: [InputSlot] = []
+        controller.onPromoteInput = { promoted.append($0) }
+        controller.mouseDown(at: pin, extend: false, cut: true)
+        controller.mouseDragged(to: outside)
+        #expect(controller.wirePreview != nil)
+        controller.mouseUp()
+        #expect(promoted == [controller.model.slot(of: PortReference(node: node.id, index: index))])
+        #expect(controller.wirePreview == nil)
+
+        // Dropped to the right of the node: nothing.
+        controller.mouseDown(at: pin, extend: false, cut: true)
+        controller.mouseDragged(to: CGPoint(x: frame.maxX + 2000, y: pin.y))
+        controller.mouseUp()
+        #expect(promoted.count == 1)
+    }
 }
