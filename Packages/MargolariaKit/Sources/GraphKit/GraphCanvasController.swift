@@ -27,6 +27,11 @@
 // drawn, dangling, until the app reports the search closed
 // (endNodeSearch), having added and connected a node or not.
 //
+// Promoting (M4b): inside a nodegraph, ⌥-dragging an unconnected input to
+// the left of its node and dropping it on empty canvas asks the app to
+// make it one of the graph's inputs (onPromoteInput). Elsewhere ⌥-drag
+// still cuts wires.
+//
 // Menu commands (M4a): Copy, Cut, Paste, Duplicate, Collapse into
 // Nodegraph and Ungroup reach the canvas view through the responder
 // chain; the controller says which can apply to the selection, and passes
@@ -231,6 +236,9 @@ public final class GraphCanvasController {
         /// A new wire was dropped on empty canvas; the app is showing its
         /// node search, and the wire stays drawn until it closes.
         case awaitingNode
+        /// ⌥-dragging an unconnected input towards the graph's edge, to
+        /// promote it (M4b); where the pointer is.
+        case promoting(input: PortReference, pointer: CGPoint)
     }
 
     /// A wire drag in progress.
@@ -310,6 +318,12 @@ public final class GraphCanvasController {
     /// Called with a menu command on the selection (M4a, see
     /// ``perform(_:at:)``).
     @ObservationIgnored public var onCommand: (@MainActor (GraphCommandRequest) -> Void)? = nil
+
+    /// Called when an input is ⌥-dragged out to the left of its node and
+    /// dropped on empty canvas: make it one of the nodegraph's inputs
+    /// (M4b). Nil where that can't be done (the document's top level):
+    /// ⌥-dragging from a pin then cuts wires, as elsewhere.
+    @ObservationIgnored public var onPromoteInput: (@MainActor (InputSlot) -> Void)? = nil
 
     /// Asked whether Paste has anything to paste (the pasteboard is the
     /// app's business). Nil: it always has.
@@ -449,6 +463,13 @@ public final class GraphCanvasController {
             onSoloNode?(id)
             return
         }
+        // ⌥ on an unconnected input, inside a nodegraph: drag it to the
+        // graph's edge to promote it (M4b).
+        if cut, onPromoteInput != nil, case .input(let port) = hitTest(point), !model.nodes[port.node].isLocked,
+           model.nodes[port.node].category != .graphInterface, model.wire(into: port) == nil {
+            drag = .promoting(input: port, pointer: point)
+            return
+        }
         if cut {
             drag = .cutting(start: point)
             cutLine = CutLine(start: point, end: point)
@@ -559,6 +580,13 @@ public final class GraphCanvasController {
         case .cutting(let start):
             cutLine = CutLine(start: start, end: point)
             cutWires = model.wires(crossing: start, point)
+        case .promoting(let input, _):
+            // A wire from the pointer into the input, as if from the
+            // graph input it will become.
+            let node: GraphNode = model.nodes[input.node]
+            wirePreview = WirePreview(start: point, end: GraphLayout.inputPoint(of: node, index: input.index),
+                                      type: node.inputs[input.index].type)
+            drag = .promoting(input: input, pointer: point)
         }
     }
 
@@ -595,6 +623,16 @@ public final class GraphCanvasController {
             cutWires = []
             if !inputs.isEmpty {
                 onDisconnect?(inputs)
+            }
+            return nil
+        case .promoting(let input, let pointer):
+            drag = .idle
+            wirePreview = nil
+            // Dropped on empty canvas, on the left of its node: towards the
+            // graph's inputs.
+            let frame: CGRect = GraphLayout.frame(of: model.nodes[input.node])
+            if hitTest(pointer) == .empty, pointer.x < frame.minX {
+                onPromoteInput?(model.slot(of: input))
             }
             return nil
         case .idle, .marquee, .choosing, .awaitingNode:
@@ -637,7 +675,7 @@ public final class GraphCanvasController {
     /// Escape during a wire drag or a cut: abandons it.
     public func cancelDrag() {
         switch drag {
-        case .wiring, .cutting, .choosing, .awaitingNode:
+        case .wiring, .cutting, .choosing, .awaitingNode, .promoting:
             drag = .idle
             clearWire()
             cutLine = nil

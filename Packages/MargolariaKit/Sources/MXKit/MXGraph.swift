@@ -10,7 +10,8 @@
 //
 // Introduces (SWIFT): failable initializers (`init?`), assigning `self` in
 // an enum's initializer, the `if let x` shorthand, `_` in patterns,
-// an `extension` shared within the module, `.map` over a C++ vector, `CGPoint`/`CGFloat`.
+// an `extension` shared within the module, `.map` over a C++ vector, `CGPoint`/`CGFloat`;
+// `filter` on a dictionary (M4b).
 
 import CoreGraphics
 import Foundation
@@ -125,6 +126,9 @@ public struct MXPort: Hashable, Sendable {
     public let inheritedColorSpace: String?
     /// How the inspector shows the input: label, ranges, choices, help.
     public let ui: MXPortUI
+    /// The metadata as written, by attribute (M4b's inspector edits a
+    /// nodegraph input's): the port's own, else its nodedef's.
+    public let metadata: [MXInputMetadata: String]
     /// The `xpos`/`ypos` saved on a nodegraph's own input or output, which
     /// the canvas draws as a small node; nil if none (and for node inputs).
     public let position: CGPoint?
@@ -149,7 +153,30 @@ public struct MXPort: Hashable, Sendable {
         activeColorSpace = port.activeColorSpace.swiftString.nonEmpty
         inheritedColorSpace = port.inheritedColorSpace.swiftString.nonEmpty
         ui = MXPortUI(port)
+        metadata = Self.metadata(of: port)
         position = port.hasPosition ? CGPoint(x: CGFloat(port.xpos), y: CGFloat(port.ypos)) : nil
+    }
+
+    /// The metadata attributes `port` has, as text.
+    ///
+    /// SWIFT: A dictionary literal with enum keys; `filter` on a dictionary
+    /// keeps the (key, value) pairs for which the closure is true, and
+    /// gives a dictionary back.
+    private static func metadata(of port: mxbridge.PortInfo) -> [MXInputMetadata: String] {
+        let all: [MXInputMetadata: String] = [
+            .uiName: port.uiName.swiftString,
+            .uiFolder: port.uiFolder.swiftString,
+            .uiMin: port.uiMin.swiftString,
+            .uiMax: port.uiMax.swiftString,
+            .uiSoftMin: port.uiSoftMin.swiftString,
+            .uiSoftMax: port.uiSoftMax.swiftString,
+            .uiStep: port.uiStep.swiftString,
+            .enumNames: port.enumNames.map { $0.swiftString }.joined(separator: ", "),
+            .enumValues: port.enumValues.map { $0.swiftString }.joined(separator: ", "),
+            .doc: port.doc.swiftString,
+            .uiAdvanced: port.isAdvanced ? "true" : "",
+        ]
+        return all.filter { !$0.value.isEmpty }
     }
 
     /// Turns a filename value into a file URL: absolute paths as they are,

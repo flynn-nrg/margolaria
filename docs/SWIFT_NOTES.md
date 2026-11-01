@@ -66,6 +66,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `zip` | Pairs two sequences element by element into tuples | Python `zip` | `MXValue.swift` (`MXPortUI`) |
 | `Double` vs `Float`; `String(Float(x))` | 64- and 32-bit floats, never converted implicitly. `String(_:)` on a Float prints the shortest text that reads back as the same Float | `double`/`float`; `%g` with round-trip precision | `MXValue.swift` (`MXValueText`) |
 | Enums with raw values | `enum E: String { case studio }`: each case has a fixed value (`.rawValue`), and `E(rawValue:)` reads one back, nil if unknown | A C enum with explicit values, plus a parse function | `ViewportSettings.swift` (`ViewportEnvironment`) |
+| Raw values unlike the case names | `case uiName = "uiname"`: Swift's camelCase for the case, the file's spelling for the value | `#define` names vs their strings | `MXInterfaceEdit.swift` (`MXInputMetadata`) |
+| `filter` on a dictionary | Keeps the key-value pairs for which the closure is true, and returns a dictionary | — | `MXGraph.swift` (`MXPort.metadata`) |
 | `switch` as an expression | `let t = switch x { case .a: "A" case .b: "B" }`: the value of the chosen case | A ternary over many cases | `ViewportSettings.swift` |
 | `Float.exponent`, `Float(sign:exponent:significand:)` | A float's binary exponent, and building `2^e` exactly | `frexp`, `ldexp` | `StudioEnvironment.swift` (`rgbe`) |
 | `static let x = { ... }()` | A constant computed by a closure, once, on first use | A function-local static initialised by a lambda | `StudioEnvironment.swift` (`fileURL`) |

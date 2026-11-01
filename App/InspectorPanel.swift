@@ -4,9 +4,12 @@
 // canvas, with every input, grouped by the nodedef's `uifolder`.
 //
 // With nothing selected: the document's version and working space. For a
-// nodegraph, its working space too (WorkingSpaceMenu.swift), and its
-// outputs, which can be added, renamed and removed (M4a); a selected graph
-// output can be renamed and removed too.
+// nodegraph, its working space too (WorkingSpaceMenu.swift), and its inputs
+// and outputs, which can be added, renamed and removed (M4a, M4b); a
+// selected graph input or output can be renamed and removed too, and a
+// graph input's presentation (label, folder, ranges, choices, description)
+// edited. Right-clicking an unconnected input of a node inside a nodegraph
+// offers to promote it to the graph's interface (M4b).
 //
 // For a node: its name (editable, to rename it), category, nodedef, type
 // variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
@@ -102,16 +105,23 @@ private struct InspectedElementView: View {
                 InputList(document: document, inputs: node.inputs, ownerPath: node.path,
                           sourceGraph: parent(of: node.path), isReadOnly: isReadOnly(node), onShow: onShow)
             case .graphInput(let input, let graphPath):
-                ElementTitle(name: input.name, subtitle: "Input of \(graphPath) · \(input.type)")
+                if isGraphReadOnly(graphPath) {
+                    ElementTitle(name: input.name, subtitle: "Input of \(graphPath) · \(input.type)")
+                } else {
+                    GraphPortHeader(document: document, port: input, kind: .input, graphPath: graphPath, onShow: onShow)
+                }
                 Divider()
                 InputList(document: document, inputs: [input], ownerPath: graphPath,
                           sourceGraph: parent(of: graphPath), isReadOnly: isGraphReadOnly(graphPath), onShow: onShow)
+                if !isGraphReadOnly(graphPath) {
+                    InterfaceMetadataEditor(document: document, input: input, graphPath: graphPath)
+                }
             case .graphOutput(let output, let graphPath):
                 if graphPath.isEmpty || isGraphReadOnly(graphPath) {
                     ElementTitle(name: output.name,
                                  subtitle: "Output of \(graphPath.isEmpty ? "the document" : graphPath) · \(output.type)")
                 } else {
-                    GraphOutputHeader(document: document, output: output, graphPath: graphPath, onShow: onShow)
+                    GraphPortHeader(document: document, port: output, kind: .output, graphPath: graphPath, onShow: onShow)
                 }
                 Divider()
                 // An <output> has no value, only what it is connected to.
@@ -246,8 +256,11 @@ private struct NodeHeader: View {
                 WorkingSpaceMenu(document: document, path: node.path,
                                  isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
-                GraphOutputList(document: document, graph: node,
-                                isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                GraphPortList(document: document, graph: node, kind: .input,
+                              isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                    .padding(.top, 4)
+                GraphPortList(document: document, graph: node, kind: .output,
+                              isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
             }
             if node.isIncluded {
@@ -303,57 +316,103 @@ private struct NodeHeader: View {
     }
 }
 
-// MARK: - Graph outputs (M4a)
+// MARK: - A nodegraph's interface (M4a outputs, M4b inputs)
 
-/// A nodegraph's outputs: each one's name (editable) and type, a button to
-/// remove it, and a menu to add one.
-private struct GraphOutputList: View {
+/// Which of a nodegraph's own ports a list or header is about.
+private enum GraphPortKind {
+    case input, output
+
+    var title: String {
+        self == .input ? "Input" : "Output"
+    }
+
+    /// The types offered for a new port. Outputs can also pass shaders out;
+    /// inputs take values.
+    var types: [String] {
+        switch self {
+        case .input:
+            ["color3", "color4", "float", "vector2", "vector3", "vector4", "integer", "boolean", "filename", "string"]
+        case .output:
+            ["color3", "color4", "float", "vector2", "vector3", "vector4", "integer", "boolean",
+             "BSDF", "EDF", "VDF", "surfaceshader", "displacementshader", "volumeshader"]
+        }
+    }
+
+    /// The edits, by kind.
+    func add(_ type: String, to graph: String, in content: MXDocument) throws {
+        switch self {
+        case .input: try content.addInput(type: type, to: graph)
+        case .output: try content.addOutput(type: type, to: graph)
+        }
+    }
+
+    func rename(_ name: String, of graph: String, to newName: String, in content: MXDocument) throws {
+        switch self {
+        case .input: try content.renameInput(name, of: graph, to: newName)
+        case .output: try content.renameOutput(name, of: graph, to: newName)
+        }
+    }
+
+    func remove(_ name: String, of graph: String, in content: MXDocument) throws {
+        switch self {
+        case .input: try content.removeInput(name, of: graph)
+        case .output: try content.removeOutput(name, of: graph)
+        }
+    }
+}
+
+/// A nodegraph's inputs or outputs: each one's name (editable) and type, a
+/// button to remove it, and a menu to add one.
+private struct GraphPortList: View {
     let document: MaterialXDocument
     let graph: MXNode
+    let kind: GraphPortKind
     let isReadOnly: Bool
 
-    /// The types offered for a new output: values first, then shaders.
-    static let types: [String] = ["color3", "color4", "float", "vector2", "vector3", "vector4", "integer", "boolean",
-                                  "BSDF", "EDF", "VDF", "surfaceshader", "displacementshader", "volumeshader"]
+    private var ports: [MXPort] {
+        kind == .input ? graph.inputs : graph.outputs
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Outputs")
+            Text(kind == .input ? "Inputs" : "Outputs")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            if graph.outputs.isEmpty {
-                Text("None yet: nothing can read this nodegraph.")
+            if ports.isEmpty {
+                Text(kind == .input ? "None: promote a node's input inside (right-click it), or add one."
+                                    : "None yet: nothing can read this nodegraph.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            ForEach(graph.outputs, id: \.name) { output in
+            ForEach(ports, id: \.name) { port in
                 HStack(spacing: 6) {
                     if isReadOnly {
-                        Text(output.name)
+                        Text(port.name)
                     } else {
-                        CommitTextField(text: output.name) { name in
-                            rename(output.name, to: name)
+                        CommitTextField(text: port.name) { name in
+                            rename(port.name, to: name)
                         }
                         .textFieldStyle(.roundedBorder)
-                        .help("The output's name. Type a new one and press Return to rename it.")
+                        .help("The \(kind.title.lowercased())'s name. Type a new one and press Return to rename it.")
                     }
-                    Text(output.type)
+                    Text(port.type)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if !isReadOnly {
-                        Button("Remove \(output.name)", systemImage: "minus.circle") {
-                            remove(output.name)
+                        Button("Remove \(port.name)", systemImage: "minus.circle") {
+                            remove(port.name)
                         }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
-                        .help("Remove this output, disconnecting what reads it")
+                        .help(kind == .input ? "Remove this input; the nodes inside that read it keep its value"
+                                             : "Remove this output, disconnecting what reads it")
                     }
                 }
             }
             if !isReadOnly {
                 // SWIFT: A `Menu` whose items are buttons, one per type.
-                Menu("Add Output") {
-                    ForEach(Self.types, id: \.self) { type in
+                Menu("Add \(kind.title)") {
+                    ForEach(kind.types, id: \.self) { type in
                         Button(type) {
                             add(type)
                         }
@@ -361,69 +420,171 @@ private struct GraphOutputList: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .help("Add an output to the nodegraph; connect it inside, to the node whose result it gives")
+                .help(kind == .input ? "Add an input to the nodegraph; connect nodes inside to it"
+                                     : "Add an output to the nodegraph; connect it inside, to the node whose result it gives")
             }
         }
     }
 
     private func add(_ type: String) {
         let path: String = graph.path
-        document.edit("Add Output to \(graph.name)") { content in
-            try content.addOutput(type: type, to: path)
+        let kind: GraphPortKind = kind
+        document.edit("Add \(kind.title) to \(graph.name)") { content in
+            try kind.add(type, to: path, in: content)
         }
     }
 
-    private func rename(_ output: String, to name: String) {
+    private func rename(_ name: String, to newName: String) {
         let path: String = graph.path
-        document.edit("Rename \(output)") { content in
-            try content.renameOutput(output, of: path, to: name)
+        let kind: GraphPortKind = kind
+        document.edit("Rename \(name)") { content in
+            try kind.rename(name, of: path, to: newName, in: content)
         }
     }
 
-    private func remove(_ output: String) {
+    private func remove(_ name: String) {
         let path: String = graph.path
-        document.edit("Remove Output \(output)") { content in
-            try content.removeOutput(output, of: path)
+        let kind: GraphPortKind = kind
+        document.edit("Remove \(kind.title) \(name)") { content in
+            try kind.remove(name, of: path, in: content)
         }
     }
 }
 
-/// A selected graph output, inside its nodegraph: its name (editable),
-/// type, and a button to remove it.
-private struct GraphOutputHeader: View {
+/// A selected input or output of a nodegraph, inside it: its name
+/// (editable), type, and a button to remove it.
+private struct GraphPortHeader: View {
     let document: MaterialXDocument
-    let output: MXPort
+    let port: MXPort
+    let kind: GraphPortKind
     let graphPath: String
     let onShow: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            CommitTextField(text: output.name, onCommit: rename)
+            CommitTextField(text: port.name, onCommit: rename)
                 .font(.headline)
                 .textFieldStyle(.plain)
-                .help("The output's name. Type a new one and press Return to rename it.")
-            Text("Output of \(graphPath) · \(output.type)")
+                .help("The \(kind.title.lowercased())'s name. Type a new one and press Return to rename it.")
+            Text("\(kind.title) of \(graphPath) · \(port.type)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("Remove Output", systemImage: "minus.circle") {
-                let name: String = output.name
+            Button("Remove \(kind.title)", systemImage: "minus.circle") {
+                let name: String = port.name
                 let path: String = graphPath
-                document.edit("Remove Output \(name)") { content in
-                    try content.removeOutput(name, of: path)
+                let kind: GraphPortKind = kind
+                document.edit("Remove \(kind.title) \(name)") { content in
+                    try kind.remove(name, of: path, in: content)
                 }
             }
             .controlSize(.small)
-            .help("Remove this output, disconnecting what reads it")
+            .help(kind == .input ? "Remove this input; the nodes that read it keep its value"
+                                 : "Remove this output, disconnecting what reads it")
         }
     }
 
-    /// Renames the output, and keeps it selected under its new name.
+    /// Renames the port, and keeps it selected under its new name.
     private func rename(to name: String) {
-        let old: String = output.name
+        let old: String = port.name
         let path: String = graphPath
+        let kind: GraphPortKind = kind
         document.edit("Rename \(old)") { content in
-            try content.renameOutput(old, of: path, to: name)
+            try kind.rename(old, of: path, to: name, in: content)
             onShow(path + "/" + name)
+        }
+    }
+}
+
+/// How a nodegraph's input is presented (M4b): its label, folder, ranges,
+/// step, choices, description and whether it is advanced. What is set here
+/// is what the graph's inspector shows, and what a node definition made
+/// from the graph will show (M4c1).
+private struct InterfaceMetadataEditor: View {
+    let document: MaterialXDocument
+    let input: MXPort
+    let graphPath: String
+
+    /// Open by default when the input has any metadata.
+    @State private var isExpanded: Bool? = nil
+
+    /// The fields, in the order shown. Choice values only matter with
+    /// choices, so they follow them.
+    private static let fields: [MXInputMetadata] = [.uiName, .uiFolder, .doc, .uiSoftMin, .uiSoftMax, .uiMin, .uiMax,
+                                                    .uiStep, .enumNames, .enumValues]
+
+    var body: some View {
+        DisclosureGroup(isExpanded: Binding(get: { isExpanded ?? !input.metadata.isEmpty },
+                                            set: { isExpanded = $0 })) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Self.fields.filter(applies), id: \.self) { field in
+                    HStack(spacing: 8) {
+                        Text(field.title)
+                            .frame(width: 110, alignment: .leading)
+                            .foregroundStyle(.secondary)
+                        CommitTextField(text: input.metadata[field] ?? "", prompt: prompt(for: field)) { value in
+                            set(field, to: value)
+                        }
+                        .textFieldStyle(.roundedBorder)
+                    }
+                    .help(help(for: field))
+                }
+                // SWIFT: `Toggle` bound with get/set closures: the document
+                // holds the value, and setting it is an edit.
+                Toggle("Advanced: hidden until asked for", isOn: Binding(
+                    get: { input.ui.isAdvanced },
+                    set: { set(.uiAdvanced, to: $0 ? "true" : "") }))
+            }
+            .font(.callout)
+            .padding(.top, 4)
+        } label: {
+            Text("Presentation")
+                .font(.subheadline.weight(.semibold))
+        }
+    }
+
+    /// Ranges and steps are for numbers; choices for numbers and strings.
+    private func applies(_ field: MXInputMetadata) -> Bool {
+        let numeric: Bool = ["float", "integer", "vector2", "vector3", "vector4", "color3", "color4"].contains(input.type)
+        switch field {
+        case .uiMin, .uiMax, .uiSoftMin, .uiSoftMax, .uiStep:
+            return numeric
+        case .enumNames, .enumValues:
+            return ["integer", "string", "float"].contains(input.type)
+        default:
+            return true
+        }
+    }
+
+    private func prompt(for field: MXInputMetadata) -> String {
+        switch field {
+        case .uiName: input.name
+        case .enumNames: "Off, On"
+        case .enumValues: "0, 1"
+        case .uiStep: "0.01"
+        default: field.isValue ? input.type : ""
+        }
+    }
+
+    private func help(for field: MXInputMetadata) -> String {
+        switch field {
+        case .uiName: "The label shown instead of the name (uiname)"
+        case .uiFolder: "The group the input is shown in (uifolder)"
+        case .doc: "A sentence describing the input, shown when hovering over it (doc)"
+        case .uiSoftMin, .uiSoftMax: "The slider's usual range, inside the limits; a \(input.type) (uisoftmin, uisoftmax)"
+        case .uiMin, .uiMax: "The value's hard limits; a \(input.type) (uimin, uimax)"
+        case .uiStep: "The slider's increment (uistep)"
+        case .enumNames: "The allowed values' names, separated by commas (enum)"
+        case .enumValues: "The value stored for each name, in the same order (enumvalues); empty when the names are the values"
+        case .uiAdvanced: "An input most users can leave alone (uiadvanced)"
+        }
+    }
+
+    private func set(_ field: MXInputMetadata, to value: String) {
+        let name: String = input.name
+        let path: String = graphPath
+        let trimmed: String = value.trimmingCharacters(in: .whitespaces)
+        document.edit("Set \(field.title) of \(name)") { content in
+            try content.setMetadata(field, to: trimmed.isEmpty ? nil : trimmed, ofInput: name, on: path)
         }
     }
 }
@@ -605,6 +766,27 @@ struct InputRow: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(input.name, forType: .string)
             }
+            if canPromote {
+                Divider()
+                Button("Promote to Nodegraph Input", action: promote)
+            }
+        }
+    }
+
+    /// An unconnected input of a node inside a nodegraph can become one of
+    /// the graph's inputs (M4b). Not a nodegraph's own input (its owner is
+    /// the graph, at the top level).
+    private var canPromote: Bool {
+        !isReadOnly && input.connection == nil && ownerPath.contains("/")
+    }
+
+    /// Makes the input one of its nodegraph's, with its value and
+    /// presentation; the node then reads it.
+    private func promote() {
+        let name: String = input.name
+        let ownerPath: String = ownerPath
+        document.edit("Promote \(label)") { content in
+            try content.promote(input: name, on: ownerPath)
         }
     }
 
