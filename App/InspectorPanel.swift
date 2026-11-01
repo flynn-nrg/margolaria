@@ -11,6 +11,12 @@
 // edited. Right-clicking an unconnected input of a node inside a nodegraph
 // offers to promote it to the graph's interface (M4b).
 //
+// Node definitions (M4c1): a top-level nodegraph with outputs has a "Make
+// Node Definition…" button, whose sheet names the new kind of node. A
+// nodegraph implementing a definition made in this document keeps its
+// inputs, defaults and presentation editable (they are the nodedef's), and
+// shows the definition's group, version and description.
+//
 // For a node: its name (editable, to rename it), category, nodedef, type
 // variant (a menu, M2e) and description, then its inputs. Inputs the document sets are marked with a
 // dot; the others show the nodedef's default, dimmed, and setting one adds
@@ -28,7 +34,8 @@
 //
 // Introduces (SWIFT): `DisclosureGroup`, `ScrollView`, `let _ =` to make a
 // view observe a property it doesn't otherwise use, `firstIndex(where:)`
-// and changing an array element in place, `.contentShape`.
+// and changing an array element in place, `.contentShape`; `.sheet`,
+// `@Environment(\.dismiss)`, `Form`, `TextField(axis:)` (M4c1).
 
 import GraphKit
 import MXKit
@@ -45,6 +52,12 @@ struct InspectorPanel: View {
     /// Shows the element at a path on the canvas (a connection's source,
     /// or a node just renamed).
     let onShow: (String) -> Void
+    /// The graph level the canvas shows: with nothing selected inside a
+    /// nodegraph, the inspector shows the nodegraph itself (M4c1).
+    let levelPath: String
+    /// Opens a graph level on the canvas ("" for the document): a
+    /// definition's implementation, or back up after deleting it.
+    let onOpen: (String) -> Void
 
     var body: some View {
         // SWIFT: Reading `document.revision` makes SwiftUI call `body`
@@ -55,7 +68,8 @@ struct InspectorPanel: View {
         VStack(spacing: 0) {
             if let selectedPath, let element = lookUp(selectedPath) {
                 ScrollView {
-                    InspectedElementView(document: document, element: element, soloPath: $soloPath, onShow: onShow)
+                    InspectedElementView(document: document, element: element, soloPath: $soloPath, onShow: onShow,
+                                         onOpen: onOpen)
                         .padding(12)
                 }
                 // A new set of editors for each element. Otherwise SwiftUI
@@ -65,6 +79,15 @@ struct InspectorPanel: View {
                 // set the new node's input. A fresh well, clicked, connects
                 // and sends the panel its own colour.
                 .id(selectedPath)
+            } else if !levelPath.isEmpty, let graph = lookUp(levelPath) {
+                // Nothing selected inside a nodegraph: the nodegraph, its
+                // interface and (for a definition) its settings.
+                ScrollView {
+                    InspectedElementView(document: document, element: graph, soloPath: $soloPath, onShow: onShow,
+                                         onOpen: onOpen)
+                        .padding(12)
+                }
+                .id(levelPath)
             } else {
                 // Nothing selected: the document's own settings.
                 DocumentSettings(document: document)
@@ -95,12 +118,13 @@ private struct InspectedElementView: View {
     let element: MXInspectable
     @Binding var soloPath: String?
     let onShow: (String) -> Void
+    let onOpen: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             switch element {
             case .node(let node):
-                NodeHeader(document: document, node: node, soloPath: $soloPath, onShow: onShow)
+                NodeHeader(document: document, node: node, soloPath: $soloPath, onShow: onShow, onOpen: onOpen)
                 Divider()
                 InputList(document: document, inputs: node.inputs, ownerPath: node.path,
                           sourceGraph: parent(of: node.path), isReadOnly: isReadOnly(node), onShow: onShow)
@@ -134,7 +158,7 @@ private struct InspectedElementView: View {
     /// Included elements, and nodegraphs implementing a nodedef, can't be
     /// changed here.
     private func isReadOnly(_ node: MXNode) -> Bool {
-        node.isIncluded || (node.isNodeGraph && node.nodeDefName != nil)
+        node.isIncluded || (node.isNodeGraph && node.nodeDefName != nil && !node.isLocalDefinition)
     }
 
     /// The graph level an element is in: "NG/scale" → "NG", "SR" → "".
@@ -195,6 +219,7 @@ private struct NodeHeader: View {
     let node: MXNode
     @Binding var soloPath: String?
     let onShow: (String) -> Void
+    let onOpen: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -229,6 +254,16 @@ private struct NodeHeader: View {
                     // needs instead of being cut off.
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // A node of a definition made here (M4c1): open its body.
+            if !node.isNodeGraph, let nodeDef = node.nodeDefName,
+               let implementation = document.content.implementation(of: nodeDef) {
+                Button("Edit Definition", systemImage: "shippingbox") {
+                    onOpen(implementation)
+                }
+                .controlSize(.small)
+                .help("Open the nodegraph that defines \(node.category) (or double-click the node). "
+                    + "Changes apply to every node of it.")
+            }
             // Solo (M3d): the node alone in the viewport, or back to the
             // material. For every node with a swatch, and materials.
             if SwatchPlan.shaderPath(for: node) != nil {
@@ -256,24 +291,47 @@ private struct NodeHeader: View {
                 WorkingSpaceMenu(document: document, path: node.path,
                                  isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
+                // A definition made here (M4c1) has editable inputs; its
+                // outputs are fixed, as its nodes' connections rely on them.
                 GraphPortList(document: document, graph: node, kind: .input,
-                              isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                              isReadOnly: node.isIncluded || (node.nodeDefName != nil && !node.isLocalDefinition))
                     .padding(.top, 4)
                 GraphPortList(document: document, graph: node, kind: .output,
                               isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
+                if node.isLocalDefinition {
+                    DefinitionSettings(document: document, graph: node, onOpen: onOpen)
+                        .padding(.top, 4)
+                } else if !node.isIncluded, node.nodeDefName == nil, !node.path.contains("/") {
+                    Button("Make Node Definition…", systemImage: "shippingbox") {
+                        isMakingDefinition = true
+                    }
+                    .controlSize(.small)
+                    .disabled(node.outputs.isEmpty)
+                    .help(node.outputs.isEmpty ? "Add an output first: a node made from this graph would give nothing"
+                                               : "Make this nodegraph a kind of node, listed in the Library, with its inputs and outputs")
+                    .padding(.top, 4)
+                }
             }
             if node.isIncluded {
                 Label("From an included file: read-only", systemImage: "lock")
                     .font(.caption)
                     .foregroundStyle(.orange)
-            } else if node.isNodeGraph, let nodeDef = node.nodeDefName {
+            } else if node.isNodeGraph, let nodeDef = node.nodeDefName, !node.isLocalDefinition {
                 Label("Implements \(nodeDef): its inputs are defined there", systemImage: "lock")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
+        // SWIFT: `.sheet(isPresented:)` shows a modal sheet over the window
+        // while the binding is true; the sheet sets it back to close.
+        .sheet(isPresented: $isMakingDefinition) {
+            NodeDefinitionSheet(document: document, graph: node, onShow: onShow)
+        }
     }
+
+    /// True while the Make Node Definition sheet is open.
+    @State private var isMakingDefinition: Bool = false
 
     /// "open_pbr_surface · ND_open_pbr_surface_surfaceshader".
     private var subtitle: String {
@@ -312,6 +370,162 @@ private struct NodeHeader: View {
         document.edit("Rename \(node.name)") { content in
             let newPath: String = try content.renameNode(at: path, to: name)
             onShow(newPath)
+        }
+    }
+}
+
+// MARK: - Node definitions (M4c1)
+
+/// "Make Node Definition…": names and describes the kind of node a
+/// nodegraph becomes. The node's name fills in the definition's, until the
+/// user edits that.
+private struct NodeDefinitionSheet: View {
+    let document: MaterialXDocument
+    let graph: MXNode
+    let onShow: (String) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var spec: MXNodeDefSpec
+    /// True once the definition's name was typed, not derived.
+    @State private var nameEdited: Bool = false
+
+    init(document: MaterialXDocument, graph: MXNode, onShow: @escaping (String) -> Void) {
+        self.document = document
+        self.graph = graph
+        self.onShow = onShow
+        // SWIFT: `_spec = State(initialValue:)` sets a `@State` property's
+        // first value from an init argument (see SWIFT_NOTES).
+        _spec = State(initialValue: MXNodeDefSpec.suggested(for: graph))
+    }
+
+    /// The node groups offered: the Library's, in its order.
+    private static let groups: [String] = ["texture2d", "texture3d", "procedural2d", "procedural3d", "procedural",
+                                           "adjustment", "compositing", "math", "channel", "conditional",
+                                           "geometric", "pbr", "shader"]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Make “\(graph.name)” a Node Definition")
+                .font(.headline)
+            Text("The nodegraph becomes a kind of node, listed in the Library under its group. Its inputs and outputs are the "
+                + "graph's, and the values its inputs have now become their defaults. Where the graph is used, a node of "
+                + "the new kind takes its place.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            // SWIFT: `Form` lays labelled controls out in two columns.
+            Form {
+                TextField("Node", text: Binding(get: { spec.node }, set: { node in
+                    spec.node = node
+                    if !nameEdited {
+                        spec.name = MXNodeDefSpec.nodeDefName(for: node, outputs: graph.outputs)
+                    }
+                }), prompt: Text("my_tiles"))
+                .help("The node's name, which its nodes are written as: letters, digits and _")
+                TextField("Definition", text: Binding(get: { spec.name }, set: { spec.name = $0; nameEdited = true }))
+                    .help("The nodedef's name; by convention ND_<node>_<type>")
+                Picker("Group", selection: $spec.nodeGroup) {
+                    Text("None").tag("")
+                    ForEach(Self.groups, id: \.self) { group in
+                        Text(group).tag(group)
+                    }
+                }
+                .help("Where the Library lists it (nodegroup)")
+                TextField("Version", text: $spec.version, prompt: Text("optional, such as 1.0"))
+                TextField("Description", text: $spec.documentation, prompt: Text("What the node does"), axis: .vertical)
+                    .lineLimit(2...4)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button("Make Definition") {
+                    make()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(spec.node.isEmpty || spec.name.isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+    }
+
+    /// Makes the definition as one undo step, and shows the node that took
+    /// the graph's place, if any. A refusal (a taken name) is shown by
+    /// `edit`, and the sheet stays open to fix it.
+    private func make() {
+        let path: String = graph.path
+        let spec: MXNodeDefSpec = spec
+        let onShow = onShow
+        var succeeded: Bool = false
+        document.edit("Make Node Definition \(spec.node)") { content in
+            let made = try content.makeNodeDefinition(from: path, as: spec)
+            succeeded = true
+            if let instance = made.instance {
+                onShow(instance)
+            }
+        }
+        if succeeded {
+            dismiss()
+        }
+    }
+}
+
+/// A definition made in this document: its name and kind, and its group,
+/// version and description, editable. Its inputs are edited like a
+/// nodegraph's (above); its outputs are fixed.
+private struct DefinitionSettings: View {
+    let document: MaterialXDocument
+    let graph: MXNode
+    let onOpen: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Definition")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text("\(graph.nodeDefName ?? "") defines the node shown in the Library; changes apply to every node of it.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            field("Group", .nodeGroup, value: graph.nodeGroup, prompt: "texture2d")
+            field("Version", .version, value: graph.nodeDefVersion, prompt: "1.0")
+            field("Description", .documentation, value: graph.documentation, prompt: "What the node does")
+            Button("Delete Definition", systemImage: "trash", role: .destructive) {
+                deleteDefinition()
+            }
+            .controlSize(.small)
+            .help("Remove the definition and this nodegraph; only once no node uses it")
+        }
+        .font(.callout)
+    }
+
+    /// Removes the definition and its graph, as one step, and goes back to
+    /// the document's level. Refused (and said why) while nodes use it.
+    private func deleteDefinition() {
+        let path: String = graph.path
+        let onOpen = onOpen
+        document.edit("Delete Definition \(graph.nodeDefName ?? graph.name)") { content in
+            try content.removeNodeDefinition(implementedBy: path)
+            onOpen("")
+        }
+    }
+
+    private func field(_ title: String, _ attribute: MXNodeDefAttribute, value: String?, prompt: String) -> some View {
+        HStack(spacing: 8) {
+            Text(title)
+                .frame(width: 90, alignment: .leading)
+                .foregroundStyle(.secondary)
+            CommitTextField(text: value ?? "", prompt: prompt) { newValue in
+                let path: String = graph.path
+                let trimmed: String = newValue.trimmingCharacters(in: .whitespaces)
+                document.edit("Set \(title) of \(graph.nodeDefName ?? graph.name)") { content in
+                    try content.setNodeDef(attribute, to: trimmed.isEmpty ? nil : trimmed, of: path)
+                }
+            }
+            .textFieldStyle(.roundedBorder)
         }
     }
 }

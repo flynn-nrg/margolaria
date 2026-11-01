@@ -194,6 +194,12 @@ struct NodeInfo {
     /// The nodedef's `doc` attribute: what the node does. Empty without one.
     std::string doc;
     bool isNodeGraph = false;
+    /// For a nodegraph: true if it implements a nodedef defined in this
+    /// document (not the libraries, not an included file). Its inputs,
+    /// defaults and metadata are then the nodedef's, and edited here (M4c1).
+    bool isLocalDefinition = false;
+    /// The nodedef's `version` ("1.0"), if it has one.
+    std::string nodeDefVersion;
     /// True for an element that came from an `xi:include`d file. Such
     /// elements are read-only: saving writes the include back as a
     /// reference, so changes to them would be lost.
@@ -288,6 +294,20 @@ struct NodeDefSummary {
 /// A list of strings, such as element names. Swift can't name a C++
 /// template instantiation itself, only an alias for one.
 using StringVector = std::vector<std::string>;
+
+/// What a new node definition is called and how it is described (M4c1).
+struct NodeDefSpec {
+    /// The node's category, which nodes of it are written as: "my_tiles".
+    std::string node;
+    /// The nodedef's name: "ND_my_tiles_color3".
+    std::string name;
+    /// `nodegroup`: "texture2d", "pbr", ... Empty for none.
+    std::string nodeGroup;
+    /// `version`, such as "1.0"; empty for none.
+    std::string version;
+    /// `doc`: what the node does.
+    std::string doc;
+};
 
 /// The MaterialX standard data libraries: stdlib, pbrlib, bxdf and the rest.
 /// These hold the node definitions (nodedefs) that documents refer to. They
@@ -482,7 +502,8 @@ public:
     bool changeNodeDef(const std::string& path, const std::string& nodeDefName, std::string& errorMessage);
 
     /// Removes the node or nodegraph at `path`, and disconnects everything
-    /// that was connected to it.
+    /// that was connected to it. Refused for a nodegraph implementing a
+    /// nodedef (see removeNodeDefinition).
     bool removeNode(const std::string& path, std::string& errorMessage);
 
     /// Renames the node or nodegraph at `path`, updating the connections
@@ -581,6 +602,29 @@ public:
     /// `enumvalues` with it).
     bool setInputMetadata(const std::string& graphPath, const std::string& inputName, const std::string& attribute,
                           const std::string& value, std::string& errorMessage);
+
+    // --- Node definitions (M4c1) ----------------------------------------------
+
+    /// Makes the top-level nodegraph at `graphPath` the implementation of a
+    /// new nodedef described by `spec`, whose inputs and outputs are the
+    /// graph's (the inputs' values as defaults, with their metadata).
+    /// Where the graph was used (read, or its inputs connected), a node of
+    /// the new kind takes its place and name; the graph is renamed
+    /// "NG_<node>". Refused for a name that is taken or a standard node's,
+    /// and for a graph without outputs. Sets `nodeDefName`, and
+    /// `instancePath` to the new node's path ("" if the graph was unused).
+    bool makeNodeDefinition(const std::string& graphPath, const NodeDefSpec& spec, std::string& nodeDefName,
+                            std::string& instancePath, std::string& errorMessage);
+
+    /// Removes the nodedef the nodegraph at `graphPath` implements (if it
+    /// is in this document) and the graph. Refused while any node is of it.
+    bool removeNodeDefinition(const std::string& graphPath, std::string& errorMessage);
+
+    /// Sets `nodegroup`, `doc` or `version` (with `isdefaultversion`) of the
+    /// nodedef the nodegraph at `graphPath` implements, if it is in this
+    /// document; "" removes it.
+    bool setNodeDefAttribute(const std::string& graphPath, const std::string& attribute, const std::string& value,
+                             std::string& errorMessage);
 
     /// The nodes and nodegraphs `names` of the graph at `parentPath`, as a
     /// small MaterialX document (`xml`), for the pasteboard: connections

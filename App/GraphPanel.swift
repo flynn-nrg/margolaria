@@ -64,6 +64,11 @@
 // to the left of its node, onto empty canvas, makes it one of the graph's
 // inputs (as the inspector's Promote does).
 //
+// Definitions (M4c1): a nodegraph implementing a definition isn't drawn on
+// the top-level canvas: it is the body of a kind of node, which nothing
+// reads directly. Double-clicking a node of a definition made in this
+// document opens it, and the breadcrumb says "<node> (definition)".
+//
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
 // holding view state, closures capturing a binding, `.dropDestination`,
@@ -174,7 +179,8 @@ struct GraphPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            BreadcrumbBar(path: $levelPath, showsPreviews: $showsPreviews, canPreview: document.swatches != nil,
+            BreadcrumbBar(path: $levelPath, definitions: definitionTitles, showsPreviews: $showsPreviews,
+                          canPreview: document.swatches != nil,
                           onArrange: level.map { shown in { arrange(shown) } })
             Divider()
             if let level {
@@ -296,11 +302,25 @@ struct GraphPanel: View {
         }
     }
 
+    /// The breadcrumb's names for implementations of definitions, by path:
+    /// "checkered_sphere (definition)".
+    private var definitionTitles: [String: String] {
+        let nodes: [MXNode] = (try? document.content.graph(at: "").nodes) ?? []
+        var titles: [String: String] = [:]
+        for node in nodes where node.isNodeGraph {
+            if let nodeDef = node.nodeDefName {
+                titles[node.path] = "\(document.catalog.definition(named: nodeDef)?.node ?? nodeDef) (definition)"
+            }
+        }
+        return titles
+    }
+
     /// Builds the canvas for `levelPath` from the document.
     private func rebuild() {
         let mxGraph: MXGraph
         do {
-            mxGraph = try document.content.graph(at: levelPath)
+            // Implementations of definitions aren't part of the graph (M4c1).
+            mxGraph = try document.content.graph(at: levelPath).withoutImplementations()
         } catch {
             level = nil
             failure = String(describing: error)
@@ -328,10 +348,17 @@ struct GraphPanel: View {
         // by the level) holds the closure, so the closure must not hold the
         // level strongly.
         newLevel.controller.onOpenNode = { [weak newLevel] id in
-            guard let newLevel, newLevel.graph.model.nodes[id].category == .nodeGraph else {
+            guard let newLevel else {
                 return
             }
-            levelPath = newLevel.graph.elementPaths[id]
+            let path: String = newLevel.graph.elementPaths[id]
+            if newLevel.graph.model.nodes[id].category == .nodeGraph {
+                levelPath = path
+            } else if let nodeDef = newLevel.source.nodes.first(where: { $0.path == path })?.nodeDefName,
+                      let implementation = document.content.implementation(of: nodeDef) {
+                // A node of a definition made here opens its implementation.
+                levelPath = implementation
+            }
         }
         newLevel.controller.onNavigateUp = {
             levelPath = BreadcrumbBar.parent(of: levelPath)
@@ -783,6 +810,8 @@ struct GraphPanel: View {
 /// the swatches' toggle.
 private struct BreadcrumbBar: View {
     @Binding var path: String
+    /// Names to show for implementations of definitions, by path.
+    let definitions: [String: String]
     @Binding var showsPreviews: Bool
     /// False when swatches can't be drawn at all: the toggle is disabled.
     let canPreview: Bool
@@ -799,10 +828,11 @@ private struct BreadcrumbBar: View {
                 Image(systemName: "chevron.right")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
-                crumb(parts[i], target: parts[0...i].joined(separator: "/"))
+                let target: String = parts[0...i].joined(separator: "/")
+                crumb(definitions[target] ?? parts[i], target: target)
             }
             Spacer()
-            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition made here, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

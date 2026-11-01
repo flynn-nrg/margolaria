@@ -227,6 +227,12 @@ public struct MXNode: Identifiable, Hashable, Sendable {
     public let documentation: String?
     /// True for a nodegraph shown as a node.
     public let isNodeGraph: Bool
+    /// True for a nodegraph that implements a nodedef defined in this
+    /// document (M4c1): its inputs are the nodedef's, and can be changed
+    /// here, unlike those of a nodedef from the libraries or an include.
+    public let isLocalDefinition: Bool
+    /// The nodedef's `version`, such as "1.0"; nil without one.
+    public let nodeDefVersion: String?
     /// True if the node came from an `xi:include`d file: read-only, because
     /// saving writes the include back as a reference.
     public let isIncluded: Bool
@@ -252,6 +258,8 @@ public struct MXNode: Identifiable, Hashable, Sendable {
         nodeGroup = node.nodeGroup.swiftString.nonEmpty
         documentation = node.doc.swiftString.nonEmpty
         isNodeGraph = node.isNodeGraph
+        isLocalDefinition = node.isLocalDefinition
+        nodeDefVersion = node.nodeDefVersion.swiftString.nonEmpty
         isIncluded = node.isIncluded
         // SWIFT: The ternary operator works as in C. `CGFloat(...)` converts
         // the C++ `float` (Swift `Float`, 32 bits) to Core Graphics' 64-bit
@@ -276,6 +284,23 @@ public struct MXGraph: Hashable, Sendable {
     /// The node called `name`, or nil.
     public func node(named name: String) -> MXNode? {
         nodes.first(where: { $0.name == name })
+    }
+
+    /// The same level without the nodegraphs that implement a nodedef
+    /// (M4c1): they are the body of a kind of node, not part of this graph,
+    /// and nothing may read them. The canvas leaves them out; double-
+    /// clicking a node of the kind opens one.
+    public func withoutImplementations() -> MXGraph {
+        MXGraph(path: path, nodes: nodes.filter { !($0.isNodeGraph && $0.nodeDefName != nil) },
+                interfaceInputs: interfaceInputs, outputs: outputs)
+    }
+
+    /// A level from its parts (for ``withoutImplementations()``).
+    private init(path: String, nodes: [MXNode], interfaceInputs: [MXPort], outputs: [MXPort]) {
+        self.path = path
+        self.nodes = nodes
+        self.interfaceInputs = interfaceInputs
+        self.outputs = outputs
     }
 
     /// Converts the bridge's C++ struct.

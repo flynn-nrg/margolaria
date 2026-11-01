@@ -163,9 +163,14 @@ struct ContentView: View {
                         if showsInspector {
                             // Clicking a connection, or renaming, shows that
                             // node on the canvas, selected.
-                            InspectorPanel(document: document, selectedPath: canvasSelection, soloPath: $soloPath) { path in
-                                focus = path
-                            }
+                            InspectorPanel(document: document, selectedPath: canvasSelection, soloPath: $soloPath,
+                                           onShow: { path in focus = path }, levelPath: graphPath,
+                                           onOpen: { path in
+                                               if viewMode == .text {
+                                                   viewMode = .split
+                                               }
+                                               graphPath = path
+                                           })
                             .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)
                         }
                     }
