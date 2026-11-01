@@ -125,6 +125,9 @@ public struct MXPort: Hashable, Sendable {
     public let inheritedColorSpace: String?
     /// How the inspector shows the input: label, ranges, choices, help.
     public let ui: MXPortUI
+    /// The `xpos`/`ypos` saved on a nodegraph's own input or output, which
+    /// the canvas draws as a small node; nil if none (and for node inputs).
+    public let position: CGPoint?
 
     /// The kind of value, which decides the inspector's widget.
     public var valueType: MXValueType {
@@ -146,6 +149,7 @@ public struct MXPort: Hashable, Sendable {
         activeColorSpace = port.activeColorSpace.swiftString.nonEmpty
         inheritedColorSpace = port.inheritedColorSpace.swiftString.nonEmpty
         ui = MXPortUI(port)
+        position = port.hasPosition ? CGPoint(x: CGFloat(port.xpos), y: CGFloat(port.ypos)) : nil
     }
 
     /// Turns a filename value into a file URL: absolute paths as they are,

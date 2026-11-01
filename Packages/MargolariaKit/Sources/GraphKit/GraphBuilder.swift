@@ -13,7 +13,13 @@
 //
 // Nodes with a saved position (`xpos`/`ypos`) are placed there; the
 // others get position zero, and `positioned` says which are which, so that
-// GraphAutoLayout only places the rest (see `layout()`).
+// GraphAutoLayout only places the rest (see `layout()`). A nodegraph's own
+// inputs and outputs can have positions too. When they don't but the
+// nodes do (a graph made by collapsing nodes, M4a), the inputs go to the
+// left of the nodes and the outputs to the right, not where auto-layout
+// would put them among nodes it didn't place. Inputs that only exist in a
+// nodedef (a graph implementing one) can't hold a position: they are
+// locked.
 //
 // Units: MaterialX's Graph Editor stores positions in node sizes (its nodes
 // are 138 × 116 points). Our nodes are 220 points wide, so one unit is 220
@@ -73,10 +79,35 @@ public struct DocumentGraph: Sendable {
         for id in model.nodes.indices where !positioned.contains(id) {
             model.nodes[id].position = laidOut.nodes[id].position
         }
+        placeInterface()
         // Auto-layout never overlaps nodes; saved positions can, with
         // nodes taller than when they were saved (M3c).
         if !positioned.isEmpty {
             GraphAutoLayout.separate(&model)
+        }
+    }
+
+    /// Puts the graph's own inputs and outputs that have no saved position
+    /// beside the nodes that do: inputs in a column on their left, outputs
+    /// on their right, centred on them. Only when some nodes have saved
+    /// positions; otherwise auto-layout has placed everything together.
+    private mutating func placeInterface() {
+        let placed: [CGRect] = positioned.filter { kinds[$0] == .node }.map { GraphLayout.frame(of: model.nodes[$0]) }
+        guard let first = placed.first else {
+            return
+        }
+        // SWIFT: `reduce` with `union` grows a rectangle around them all.
+        let bounds: CGRect = placed.dropFirst().reduce(first) { $0.union($1) }
+        let gap: CGFloat = GraphLayout.nodeWidth / 2
+        for (kind, x) in [(ElementKind.interfaceInput, bounds.minX - gap - GraphLayout.nodeWidth),
+                          (ElementKind.output, bounds.maxX + gap)] {
+            let ids: [Int] = model.nodes.indices.filter { kinds[$0] == kind && !positioned.contains($0) }
+            let heights: [CGFloat] = ids.map { GraphLayout.frame(of: model.nodes[$0]).height + GraphLayout.rowHeight }
+            var y: CGFloat = bounds.midY - heights.reduce(0, +) / 2
+            for (id, height) in zip(ids, heights) {
+                model.nodes[id].position = CGPoint(x: x, y: y)
+                y += height
+            }
         }
     }
 
@@ -111,11 +142,14 @@ public enum GraphBuilder {
         for input in graph.interfaceInputs {
             let id: Int = nodes.count
             interfaceIndex[input.name] = id
-            nodes.append(GraphNode(id: id, title: input.name, category: .graphInterface, position: .zero,
+            nodes.append(GraphNode(id: id, title: input.name, category: .graphInterface,
+                                   position: savedPosition(input.position, id: id, in: &positioned),
                                    inputs: [],
                                    // The output row shows the input's value, or its type.
                                    outputs: [GraphPort(name: displayValue(of: input) ?? input.type, type: PortType(input.type))],
-                                   hasThumbnail: false, subtitle: "input"))
+                                   hasThumbnail: false, subtitle: "input",
+                                   // Only in the nodedef: nowhere to save a position.
+                                   isLocked: !input.isAuthored))
             paths.append(childPath(graph.path, input.name))
             kinds.append(.interfaceInput)
         }
@@ -138,15 +172,9 @@ public enum GraphBuilder {
             let isExpanded: Bool = expanded.contains(node.path) && !unset.isEmpty
             let shown: [MXPort] = isExpanded ? node.inputs : node.inputs.filter(isSet)
             shownInputs[id] = shown
-            var position: CGPoint = .zero
-            if let saved = node.position {
-                position = CGPoint(x: saved.x * DocumentGraph.pointsPerUnit.width,
-                                   y: saved.y * DocumentGraph.pointsPerUnit.height)
-                positioned.insert(id)
-            }
             nodes.append(GraphNode(id: id, title: node.name,
                                    category: node.isNodeGraph ? .nodeGraph : NodeCategory(nodeGroup: node.nodeGroup),
-                                   position: position,
+                                   position: savedPosition(node.position, id: id, in: &positioned),
                                    inputs: shown.map { port(for: $0) },
                                    outputs: node.outputs.map { GraphPort(name: $0.name, type: PortType($0.type)) },
                                    hasThumbnail: hasThumbnail(node),
@@ -162,7 +190,8 @@ public enum GraphBuilder {
         // 3. The level's <output> elements: small nodes with one input.
         for output in graph.outputs {
             let id: Int = nodes.count
-            nodes.append(GraphNode(id: id, title: output.name, category: .graphInterface, position: .zero,
+            nodes.append(GraphNode(id: id, title: output.name, category: .graphInterface,
+                                   position: savedPosition(output.position, id: id, in: &positioned),
                                    inputs: [GraphPort(name: output.type, type: PortType(output.type))],
                                    outputs: [],
                                    hasThumbnail: false, subtitle: "output"))
@@ -223,6 +252,16 @@ public enum GraphBuilder {
 
         return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, kinds: kinds,
                              graphPath: graph.path, positioned: positioned)
+    }
+
+    /// A saved position (MaterialX units) in canvas points, noting `id` in
+    /// `positioned`; zero for none, for auto-layout to fill in.
+    static func savedPosition(_ saved: CGPoint?, id: Int, in positioned: inout Set<Int>) -> CGPoint {
+        guard let saved else {
+            return .zero
+        }
+        positioned.insert(id)
+        return CGPoint(x: saved.x * DocumentGraph.pointsPerUnit.width, y: saved.y * DocumentGraph.pointsPerUnit.height)
     }
 
     /// The canvas row for an input: its name, type and, unless connected,

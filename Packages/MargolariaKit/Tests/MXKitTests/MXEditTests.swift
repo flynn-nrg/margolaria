@@ -392,6 +392,17 @@ struct MXEditTests {
         #expect(try document.xmlString().contains(#"xpos="1.5" ypos="-2""#))
     }
 
+    @Test("A nodegraph's own inputs and outputs keep positions too")
+    func interfacePositions() throws {
+        let document = try document()
+        try document.setPosition(CGPoint(x: -2, y: 1), of: "NG/amount")
+        try document.setPosition(CGPoint(x: 5, y: 1.5), of: "NG/out")
+        let graph: MXGraph = try document.graph(at: "NG")
+        #expect(graph.interfaceInputs.first?.position == CGPoint(x: -2, y: 1))
+        #expect(graph.outputs.first?.position == CGPoint(x: 5, y: 1.5))
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+    }
+
     @Test("Copies are independent, and restore puts one back")
     func copies() throws {
         let document = try document()
