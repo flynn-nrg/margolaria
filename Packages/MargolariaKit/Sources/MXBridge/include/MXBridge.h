@@ -167,6 +167,12 @@ struct PortInfo {
     /// `unit` and `unittype` ("meter", "distance"), for distance and angle inputs.
     std::string unit;
     std::string unitType;
+    /// `xpos`/`ypos`: where a nodegraph's own input or output is drawn
+    /// inside the graph, as MaterialX's Graph Editor writes them (and the
+    /// canvas, since the fix after M4a). Unset for most.
+    bool hasPosition = false;
+    float xpos = 0;
+    float ypos = 0;
 };
 
 /// One node in a graph, or one nodegraph shown as a node in its parent graph.

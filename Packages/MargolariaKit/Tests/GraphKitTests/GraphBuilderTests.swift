@@ -286,4 +286,64 @@ struct CanvasEditingTests {
         // The document keeps its positions.
         #expect(try document.graph().nodes[1].position == CGPoint(x: 0, y: 1))
     }
+
+    @Test("A graph's own inputs and outputs: saved positions are used; without, they go beside positioned nodes")
+    func interfacePositions() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodegraph name="NG">
+                <input name="amount" type="float" value="0.5" />
+                <input name="placed" type="float" value="1" xpos="-3" ypos="2" />
+                <multiply name="scale" type="float" xpos="4" ypos="1">
+                  <input name="in1" type="float" interfacename="amount" />
+                  <input name="in2" type="float" interfacename="placed" />
+                </multiply>
+                <add name="offset" type="float" xpos="6" ypos="1">
+                  <input name="in1" type="float" nodename="scale" />
+                </add>
+                <output name="out" type="float" nodename="offset" />
+              </nodegraph>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        var graph: DocumentGraph = GraphBuilder.build(try document.graph(at: "NG"))
+        graph.layout()
+        let nodes: [GraphNode] = graph.model.nodes
+        func node(_ path: String) throws -> GraphNode {
+            nodes[try #require(graph.nodeIndex(forPath: path))]
+        }
+        let units = DocumentGraph.pointsPerUnit
+        #expect(try node("NG/placed").position == CGPoint(x: -3 * units.width, y: 2 * units.height))
+        #expect(graph.positioned.contains(try #require(graph.nodeIndex(forPath: "NG/placed"))))
+        // Left of the leftmost node, right of the rightmost.
+        #expect(try GraphLayout.frame(of: node("NG/amount")).maxX < GraphLayout.frame(of: node("NG/scale")).minX)
+        #expect(try GraphLayout.frame(of: node("NG/out")).minX > GraphLayout.frame(of: node("NG/offset")).maxX)
+        #expect(try !node("NG/amount").isLocked)
+    }
+
+    @Test("Inputs that only exist in a nodedef are locked: there is nowhere to save their position")
+    func nodeDefInputsLocked() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodedef name="ND_dim_float" node="dim">
+                <input name="amount" type="float" value="0.5" />
+                <output name="out" type="float" />
+              </nodedef>
+              <nodegraph name="NG_dim" nodedef="ND_dim_float">
+                <multiply name="scale" type="float">
+                  <input name="in1" type="float" interfacename="amount" />
+                </multiply>
+                <output name="out" type="float" nodename="scale" />
+              </nodegraph>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        let graph: DocumentGraph = GraphBuilder.build(try document.graph(at: "NG_dim"))
+        let amount: Int = try #require(graph.nodeIndex(forPath: "NG_dim/amount"))
+        #expect(graph.model.nodes[amount].isLocked)
+        // The graph's own output is an element: it can move.
+        #expect(try !graph.model.nodes[#require(graph.nodeIndex(forPath: "NG_dim/out"))].isLocked)
+    }
 }

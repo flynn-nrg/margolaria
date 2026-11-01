@@ -354,7 +354,8 @@ std::vector<ElementSummary> Document::shadeableElements() const {
 namespace {
 
 /// The `xpos`/`ypos` attributes, if both are present and numeric.
-void ReadPosition(const mx::ElementPtr& element, NodeInfo& info) {
+template <typename Info>
+void ReadPosition(const mx::ElementPtr& element, Info& info) {
     const std::string x = element->getAttribute("xpos");
     const std::string y = element->getAttribute("ypos");
     if (x.empty() || y.empty()) {
@@ -476,6 +477,7 @@ PortInfo DescribePort(const mx::PortElementPtr& port) {
     info.activeColorSpace = port->getActiveColorSpace();
     info.inheritedColorSpace = port->getParent()->getActiveColorSpace();
     MergeUIMetadata(port, info);
+    ReadPosition(port, info);
     return info;
 }
 
