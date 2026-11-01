@@ -208,7 +208,24 @@ public final class MXDocument {
         return xml
     }
 
-    /// The preview text (``previewXMLString()``) with a material added
+    /// The preview text (``previewXMLString()``) for Storm, the viewport's
+    /// renderer: nodegraphs Storm would draw wrong are ungrouped (their
+    /// inputs read nodes, nodes other than shaders read them, or they hold
+    /// a shader: OpenUSD's MaterialX reader loses those connections). The
+    /// materials compute the same; only the paths of the nodes in those
+    /// graphs differ, so swatches, which draw nodes by path, use the
+    /// preview text.
+    ///
+    /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
+    public func viewportXMLString() throws -> String {
+        let xml = handle.writeForViewport().swiftString
+        guard !xml.isEmpty else {
+            throw MXError.writeFailed
+        }
+        return xml
+    }
+
+    /// The viewport's text (``viewportXMLString()``) with a material added
     /// that shows the element at `path` on its own, for the viewport's
     /// solo preview (M3d). The document itself isn't changed.
     ///

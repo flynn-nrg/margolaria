@@ -49,11 +49,22 @@
 // document. The bar's Arrange button lays the whole level out again and
 // saves the positions, as one undo step.
 //
+// Nodegraphs (M4a): Graph > Collapse into Nodegraph (⌥⌘G) puts the
+// selected nodes in a new nodegraph, keeping their connections through its
+// inputs and outputs; Ungroup puts a nodegraph's nodes back. Copy, Cut,
+// Paste and Duplicate work on canvas nodes, between levels and documents:
+// the pasteboard holds the nodes as a small MaterialX document (and as
+// plain text, so other apps get the XML). Pasted nodes go under the
+// pointer, duplicates beside the originals. Each is one undo step, and
+// selects the nodes it made. The Library's "nodegraph" row adds an empty
+// one. Nodegraphs are only at the top level: MaterialX 1.39.5 can't
+// connect to a nodegraph inside another (PLAN.md §8.2).
+//
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
 // holding view state, closures capturing a binding, `.dropDestination`,
 // `.popover` anchored to a point, `.allowsHitTesting`; `Dictionary(uniqueKeysWithValues:)`
-// (M3c).
+// (M3c); `NSPasteboard` with a type of our own (M4a).
 
 import ColorKit
 import GraphKit
@@ -136,8 +147,9 @@ struct GraphPanel: View {
     /// canvas): where it points, in view coordinates, and the wire, if any.
     @State private var searchRequest: NodeSearchRequest? = nil
 
-    /// A node to select once the level has been rebuilt: one just added.
-    @State private var pendingSelection: String? = nil
+    /// Nodes to select once the level has been rebuilt, by path: one just
+    /// added, pasted nodes, a new nodegraph.
+    @State private var pendingSelection: [String] = []
 
     /// Whether nodes show swatches (the bar's toggle), kept between launches.
     @AppStorage("showsNodePreviews") private var showsPreviews: Bool = true
@@ -360,6 +372,15 @@ struct GraphPanel: View {
             let path: String = newLevel.graph.elementPaths[id]
             soloPath = soloPath == path ? nil : path
         }
+        newLevel.controller.onCommand = { [weak newLevel] request in
+            guard let newLevel else {
+                return
+            }
+            perform(request, in: newLevel)
+        }
+        newLevel.controller.canPaste = {
+            NodePasteboard.text() != nil
+        }
         newLevel.controller.soloNode = soloPath.flatMap { graph.nodeIndex(forPath: $0) }
         newLevel.controller.onRequestNodeSearch = { request in
             searchRequest = request
@@ -396,10 +417,10 @@ struct GraphPanel: View {
             newLevel.controller.frame(.all)
         }
         framesAfterRebuild = false
-        if let path = pendingSelection, let index = graph.nodeIndex(forPath: path) {
-            newLevel.controller.selection = [index]
+        if !pendingSelection.isEmpty {
+            newLevel.controller.selection = Set(pendingSelection.compactMap { graph.nodeIndex(forPath: $0) })
         }
-        pendingSelection = nil
+        pendingSelection = []
         requestSwatches(for: newLevel)
         level = newLevel
         failure = nil
@@ -526,6 +547,17 @@ struct GraphPanel: View {
                                                                                                  for: wire))
         let positions: [String: CGPoint] = autoLayoutPositions(in: level)
         let parent: String = levelPath
+        if nodeDef == NodeDefinitionDrag.emptyNodeGraph {
+            document.edit("Add Nodegraph") { content in
+                for (path, saved) in positions {
+                    try content.setPosition(saved, of: path)
+                }
+                let path: String = try content.addNodeGraph(in: parent)
+                try content.setPosition(position, of: path)
+                pendingSelection = [path]
+            }
+            return
+        }
         let definition: MXNodeDefinition? = document.catalog.definition(named: nodeDef)
         let name: String = definition?.node ?? nodeDef
         let graph: DocumentGraph = level.graph
@@ -539,7 +571,7 @@ struct GraphPanel: View {
                 try graph.connect(newNode: path, port: port, outputCount: definition?.outputs.count ?? 1,
                                   to: wire, in: content)
             }
-            pendingSelection = path
+            pendingSelection = [path]
         }
     }
 
@@ -572,16 +604,17 @@ struct GraphPanel: View {
         }
     }
 
-    /// Deletes nodes from the document, as one step. A nodegraph's own
+    /// Deletes nodes from the document, as one step called `title` (or
+    /// "Delete …"). A nodegraph's own
     /// inputs and outputs (shown at the graph's edges) aren't nodes, and
     /// are left alone.
-    private func delete(_ ids: Set<Int>, in level: GraphLevel) {
+    private func delete(_ ids: Set<Int>, in level: GraphLevel, as title: String? = nil) {
         let nodes: [GraphNode] = ids.map { level.graph.model.nodes[$0] }.filter { $0.category != .graphInterface }
         guard !nodes.isEmpty else {
             NSSound.beep()
             return
         }
-        let name: String = nodes.count == 1 ? "Delete \(nodes[0].title)" : "Delete \(nodes.count) Nodes"
+        let name: String = title ?? (nodes.count == 1 ? "Delete \(nodes[0].title)" : "Delete \(nodes.count) Nodes")
         let paths: [String] = nodes.map { level.graph.elementPaths[$0.id] }
         level.controller.selection = []
         document.edit(name) { content in
@@ -589,6 +622,133 @@ struct GraphPanel: View {
                 try content.removeNode(at: path)
             }
         }
+    }
+
+    // MARK: Nodegraphs, copy and paste (M4a)
+
+    /// Does a menu command on the canvas's selection.
+    private func perform(_ request: GraphCommandRequest, in level: GraphLevel) {
+        // A nodegraph's own inputs and outputs, at the graph's edges, aren't
+        // nodes to copy or group.
+        let nodes: [GraphNode] = request.nodes.map { level.graph.model.nodes[$0] }
+            .filter { $0.category != .graphInterface }
+            // In file order, so copies and groups keep it.
+            .sorted { $0.id < $1.id }
+        let names: [String] = nodes.map { Self.name(of: level.graph.elementPaths[$0.id]) }
+        guard !names.isEmpty || request.command == .paste else {
+            NSSound.beep()
+            return
+        }
+        let parent: String = levelPath
+        let positions: [String: CGPoint] = autoLayoutPositions(in: level)
+        let title: String = names.count == 1 ? names[0] : "\(names.count) Nodes"
+
+        switch request.command {
+        case .copy:
+            copy(names, in: level)
+        case .cut:
+            guard copy(names, in: level) else {
+                return
+            }
+            delete(Set(nodes.map(\.id)), in: level, as: "Cut \(title)")
+        case .paste:
+            guard let xml = NodePasteboard.text() else {
+                NSSound.beep()
+                return
+            }
+            // Where the pasted nodes' middle goes: under the pointer.
+            let target: CGPoint = DocumentGraph.units(fromPoints: level.controller.newNodePosition(atView: request.location))
+            document.edit("Paste") { content in
+                try save(positions, in: content)
+                let paths: [String] = try content.paste(xml, into: parent)
+                try place(paths, in: content, around: target, from: nil)
+                pendingSelection = paths
+            }
+        case .duplicate:
+            let snapshot: MXDocument = positioned(document.content, positions)
+            document.edit("Duplicate \(title)") { content in
+                try save(positions, in: content)
+                let xml: String = try snapshot.copyNodes(names, in: parent, keepingInterface: true)
+                let paths: [String] = try content.paste(xml, into: parent)
+                // Beside the originals, down and to the right.
+                try place(paths, in: content, around: nil, from: DocumentGraph.units(fromPoints: CGPoint(x: 30, y: 30)))
+                pendingSelection = paths
+            }
+        case .collapse:
+            document.edit("Collapse into Nodegraph") { content in
+                try save(positions, in: content)
+                pendingSelection = [try content.collapse(names, in: parent)]
+            }
+        case .ungroup:
+            let path: String = level.graph.elementPaths[nodes[0].id]
+            document.edit("Ungroup \(names[0])") { content in
+                try save(positions, in: content)
+                pendingSelection = try content.ungroup(path)
+            }
+        }
+    }
+
+    /// Puts the nodes `names` of the level on the pasteboard, with the
+    /// positions the canvas shows. Returns false, having said why, if
+    /// MaterialX couldn't copy them.
+    @discardableResult
+    private func copy(_ names: [String], in level: GraphLevel) -> Bool {
+        do {
+            let xml: String = try positioned(document.content, autoLayoutPositions(in: level))
+                .copyNodes(names, in: levelPath)
+            NodePasteboard.write(xml)
+            return true
+        } catch {
+            document.presentError(error)
+            return false
+        }
+    }
+
+    /// `content` with `positions` saved, as a copy when there are any:
+    /// what is copied then has the positions the canvas shows, without
+    /// changing the document.
+    private func positioned(_ content: MXDocument, _ positions: [String: CGPoint]) -> MXDocument {
+        guard !positions.isEmpty else {
+            return content
+        }
+        let copy: MXDocument = content.copy()
+        try? save(positions, in: copy)
+        return copy
+    }
+
+    /// Saves positions (MaterialX units, by path) in `content`.
+    private func save(_ positions: [String: CGPoint], in content: MXDocument) throws {
+        for (path, position) in positions {
+            try content.setPosition(position, of: path)
+        }
+    }
+
+    /// Moves the nodes at `paths`, just pasted: their middle to `target`,
+    /// or each by `offset`. Nodes that came without a position (from
+    /// another tool) are put in a row at `target`, or beside the others.
+    private func place(_ paths: [String], in content: MXDocument, around target: CGPoint?, from offset: CGPoint?) throws {
+        let graph: MXGraph = try content.graph(at: levelPath)
+        let pasted: [MXNode] = paths.compactMap { path in graph.nodes.first(where: { $0.path == path }) }
+        let placed: [CGPoint] = pasted.compactMap(\.position)
+        // SWIFT: `reduce(_:_:)` folds a sequence into one value: here, the
+        // sum of the positions, starting from zero.
+        let sum: CGPoint = placed.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.x, y: $0.y + $1.y) }
+        let middle: CGPoint = placed.isEmpty ? .zero : CGPoint(x: sum.x / CGFloat(placed.count), y: sum.y / CGFloat(placed.count))
+        let shift: CGPoint = offset ?? CGPoint(x: (target?.x ?? 0) - middle.x, y: (target?.y ?? 0) - middle.y)
+        var row: CGPoint = target ?? CGPoint(x: middle.x, y: middle.y + 2)
+        for node in pasted {
+            if let position = node.position {
+                try content.setPosition(CGPoint(x: position.x + shift.x, y: position.y + shift.y), of: node.path)
+            } else {
+                try content.setPosition(row, of: node.path)
+                row.x += 1.5
+            }
+        }
+    }
+
+    /// The last part of a path: the element's name.
+    private static func name(of path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
     }
 
     /// Selects and frames `focus`, if it is on the level shown.
@@ -677,5 +837,41 @@ private struct BreadcrumbBar: View {
         // SWIFT: String indices aren't integers (characters vary in size),
         // so slicing uses `String.Index` values like `slash`.
         return String(path[..<slash])
+    }
+}
+
+/// The pasteboard, for canvas nodes (M4a): MaterialX text, under
+/// MaterialX's own type and as plain text.
+///
+/// SWIFT: An `enum` with no cases is a namespace: it can't be
+/// instantiated, only hold static members.
+enum NodePasteboard {
+    /// MaterialX's type identifier, as macOS declares it for .mtlx files
+    /// (and Info.plist on older macOS).
+    ///
+    /// SWIFT/AppKit: `NSPasteboard.PasteboardType` wraps a type identifier
+    /// string; any UTI can be used.
+    static let materialX = NSPasteboard.PasteboardType("io.aswf.materialx")
+
+    /// Replaces the pasteboard's contents with `xml`.
+    static func write(_ xml: String) {
+        let pasteboard: NSPasteboard = .general
+        pasteboard.clearContents()
+        pasteboard.setString(xml, forType: materialX)
+        pasteboard.setString(xml, forType: .string)
+    }
+
+    /// The MaterialX text on the pasteboard: under MaterialX's type, or
+    /// plain text that looks like a MaterialX document (copied from the
+    /// XML tab, or a text editor). Nil if there is none.
+    static func text() -> String? {
+        let pasteboard: NSPasteboard = .general
+        if let xml = pasteboard.string(forType: materialX) {
+            return xml
+        }
+        if let text = pasteboard.string(forType: .string), text.contains("<materialx") {
+            return text
+        }
+        return nil
     }
 }

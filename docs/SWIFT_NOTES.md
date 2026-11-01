@@ -93,6 +93,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `fatalError("...")` | Stop the program with a message; never returns | `abort()` | `ViewportView.swift` |
 | `async` / `await`, `Task.yield()` | A function that can suspend without blocking its thread; `yield` lets other work (UI updates) run | Coroutines; Go's `runtime.Gosched()` | `SwatchSpikeApp.swift` |
 | `reduce` | Folds a collection into one value: `xs.reduce(0, +)` | `std::accumulate` | `GraphLayout.swift` |
+| `reduce(into:)` | The same, with the value changed in place (`inout`) by the closure: no copy per element | A loop appending to an accumulator | `MXNodeGraphEdit.swift` (`stringVector`) |
 | `@objc` and `#selector` | Expose a method to the Objective-C runtime and name it for target/action, checked at compile time | `@selector(tick:)` | `GraphBenchmark.swift` |
 | A closure in a `let` | `let isSet: (MXPort) -> Bool = { ... }`, then `filter(isSet)`: a closure is a value, passed by name | A function pointer or `std::function` | `GraphBuilder.swift` |
 | `NSMenu.popUp(positioning:at:in:)` | Shows a menu built in code and returns once it closes, after the chosen item's action ran | `-popUpMenuPositioningItem:atLocation:inView:` | `GraphEventView.swift` |
@@ -131,6 +132,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Codable` | Declaring `Codable` on a struct of Codable properties makes the compiler write its encoding and decoding (JSON, property lists) | Go's `encoding/json` struct tags, without the tags | `LibraryPanel.swift` (`NodeDefinitionDrag`) |
 | `addObserver(_:selector:name:object:)` | Calls an `@objc` method of the observer for each matching notification; `object: nil` means from any sender | `-addObserver:selector:name:object:` | `MargolariaApp.swift` (colour panel) |
 | `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
+| `NSMenuItemValidation` in an extension | `validateMenuItem(_:)` enables or greys out the menu items whose actions the object receives; conforming in an extension keeps it beside its method | `-validateMenuItem:` (an informal protocol in ObjC) | `GraphEventView.swift` |
 
 ## Modules and access
 
@@ -215,6 +217,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `UTType(exportedAs:)` | A data type of our own for the pasteboard, also declared in Info.plist; `CodableRepresentation` carries a Codable value under it | `LibraryPanel.swift` |
 | `Section(isExpanded:)` | A list section the user can fold, with its open state in a binding | `LibraryPanel.swift` |
 | `.contextMenu(forSelectionType:primaryAction:)` | A list's row menu, plus the action for double-click and Return on the selected rows | `LibraryPanel.swift` |
+| `.tag` on a `List` row | Gives a row that doesn't come from a `ForEach` the ID the list's selection uses | `LibraryPanel.swift` (`NodeGraphRow`) |
+| `NSPasteboard` | `clearContents()`, then `setString(_:forType:)` once per type (our own UTI, and `.string` for other apps); `string(forType:)` reads | `GraphPanel.swift` (`NodePasteboard`) |
 | `.popover(attachmentAnchor:)` | A popover pointing at a rectangle in the view (`.rect(.rect(r))`), not the whole view | `GraphPanel.swift` (node search) |
 | `.onKeyPress` | Sees a key before the view does; `.handled` stops it, `.ignored` passes it on | `NodeSearchPopup.swift` |
 | `ScrollViewReader` | A proxy that scrolls a `ScrollView` to the child with a given `.id` | `NodeSearchPopup.swift` |
@@ -235,6 +239,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `std.string` | `std::string` in Swift. Make one with `std.string(swiftString)`; convert back with `.swiftString` (our helper) | `CxxString.swift` |
 | `std::vector` | Imported as a Swift collection, so `for x in v` works | `MXDocument.swift` |
 | C++ template instances | Swift can't write `std::vector<float>` itself; give it a name with `using FloatVector = std::vector<float>;` in the header. Imported vectors can be made from a Swift array: `FloatVector([1, 2, 3])` | `ColorBridge.h`, `ColorConverter.swift` |
+| Filling a C++ vector | `var v = mxbridge.StringVector(); v.push_back(std.string(s))`: the C++ methods, called from Swift | `MXNodeGraphEdit.swift` |
 | C++ classes are structs | Copying a Swift value copies the C++ object (copy constructor) | `MXBridge.h` |
 | `const` ↔ `mutating` | Non-const C++ methods are `mutating`, so they need a `var` | `MXDocument.swift` |
 | C++ exceptions | Can't be caught in Swift; one that escapes terminates the process. Catch them in C++. | `MXBridge.cpp` |
@@ -252,6 +257,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@Test`, `#expect`, `@Suite` | Swift Testing: a test function, a checked condition, a group of tests | `MXDocumentTests.swift` |
 | `#require` | Like `#expect`, but stops the test on failure, and unwraps an optional | `MXGraphTests.swift` |
 | Parameterized tests | `@Test(arguments: list)` runs once per element, each reported separately | `MXCorpusTests.swift` |
+| Two argument lists | `@Test(arguments: files, [false, true])` runs every combination, with one parameter per list | `StormCorpusTests.swift` (`previewTextMatchesFile`) |
 | Traits | `.serialized`, `.enabled(if:)`: change how a test or suite runs | `StormRendererTests.swift`, `MXCorpusTests.swift` |
 | `Issue.record` | Records a failure with a message, without stopping the test | `MXCorpusTests.swift` |
 | `#filePath` | The path of the current source file, like `__FILE__` | `MXCorpusTests.swift` |

@@ -27,6 +27,11 @@
 // drawn, dangling, until the app reports the search closed
 // (endNodeSearch), having added and connected a node or not.
 //
+// Menu commands (M4a): Copy, Cut, Paste, Duplicate, Collapse into
+// Nodegraph and Ungroup reach the canvas view through the responder
+// chain; the controller says which can apply to the selection, and passes
+// them to the app (onCommand).
+//
 // Introduces (SWIFT): `@Observable` classes, `@MainActor` on a type,
 // `Set`, `enum` state machines with associated values, `private(set)`,
 // matching several patterns in one `case`, a struct stored in an enum
@@ -116,6 +121,32 @@ public struct NodeSearchRequest: Equatable, Sendable {
     public init(location: CGPoint, wire: DanglingWire? = nil) {
         self.location = location
         self.wire = wire
+    }
+}
+
+/// A command on the canvas's selection, from the Edit and Graph menus
+/// (M4a). The canvas only passes it on; the app does it.
+public enum GraphCommand: Sendable {
+    /// Edit > Copy, Cut, Paste and Duplicate.
+    case copy, cut, paste, duplicate
+    /// Graph > Collapse into Nodegraph (⌥⌘G) and Ungroup Nodegraph.
+    case collapse, ungroup
+}
+
+/// A command to do, with the nodes it applies to and where the pointer is.
+public struct GraphCommandRequest: Sendable {
+    public let command: GraphCommand
+    /// The selected nodes; locked ones are left out of those that change
+    /// the graph (cut, collapse, ungroup).
+    public let nodes: Set<Int>
+    /// Where pasted nodes go, in view coordinates: the pointer, or the
+    /// middle of the view when the pointer is elsewhere (on the menu bar).
+    public let location: CGPoint
+
+    public init(command: GraphCommand, nodes: Set<Int>, location: CGPoint) {
+        self.command = command
+        self.nodes = nodes
+        self.location = location
     }
 }
 
@@ -275,6 +306,14 @@ public final class GraphCanvasController {
     /// Called on ⌥-click on a node's swatch or title bar: show it alone in
     /// the viewport, or stop if it already is (M3d).
     @ObservationIgnored public var onSoloNode: (@MainActor (Int) -> Void)? = nil
+
+    /// Called with a menu command on the selection (M4a, see
+    /// ``perform(_:at:)``).
+    @ObservationIgnored public var onCommand: (@MainActor (GraphCommandRequest) -> Void)? = nil
+
+    /// Asked whether Paste has anything to paste (the pasteboard is the
+    /// app's business). Nil: it always has.
+    @ObservationIgnored public var canPaste: (@MainActor () -> Bool)? = nil
 
     /// The size of the view showing the canvas, kept up to date by the view.
     /// Framing needs it; until the view has been laid out it is zero.
@@ -800,6 +839,43 @@ public final class GraphCanvasController {
         if !deletable.isEmpty {
             onDeleteNodes?(deletable)
         }
+    }
+
+    /// The selected nodes `command` applies to: all of them to copy, the
+    /// ones that aren't locked to change the graph; none if the command
+    /// can't apply (Ungroup needs exactly one nodegraph).
+    private func nodes(for command: GraphCommand) -> Set<Int> {
+        let unlocked: Set<Int> = selection.filter { !model.nodes[$0].isLocked }
+        switch command {
+        case .copy, .duplicate:
+            return selection
+        case .cut, .collapse:
+            return unlocked
+        case .ungroup:
+            return unlocked.count == 1 && unlocked.allSatisfy { model.nodes[$0].category == .nodeGraph } ? unlocked : []
+        case .paste:
+            return []
+        }
+    }
+
+    /// True if `command` can be done now: there are nodes for it, or, for
+    /// Paste, something to paste. Menus are enabled by this.
+    public func canPerform(_ command: GraphCommand) -> Bool {
+        if command == .paste {
+            return canPaste?() ?? true
+        }
+        return !nodes(for: command).isEmpty
+    }
+
+    /// Asks the app to do `command` (see ``onCommand``), with the pointer
+    /// at `viewPoint`. Returns false, doing nothing, if it can't be done.
+    @discardableResult
+    public func perform(_ command: GraphCommand, at viewPoint: CGPoint) -> Bool {
+        guard canPerform(command) else {
+            return false
+        }
+        onCommand?(GraphCommandRequest(command: command, nodes: nodes(for: command), location: viewPoint))
+        return true
     }
 
     /// Moves the nodes in `original` to their original position plus `delta`.

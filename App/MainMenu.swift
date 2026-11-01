@@ -11,11 +11,15 @@
 // knowing anything about documents. Items whose action nobody implements are
 // greyed out automatically.
 //
+// The Graph menu (M4a) and Edit > Duplicate act on the canvas; their
+// actions are GraphEventView's.
+//
 // Introduces (SWIFT): `#selector` with a type name (`NSDocument.save(_:)`),
 // `Selector(("name:"))` for actions with no Swift declaration, variadic
 // parameters (`Item...`), option sets (`[.command, .shift]`).
 
 import AppKit
+import GraphKit
 
 /// Builds the main menu.
 @MainActor
@@ -40,7 +44,7 @@ enum MainMenu {
         static let separator = Item("", nil)
     }
 
-    /// The whole menu bar: the app menu, File, Edit, View, Window, Help.
+    /// The whole menu bar: the app menu, File, Edit, View, Graph, Window, Help.
     static func make() -> NSMenu {
         let appName: String = ProcessInfo.processInfo.processName
         let bar = NSMenu()
@@ -96,6 +100,9 @@ enum MainMenu {
                                   Item("Cut", #selector(NSText.cut(_:)), "x"),
                                   Item("Copy", #selector(NSText.copy(_:)), "c"),
                                   Item("Paste", #selector(NSText.paste(_:)), "v"),
+                                  // On the canvas: copies the selected nodes
+                                  // next to themselves (M4a).
+                                  Item("Duplicate", #selector(GraphEventView.duplicateNodes(_:)), "d"),
                                   // On the canvas: deletes the selected nodes
                                   // (GraphEventView.delete(_:)).
                                   Item("Delete", #selector(NSText.delete(_:))),
@@ -122,6 +129,15 @@ enum MainMenu {
                                   Item("Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
                                   .separator,
                                   Item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])))
+
+        // Graph: canvas commands (M4a), handled by the canvas view
+        // (GraphEventView) when it has keyboard focus, and greyed out
+        // otherwise. "G" in capitals adds Shift.
+        bar.addItem(submenu: menu("Graph",
+                                  Item("Collapse into Nodegraph", #selector(GraphEventView.collapseIntoNodeGraph(_:)),
+                                       "g", [.command, .option]),
+                                  Item("Ungroup Nodegraph", #selector(GraphEventView.ungroupNodeGraph(_:)),
+                                       "G", [.command, .option])))
 
         // Window. Registering it as the windows menu makes AppKit list the
         // open windows at its end.

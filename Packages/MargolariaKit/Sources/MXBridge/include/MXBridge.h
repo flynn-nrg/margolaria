@@ -279,6 +279,10 @@ struct NodeDefSummary {
     std::vector<NodeDefPort> outputs;
 };
 
+/// A list of strings, such as element names. Swift can't name a C++
+/// template instantiation itself, only an alias for one.
+using StringVector = std::vector<std::string>;
+
 /// The MaterialX standard data libraries: stdlib, pbrlib, bxdf and the rest.
 /// These hold the node definitions (nodedefs) that documents refer to. They
 /// are loaded once and shared by every open document.
@@ -353,7 +357,14 @@ public:
     /// Returns "" if not loaded.
     std::string writeForPreview() const;
 
-    /// The same, with a material added that shows the element at
+    /// The same, for Storm (the viewport): nodegraphs that Storm would
+    /// draw wrong are ungrouped (their inputs read nodes, or nodes other
+    /// than shaders read them, or they hold a shader; PLAN.md §8.2). The
+    /// materials compute the same, but nodes inside those graphs have
+    /// other paths, so swatches use writeForPreview().
+    std::string writeForViewport() const;
+
+    /// writeForViewport's text, with a material added that shows the element at
     /// `elementPath` on its own (solo preview, M3d): a value through
     /// `convert` nodes into the emission of an otherwise black surface, a BSDF in a `surface`, a
     /// surface shader as it is, each in a new surfacematerial; a material
@@ -475,6 +486,71 @@ public:
 
     /// Sets the `xpos`/`ypos` attributes of the element at `path`.
     bool setPosition(const std::string& path, float x, float y, std::string& errorMessage);
+
+    // --- Nodegraphs, outputs, copy and paste (M4a) --------------------------
+
+    /// Moves the nodes called `names` at the top level of the document
+    /// into a new nodegraph there,
+    /// named `nameHint` (made unique), placed at their average position.
+    /// Connections that cross the new graph's edge go through it: an input
+    /// reading something left outside reads a new input of the graph
+    /// (named after it, one per thing read), and what reads the moved
+    /// nodes from outside reads a new output ("out", or `node_output` when
+    /// there are several). Materials can't be moved: they stay at the top
+    /// level. Nodegraphs can't be nested (`parentPath` must be "", and
+    /// `names` can't include one): MaterialX 1.39.5 can't connect to a
+    /// nodegraph inside another. Sets `newPath`.
+    bool collapseIntoNodeGraph(const std::string& parentPath, const StringVector& names, const std::string& nameHint,
+                               std::string& newPath, std::string& errorMessage);
+
+    /// The opposite: moves the nodes of the nodegraph at `path` into its
+    /// parent (renamed where their names are taken), connects them to what
+    /// the graph's inputs read or to their values, connects what read the
+    /// graph's outputs to what those read, and removes the graph. Nodes
+    /// keep the graph's working space and file prefix. Refused for a graph
+    /// that implements a nodedef. Sets `newPaths` to the nodes' new paths.
+    bool ungroupNodeGraph(const std::string& path, StringVector& newPaths, std::string& errorMessage);
+
+    /// Adds an empty nodegraph to the document (`parentPath` must be "",
+    /// see collapseIntoNodeGraph), named `nameHint` (made unique). Sets
+    /// `newPath`.
+    bool addNodeGraph(const std::string& parentPath, const std::string& nameHint, std::string& newPath,
+                      std::string& errorMessage);
+
+    /// Adds an `<output>` of `type` to the nodegraph at `graphPath`, named
+    /// `nameHint` (made unique), connected to nothing. Sets `newName`.
+    /// Ports reading the graph's only output without naming it are made to
+    /// name it, since there are now two. Refused for a graph that
+    /// implements a nodedef: its outputs are the nodedef's.
+    bool addGraphOutput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
+                        std::string& newName, std::string& errorMessage);
+
+    /// Renames the output `outputName` of the nodegraph at `graphPath`,
+    /// and what reads it by name.
+    bool renameGraphOutput(const std::string& graphPath, const std::string& outputName, const std::string& newName,
+                           std::string& errorMessage);
+
+    /// Removes the output `outputName` of the nodegraph at `graphPath`,
+    /// disconnecting what read it.
+    bool removeGraphOutput(const std::string& graphPath, const std::string& outputName, std::string& errorMessage);
+
+    /// The nodes and nodegraphs `names` of the graph at `parentPath`, as a
+    /// small MaterialX document (`xml`), for the pasteboard: connections
+    /// between them are kept, connections to anything else dropped
+    /// (except, with `keepsInterface`, to the graph's own inputs, for
+    /// pasting back in the same graph). File names are made absolute, and
+    /// the document's `colorspace` is the space their colours were in.
+    bool copyNodes(const std::string& parentPath, const StringVector& names, bool keepsInterface, std::string& xml,
+                   std::string& errorMessage) const;
+
+    /// Adds the nodes and nodegraphs of the MaterialX document `xml` (as
+    /// copyNodes writes it, or from another tool) to the graph at
+    /// `parentPath`, renamed where their names are taken. Connections to
+    /// anything that wasn't pasted are dropped; colours keep their space.
+    /// Nodegraphs are only pasted at the top level, materials too. Sets
+    /// `newPaths` to their paths, in order.
+    bool pasteNodes(const std::string& parentPath, const std::string& xml, StringVector& newPaths,
+                    std::string& errorMessage);
 
     /// The `version` attribute of the root element, such as "1.39".
     std::string documentVersion() const;

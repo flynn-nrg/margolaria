@@ -20,7 +20,10 @@
 #include <MaterialXGenShader/Shader.h>
 #include <MaterialXGenShader/ShaderStage.h>
 
+#include <algorithm>
+#include <cmath>
 #include <exception>
+#include <map>
 #include <set>
 #include <sstream>
 
@@ -594,6 +597,26 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     return info;
 }
 
+/// The file a filename input or value refers to: its value with
+/// `fileprefix` (from it or any ancestor) applied, made absolute against
+/// the folder of the file it was read from. Relative still if the
+/// document wasn't read from a file.
+std::string AbsoluteFilename(const mx::ValueElementPtr& value) {
+    mx::FilePath file(value->getResolvedValueString());
+    const std::string source = ResolvedSourceUri(value);
+    if (!file.isEmpty() && !file.isAbsolute() && !source.empty()) {
+        file = (mx::FilePath(source).getParentPath() / file).getNormalized();
+    }
+    return file.asString();
+}
+
+} // namespace
+
+namespace {
+
+/// Defined with the M4a edits below.
+void UngroupForStorm(const mx::DocumentPtr& preview);
+
 } // namespace
 
 namespace {
@@ -614,13 +637,7 @@ mx::DocumentPtr PreviewCopy(const mx::DocumentPtr& document) {
         if (!value || value->getType() != mx::FILENAME_TYPE_STRING || !value->hasValueString()) {
             continue;
         }
-        // Applies `fileprefix` from this element or any ancestor.
-        mx::FilePath file(value->getResolvedValueString());
-        const std::string source = ResolvedSourceUri(value);
-        if (!file.isEmpty() && !file.isAbsolute() && !source.empty()) {
-            file = (mx::FilePath(source).getParentPath() / file).getNormalized();
-        }
-        value->setValueString(file.asString());
+        value->setValueString(AbsoluteFilename(value));
     }
     // The prefixes are applied now; leaving them would apply them twice.
     for (const mx::ElementPtr& element : preview->traverseTree()) {
@@ -687,6 +704,19 @@ std::string Document::writeForPreview() const {
     }
 }
 
+std::string Document::writeForViewport() const {
+    if (!_impl) {
+        return {};
+    }
+    try {
+        mx::DocumentPtr preview = PreviewCopy(_impl->document);
+        UngroupForStorm(preview);
+        return WritePreview(preview);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
 bool Document::writeSoloPreview(const std::string& elementPath, SoloPreview& solo,
                                 std::string& errorMessage) const {
     if (!_impl) {
@@ -737,6 +767,7 @@ bool Document::writeSoloPreview(const std::string& elementPath, SoloPreview& sol
                 // A material is shown as it is.
                 solo.materialName = node->getName();
                 solo.outputType = type;
+                UngroupForStorm(preview);
                 solo.xml = WritePreview(preview);
                 return true;
             }
@@ -855,6 +886,7 @@ bool Document::writeSoloPreview(const std::string& elementPath, SoloPreview& sol
 
         solo.materialName = material->getName();
         solo.outputType = type;
+        UngroupForStorm(preview);
         solo.xml = WritePreview(preview);
         return true;
     } catch (const std::exception& e) {
@@ -1200,6 +1232,53 @@ std::vector<mx::PortElementPtr> SiblingPorts(const mx::ElementPtr& graph) {
     return ports;
 }
 
+/// The type of what comes out of `source` (a node or nodegraph) through
+/// its output `outputName`, or its only output for "".
+std::string SourceOutputType(const mx::ElementPtr& source, const std::string& outputName) {
+    if (mx::NodeGraphPtr nodeGraph = source->asA<mx::NodeGraph>()) {
+        std::vector<mx::OutputPtr> outputs = nodeGraph->getOutputs();
+        mx::OutputPtr output = outputName.empty() ? (outputs.size() == 1 ? outputs.front() : nullptr)
+                                                  : nodeGraph->getOutput(outputName);
+        if (!output) {
+            throw Refusal("Say which output of " + source->getName() + " to use");
+        }
+        return output->getType();
+    }
+    mx::NodePtr node = source->asA<mx::Node>();
+    if (!node) {
+        throw Refusal(source->getName() + " is not a node or nodegraph");
+    }
+    if (outputName.empty() && node->getType() != mx::MULTI_OUTPUT_TYPE_STRING) {
+        return node->getType();
+    }
+    mx::NodeDefPtr nodeDef = node->getNodeDef();
+    mx::OutputPtr output = nodeDef ? nodeDef->getActiveOutput(outputName) : nullptr;
+    if (!output) {
+        throw Refusal(source->getName() + " has no output " + outputName);
+    }
+    return output->getType();
+}
+
+/// Sets `xpos`/`ypos` on `element`, with three decimals: a thousandth of
+/// a node is far below a pixel, and shorter numbers keep the file tidy.
+void SetPosition(const mx::ElementPtr& element, float x, float y) {
+    auto format = [](float value) {
+        std::ostringstream stream;
+        stream.setf(std::ios::fixed);
+        stream.precision(3);
+        stream << value;
+        std::string text = stream.str();
+        // "1.500" → "1.5", "2.000" → "2".
+        text.erase(text.find_last_not_of('0') + 1);
+        if (!text.empty() && text.back() == '.') {
+            text.pop_back();
+        }
+        return text == "-0" ? std::string("0") : text;
+    };
+    element->setAttribute(mx::Element::XPOS_ATTRIBUTE, format(x));
+    element->setAttribute(mx::Element::YPOS_ATTRIBUTE, format(y));
+}
+
 /// Runs an edit on `document`, turning any exception into `false` and a
 /// message. Every edit function below is one call to this, with the edit
 /// as a lambda.
@@ -1275,28 +1354,7 @@ bool Document::connectInput(const std::string& targetPath, const std::string& in
             throw Refusal("No node or nodegraph " + sourceName + " next to " + targetPath);
         }
 
-        // The type that comes out of the source.
-        std::string sourceType;
-        if (mx::NodeGraphPtr nodeGraph = source->asA<mx::NodeGraph>()) {
-            std::vector<mx::OutputPtr> outputs = nodeGraph->getOutputs();
-            mx::OutputPtr output = sourceOutput.empty() ? (outputs.size() == 1 ? outputs.front() : nullptr)
-                                                        : nodeGraph->getOutput(sourceOutput);
-            if (!output) {
-                throw Refusal("Say which output of " + sourceName + " to use");
-            }
-            sourceType = output->getType();
-        } else {
-            mx::NodePtr node = source->asA<mx::Node>();
-            sourceType = node->getType();
-            if (!sourceOutput.empty() || sourceType == mx::MULTI_OUTPUT_TYPE_STRING) {
-                mx::NodeDefPtr nodeDef = node->getNodeDef();
-                mx::OutputPtr output = nodeDef ? nodeDef->getActiveOutput(sourceOutput) : nullptr;
-                if (!output) {
-                    throw Refusal(sourceName + " has no output " + sourceOutput);
-                }
-                sourceType = output->getType();
-            }
-        }
+        const std::string sourceType = SourceOutputType(source, sourceOutput);
 
         mx::PortElementPtr port = Port(target, inputName, true);
         if (port->getType() != sourceType) {
@@ -1474,24 +1532,651 @@ bool Document::renameNode(const std::string& path, const std::string& newName,
 
 bool Document::setPosition(const std::string& path, float x, float y, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::ElementPtr element = EditableElement(document, path);
-        // Three decimals: a thousandth of a node is far below a pixel, and
-        // shorter numbers keep the file tidy.
-        auto format = [](float value) {
-            std::ostringstream stream;
-            stream.setf(std::ios::fixed);
-            stream.precision(3);
-            stream << value;
-            std::string text = stream.str();
-            // "1.500" → "1.5", "2.000" → "2".
-            text.erase(text.find_last_not_of('0') + 1);
-            if (!text.empty() && text.back() == '.') {
-                text.pop_back();
+        SetPosition(EditableElement(document, path), x, y);
+    });
+}
+
+// --- Nodegraphs, outputs, copy and paste (M4a) -----------------------------
+
+namespace {
+
+/// The graph at `path`: the document for "", or a nodegraph that may be
+/// edited.
+mx::GraphElementPtr EditableGraph(const mx::DocumentPtr& document, const std::string& path) {
+    mx::ElementPtr element = path.empty() ? mx::ElementPtr(document) : EditableElement(document, path);
+    mx::GraphElementPtr graph = element->asA<mx::GraphElement>();
+    if (!graph || !(graph->isA<mx::Document>() || graph->isA<mx::NodeGraph>())) {
+        throw Refusal(path + " is not a nodegraph");
+    }
+    return graph;
+}
+
+/// Refuses to put a nodegraph inside `graph` unless it is the document.
+/// MaterialX 1.39.5 can't connect to a nodegraph inside another: its
+/// validation finds no output for the connection ("No output found for
+/// port connection", "Invalid port connection"; PLAN.md §8.2).
+void RequireTopLevel(const mx::GraphElementPtr& graph) {
+    if (!graph->isA<mx::Document>()) {
+        throw Refusal("Nodegraphs can only be at the top level of the document: MaterialX can't connect "
+                      "to a nodegraph inside another");
+    }
+}
+
+/// The node or nodegraph `name` in `graph`, which must not be a material:
+/// materials stay at the top level of a document.
+mx::ElementPtr MovableNode(const mx::GraphElementPtr& graph, const std::string& name) {
+    mx::ElementPtr element = graph->getChild(name);
+    if (!element || !(element->isA<mx::Node>() || element->isA<mx::NodeGraph>())) {
+        throw Refusal("No node or nodegraph " + name + " in " + (graph->isA<mx::Document>() ? "the document" : graph->getName()));
+    }
+    if (IsIncluded(element)) {
+        throw Refusal(name + " comes from an included file and can't be changed here");
+    }
+    return element;
+}
+
+/// True for nodes that output a material: they must stay at the top level.
+bool IsMaterial(const mx::ElementPtr& element) {
+    mx::NodePtr node = element->asA<mx::Node>();
+    return node && node->getType() == mx::MATERIAL_TYPE_STRING;
+}
+
+/// A copy of `element` (a node or nodegraph) added to `graph` as `name`:
+/// same attributes and children. The original is left where it is.
+mx::ElementPtr CopyNode(const mx::ElementPtr& element, const mx::GraphElementPtr& graph, const std::string& name) {
+    mx::ElementPtr copy;
+    if (mx::NodePtr node = element->asA<mx::Node>()) {
+        copy = graph->addNode(node->getCategory(), name, node->getType());
+    } else {
+        copy = graph->addChildOfCategory(mx::NodeGraph::CATEGORY, name);
+    }
+    copy->copyContentFrom(element);
+    return copy;
+}
+
+/// Copies the attributes that say where a port's value comes from
+/// (`nodename`, `nodegraph`, `output`, `interfacename`) from `from` to `to`.
+void CopyConnection(const mx::PortElementPtr& from, const mx::PortElementPtr& to) {
+    ClearConnection(to);
+    for (const std::string& attribute : {mx::PortElement::NODE_NAME_ATTRIBUTE, mx::PortElement::NODE_GRAPH_ATTRIBUTE,
+                                         mx::PortElement::OUTPUT_ATTRIBUTE, mx::ValueElement::INTERFACE_NAME_ATTRIBUTE}) {
+        if (from->hasAttribute(attribute)) {
+            to->setAttribute(attribute, from->getAttribute(attribute));
+        }
+    }
+}
+
+/// True if `port` reads from a node or nodegraph (not a graph's input).
+bool ReadsSibling(const mx::PortElementPtr& port) {
+    return !port->getNodeName().empty() || !port->getNodeGraphString().empty();
+}
+
+/// The name of the node or nodegraph `port` reads from, or "".
+std::string SiblingName(const mx::PortElementPtr& port) {
+    return !port->getNodeName().empty() ? port->getNodeName() : port->getNodeGraphString();
+}
+
+/// Renames what the inputs of `elements` read from, following `names`
+/// (old name → new name), for elements that were copied or moved together.
+void RenameReferences(const std::vector<mx::ElementPtr>& elements, const std::map<std::string, std::string>& names) {
+    for (const mx::ElementPtr& element : elements) {
+        for (const mx::InputPtr& input : element->asA<mx::InterfaceElement>()->getInputs()) {
+            auto found = names.find(SiblingName(input));
+            if (!ReadsSibling(input) || found == names.end()) {
+                continue;
             }
-            return text == "-0" ? std::string("0") : text;
-        };
-        element->setAttribute(mx::Element::XPOS_ATTRIBUTE, format(x));
-        element->setAttribute(mx::Element::YPOS_ATTRIBUTE, format(y));
+            if (!input->getNodeName().empty()) {
+                input->setNodeName(found->second);
+            } else {
+                input->setNodeGraphString(found->second);
+            }
+        }
+    }
+}
+
+/// The average `xpos`/`ypos` of the elements that have one; false if none has.
+bool AveragePosition(const std::vector<mx::ElementPtr>& elements, float& x, float& y) {
+    int count = 0;
+    x = 0;
+    y = 0;
+    for (const mx::ElementPtr& element : elements) {
+        if (element->hasAttribute(mx::Element::XPOS_ATTRIBUTE) && element->hasAttribute(mx::Element::YPOS_ATTRIBUTE)) {
+            x += std::stof(element->getAttribute(mx::Element::XPOS_ATTRIBUTE));
+            y += std::stof(element->getAttribute(mx::Element::YPOS_ATTRIBUTE));
+            count += 1;
+        }
+    }
+    if (count == 0) {
+        return false;
+    }
+    x /= count;
+    y /= count;
+    return true;
+}
+
+/// MaterialX's name for a working space, with "" meaning its default.
+std::string SpaceName(const std::string& colorSpace) {
+    return colorSpace.empty() ? std::string("lin_rec709") : colorSpace;
+}
+
+/// Gives `elements` (just put in a graph whose working space is
+/// `newSpace`) the space their colours were in, `oldSpace`, unless they
+/// set their own: the colours stay the same.
+void KeepColorSpace(const std::vector<mx::ElementPtr>& elements, const std::string& oldSpace, const std::string& newSpace) {
+    if (SpaceName(oldSpace) == SpaceName(newSpace)) {
+        return;
+    }
+    for (const mx::ElementPtr& element : elements) {
+        if (!element->hasColorSpace()) {
+            element->setColorSpace(SpaceName(oldSpace));
+        }
+    }
+}
+
+/// The nodegraph at `path`, whose outputs may be edited: not one that
+/// implements a nodedef, whose outputs are the nodedef's.
+mx::NodeGraphPtr GraphWithOwnOutputs(const mx::DocumentPtr& document, const std::string& path) {
+    mx::NodeGraphPtr graph = path.empty() ? nullptr : EditableElement(document, path)->asA<mx::NodeGraph>();
+    if (!graph) {
+        throw Refusal("Only nodegraphs have outputs that can be changed");
+    }
+    if (graph->hasNodeDefString()) {
+        throw Refusal("The outputs of " + graph->getName() + " are defined by " + graph->getNodeDefString() +
+                      " and are changed there");
+    }
+    return graph;
+}
+
+/// The ports next to `graph` that read its output `outputName`: by name,
+/// or without naming one if it is the graph's only output.
+std::vector<mx::PortElementPtr> PortsReading(const mx::NodeGraphPtr& graph, const std::string& outputName) {
+    std::vector<mx::PortElementPtr> ports;
+    const bool only = graph->getOutputs().size() == 1;
+    for (const mx::PortElementPtr& port : SiblingPorts(graph->getParent())) {
+        if (port->getNodeGraphString() != graph->getName()) {
+            continue;
+        }
+        if (port->getOutputString() == outputName || (only && port->getOutputString().empty())) {
+            ports.push_back(port);
+        }
+    }
+    return ports;
+}
+
+} // namespace
+
+bool Document::collapseIntoNodeGraph(const std::string& parentPath, const StringVector& names,
+                                     const std::string& nameHint, std::string& newPath, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::GraphElementPtr parent = EditableGraph(document, parentPath);
+        RequireTopLevel(parent);
+        if (names.empty()) {
+            throw Refusal("Select the nodes to put in a nodegraph");
+        }
+        // The selection, in file order, so the nodegraph keeps it.
+        std::set<std::string> selected(names.begin(), names.end());
+        std::vector<mx::ElementPtr> elements;
+        for (const std::string& name : selected) {
+            mx::ElementPtr element = MovableNode(parent, name);
+            if (IsMaterial(element)) {
+                throw Refusal(name + " is a material: materials stay at the top level of the document");
+            }
+            if (element->isA<mx::NodeGraph>()) {
+                throw Refusal(name + " is a nodegraph: MaterialX can't connect to a nodegraph inside another");
+            }
+        }
+        for (const mx::ElementPtr& child : parent->getChildren()) {
+            if (selected.count(child->getName())) {
+                elements.push_back(child);
+            }
+        }
+        const int index = parent->getChildIndex(elements.front()->getName());
+
+        // Outside ports reading the selection, before anything moves.
+        std::vector<mx::PortElementPtr> outbound;
+        for (const mx::PortElementPtr& port : SiblingPorts(parent)) {
+            const bool inside = selected.count(port->getParent()->getName()) && !port->isA<mx::Output>();
+            if (!inside && ReadsSibling(port) && selected.count(SiblingName(port))) {
+                outbound.push_back(port);
+            }
+        }
+
+        mx::NodeGraphPtr graph = parent->addChildOfCategory(mx::NodeGraph::CATEGORY,
+                                                            parent->createValidChildName(nameHint.empty() ? "NG_group" : nameHint))
+                                     ->asA<mx::NodeGraph>();
+        float x = 0, y = 0;
+        if (AveragePosition(elements, x, y)) {
+            SetPosition(graph, x, y);
+        }
+        std::vector<mx::ElementPtr> moved;
+        for (const mx::ElementPtr& element : elements) {
+            const std::string name = element->getName();
+            moved.push_back(CopyNode(element, graph, name));
+            parent->removeChild(name);
+        }
+        parent->setChildIndex(graph->getName(), index);
+
+        // Inbound: each input reading something outside reads one of the
+        // graph's own inputs instead, one per thing read, which reads it.
+        std::map<std::string, std::string> interfaceFor;
+        for (const mx::ElementPtr& element : moved) {
+            for (const mx::InputPtr& input : element->asA<mx::InterfaceElement>()->getInputs()) {
+                std::string key;
+                if (ReadsSibling(input) && !selected.count(SiblingName(input))) {
+                    key = "node:" + SiblingName(input) + "." + input->getOutputString();
+                } else if (input->hasInterfaceName()) {
+                    key = "interface:" + input->getInterfaceName();
+                } else {
+                    continue;
+                }
+                auto found = interfaceFor.find(key);
+                if (found == interfaceFor.end()) {
+                    mx::InputPtr interface = graph->addInput(graph->createValidChildName(input->getName()), input->getType());
+                    CopyConnection(input, interface);
+                    found = interfaceFor.emplace(key, interface->getName()).first;
+                }
+                ClearConnection(input);
+                input->setInterfaceName(found->second);
+            }
+        }
+
+        // Outbound: each output of the selection read outside becomes an
+        // output of the graph, which the readers read instead.
+        std::map<std::string, std::string> outputFor;
+        for (const mx::PortElementPtr& port : outbound) {
+            outputFor.emplace(SiblingName(port) + "." + port->getOutputString(), "");
+        }
+        for (const mx::PortElementPtr& port : outbound) {
+            std::string& outputName = outputFor[SiblingName(port) + "." + port->getOutputString()];
+            if (outputName.empty()) {
+                const std::string source = SiblingName(port);
+                const std::string sourceOutput = port->getOutputString();
+                const std::string hint = outputFor.size() == 1 ? std::string("out")
+                                                               : source + "_" + (sourceOutput.empty() ? "out" : sourceOutput);
+                mx::OutputPtr output = graph->addOutput(graph->createValidChildName(hint),
+                                                        SourceOutputType(graph->getChild(source), sourceOutput));
+                CopyConnection(port, output);
+                outputName = output->getName();
+            }
+            ClearConnection(port);
+            port->setNodeGraphString(graph->getName());
+            port->setOutputString(outputName);
+        }
+        newPath = graph->getNamePath();
+    });
+}
+
+namespace {
+
+/// Ungroups `graph` (see Document::ungroupNodeGraph), which must not
+/// implement a nodedef, and sets `newPaths` to the paths of its nodes.
+void Ungroup(const mx::NodeGraphPtr& graph, StringVector& newPaths) {
+    mx::GraphElementPtr parent = graph->getParent()->asA<mx::GraphElement>();
+    const int index = parent->getChildIndex(graph->getName());
+    // Outside ports reading the graph, before it is renamed.
+    std::vector<mx::PortElementPtr> outbound;
+    for (const mx::PortElementPtr& port : SiblingPorts(parent)) {
+        if (port->getNodeGraphString() == graph->getName()) {
+            outbound.push_back(port);
+        }
+    }
+    // Out of the way, so the nodes inside can take its name.
+    graph->setName(parent->createValidChildName("margolaria_ungrouped"));
+
+    std::vector<mx::ElementPtr> inner;
+    for (const mx::ElementPtr& child : graph->getChildren()) {
+        if (child->isA<mx::Node>() || child->isA<mx::NodeGraph>()) {
+            inner.push_back(child);
+        }
+    }
+    // Back where the graph is: offset by how far the graph was moved
+    // since its nodes were last placed around it.
+    float offsetX = 0, offsetY = 0, innerX = 0, innerY = 0;
+    if (graph->hasAttribute(mx::Element::XPOS_ATTRIBUTE) && AveragePosition(inner, innerX, innerY)) {
+        offsetX = std::stof(graph->getAttribute(mx::Element::XPOS_ATTRIBUTE)) - innerX;
+        offsetY = std::stof(graph->getAttribute(mx::Element::YPOS_ATTRIBUTE)) - innerY;
+    }
+    const bool offset = std::abs(offsetX) >= 0.001f || std::abs(offsetY) >= 0.001f;
+
+    std::map<std::string, std::string> names;
+    std::vector<mx::ElementPtr> moved;
+    for (const mx::ElementPtr& element : inner) {
+        mx::ElementPtr copy = CopyNode(element, parent, parent->createValidChildName(element->getName()));
+        names[element->getName()] = copy->getName();
+        if (offset && copy->hasAttribute(mx::Element::XPOS_ATTRIBUTE) && copy->hasAttribute(mx::Element::YPOS_ATTRIBUTE)) {
+            SetPosition(copy, std::stof(copy->getAttribute(mx::Element::XPOS_ATTRIBUTE)) + offsetX,
+                        std::stof(copy->getAttribute(mx::Element::YPOS_ATTRIBUTE)) + offsetY);
+        }
+        moved.push_back(copy);
+    }
+    RenameReferences(moved, names);
+    // What the graph gave its nodes: its working space and file prefix.
+    KeepColorSpace(moved, graph->getActiveColorSpace(), parent->getActiveColorSpace());
+    if (graph->hasFilePrefix()) {
+        for (const mx::ElementPtr& element : moved) {
+            if (!element->hasFilePrefix()) {
+                element->setFilePrefix(graph->getActiveFilePrefix());
+            }
+        }
+    }
+
+    // Inputs reading the graph's inputs read what those read, or take
+    // their values.
+    for (const mx::ElementPtr& element : moved) {
+        for (const mx::InputPtr& input : element->asA<mx::InterfaceElement>()->getInputs()) {
+            if (!input->hasInterfaceName()) {
+                continue;
+            }
+            mx::InputPtr interface = graph->getInput(input->getInterfaceName());
+            if (interface && (ReadsSibling(interface) || interface->hasInterfaceName())) {
+                CopyConnection(interface, input);
+            } else if (interface && interface->hasValueString()) {
+                ClearConnection(input);
+                input->setValueString(interface->getValueString());
+                if (interface->hasColorSpace() && !input->hasColorSpace()) {
+                    input->setColorSpace(interface->getColorSpace());
+                }
+            } else {
+                Disconnect(input);
+            }
+        }
+    }
+
+    // Ports reading the graph's outputs read what those read.
+    const std::vector<mx::OutputPtr> outputs = graph->getOutputs();
+    for (const mx::PortElementPtr& port : outbound) {
+        mx::OutputPtr output = port->getOutputString().empty() ? (outputs.size() == 1 ? outputs.front() : nullptr)
+                                                               : graph->getOutput(port->getOutputString());
+        if (output && ReadsSibling(output)) {
+            CopyConnection(output, port);
+            const std::string source = names.count(SiblingName(output)) ? names[SiblingName(output)] : SiblingName(output);
+            if (!port->getNodeName().empty()) {
+                port->setNodeName(source);
+            } else {
+                port->setNodeGraphString(source);
+            }
+        } else if (output && output->hasValueString()) {
+            ClearConnection(port);
+            port->setValueString(output->getValueString());
+        } else {
+            Disconnect(port);
+        }
+    }
+
+    parent->removeChild(graph->getName());
+    newPaths.clear();
+    for (size_t i = 0; i < moved.size(); ++i) {
+        parent->setChildIndex(moved[i]->getName(), index + static_cast<int>(i));
+        newPaths.push_back(moved[i]->getNamePath());
+    }
+}
+
+/// The types of shader and material nodes.
+bool IsShaderType(const std::string& type) {
+    return type == mx::SURFACE_SHADER_TYPE_STRING || type == mx::DISPLACEMENT_SHADER_TYPE_STRING ||
+           type == mx::VOLUME_SHADER_TYPE_STRING || type == mx::LIGHT_SHADER_TYPE_STRING ||
+           type == mx::MATERIAL_TYPE_STRING;
+}
+
+/// True if Storm (UsdMtlx, OpenUSD 26.08) would draw `graph` wrong
+/// (PLAN.md §8.2): when one of its inputs reads a node or nodegraph, when
+/// a node that isn't a shader or material reads one of its outputs, or
+/// when it holds a shader node. MaterialX's own examples only use
+/// nodegraphs whose inputs are values and whose outputs shaders read.
+bool StormMisreads(const mx::NodeGraphPtr& graph) {
+    if (graph->hasNodeDefString()) {
+        return false;
+    }
+    for (const mx::InputPtr& input : graph->getInputs()) {
+        if (ReadsSibling(input)) {
+            return true;
+        }
+    }
+    for (const mx::NodePtr& node : graph->getNodes()) {
+        if (IsShaderType(node->getType())) {
+            return true;
+        }
+    }
+    for (const mx::PortElementPtr& port : SiblingPorts(graph->getParent())) {
+        mx::NodePtr reader = port->getParent()->asA<mx::Node>();
+        if (port->getNodeGraphString() == graph->getName() && reader && !IsShaderType(reader->getType())) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// Ungroups, in a preview copy, the nodegraphs Storm would draw wrong
+/// (see StormMisreads), until none is left. Ungrouping keeps what the
+/// document computes (MXNodeGraphEditTests, CollapseRenderTests), so this
+/// is the same material in a shape Storm reads.
+void UngroupForStorm(const mx::DocumentPtr& preview) {
+    for (bool changed = true; changed;) {
+        changed = false;
+        // The document's own children: getNodeGraphs() would also list the
+        // data library's, which every document shares and which must never
+        // change.
+        for (const mx::ElementPtr& child : preview->getChildren()) {
+            mx::NodeGraphPtr graph = child->asA<mx::NodeGraph>();
+            if (graph && StormMisreads(graph)) {
+                StringVector paths;
+                Ungroup(graph, paths);
+                changed = true;
+                break;
+            }
+        }
+    }
+}
+
+} // namespace
+
+bool Document::ungroupNodeGraph(const std::string& path, StringVector& newPaths, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = EditableElement(document, path)->asA<mx::NodeGraph>();
+        if (!graph) {
+            throw Refusal(path + " is not a nodegraph");
+        }
+        if (graph->hasNodeDefString()) {
+            throw Refusal(graph->getName() + " implements " + graph->getNodeDefString() +
+                          ": ungrouping it would leave the definition without an implementation");
+        }
+        Ungroup(graph, newPaths);
+    });
+}
+
+bool Document::addNodeGraph(const std::string& parentPath, const std::string& nameHint, std::string& newPath,
+                            std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::GraphElementPtr parent = EditableGraph(document, parentPath);
+        RequireTopLevel(parent);
+        const std::string name = parent->createValidChildName(nameHint.empty() ? "NG_graph" : nameHint);
+        newPath = parent->addChildOfCategory(mx::NodeGraph::CATEGORY, name)->getNamePath();
+    });
+}
+
+bool Document::addGraphOutput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
+                              std::string& newName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        static const std::set<std::string> standardTypes = {
+            "float", "integer", "boolean", "color3", "color4", "vector2", "vector3", "vector4",
+            "matrix33", "matrix44", "string", "filename", "BSDF", "EDF", "VDF",
+            "surfaceshader", "displacementshader", "volumeshader", "lightshader"};
+        if (!standardTypes.count(type) && !document->getTypeDef(type)) {
+            throw Refusal(type + " is not a MaterialX type");
+        }
+        // With a second output, readers of the first must say which they read.
+        if (graph->getOutputs().size() == 1) {
+            const std::string first = graph->getOutputs().front()->getName();
+            for (const mx::PortElementPtr& port : PortsReading(graph, first)) {
+                port->setOutputString(first);
+            }
+        }
+        newName = graph->addOutput(graph->createValidChildName(nameHint.empty() ? "out" : nameHint), type)->getName();
+    });
+}
+
+bool Document::renameGraphOutput(const std::string& graphPath, const std::string& outputName,
+                                 const std::string& newName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        mx::OutputPtr output = graph->getOutput(outputName);
+        if (!output) {
+            throw Refusal(graph->getName() + " has no output " + outputName);
+        }
+        if (newName == outputName) {
+            return;
+        }
+        if (newName.empty() || mx::createValidName(newName) != newName) {
+            throw Refusal("\"" + newName + "\" is not a valid MaterialX name (letters, digits and _ only)");
+        }
+        if (graph->getChild(newName)) {
+            throw Refusal("There is already a " + newName + " in " + graph->getName());
+        }
+        for (const mx::PortElementPtr& port : PortsReading(graph, outputName)) {
+            if (!port->getOutputString().empty()) {
+                port->setOutputString(newName);
+            }
+        }
+        output->setName(newName);
+    });
+}
+
+bool Document::removeGraphOutput(const std::string& graphPath, const std::string& outputName, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        if (!graph->getOutput(outputName)) {
+            throw Refusal(graph->getName() + " has no output " + outputName);
+        }
+        for (const mx::PortElementPtr& port : PortsReading(graph, outputName)) {
+            Disconnect(port);
+        }
+        graph->removeOutput(outputName);
+    });
+}
+
+bool Document::copyNodes(const std::string& parentPath, const StringVector& names, bool keepsInterface,
+                         std::string& xml, std::string& errorMessage) const {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::ElementPtr scope = parentPath.empty() ? mx::ElementPtr(document) : document->getDescendant(parentPath);
+        mx::GraphElementPtr parent = scope ? scope->asA<mx::GraphElement>() : nullptr;
+        if (!parent) {
+            throw Refusal("No nodegraph at " + parentPath);
+        }
+        std::set<std::string> selected(names.begin(), names.end());
+        mx::DocumentPtr copy = mx::createDocument();
+        if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
+            copy->setDataLibrary(library);
+        }
+        // The space their colours are in, so pasting can keep them.
+        if (!parent->getActiveColorSpace().empty()) {
+            copy->setColorSpace(parent->getActiveColorSpace());
+        }
+        std::vector<mx::ElementPtr> copied;
+        for (const mx::ElementPtr& child : parent->getChildren()) {
+            if (!selected.count(child->getName())) {
+                continue;
+            }
+            if (!(child->isA<mx::Node>() || child->isA<mx::NodeGraph>())) {
+                throw Refusal("No node or nodegraph " + child->getName());
+            }
+            copied.push_back(CopyNode(child, copy, child->getName()));
+        }
+        if (copied.empty()) {
+            throw Refusal("Nothing to copy");
+        }
+        for (const mx::ElementPtr& element : copied) {
+            // Files by absolute path, so they are found wherever the copy goes.
+            for (const mx::ElementPtr& descendant : element->traverseTree()) {
+                mx::ValueElementPtr value = descendant->asA<mx::ValueElement>();
+                if (value && value->getType() == mx::FILENAME_TYPE_STRING && value->hasValueString()) {
+                    mx::ElementPtr original = parent->getDescendant(descendant->getNamePath(copy));
+                    if (mx::ValueElementPtr source = original ? original->asA<mx::ValueElement>() : nullptr) {
+                        value->setValueString(AbsoluteFilename(source));
+                    }
+                }
+            }
+            for (const mx::ElementPtr& descendant : element->traverseTree()) {
+                descendant->removeAttribute(mx::Element::FILE_PREFIX_ATTRIBUTE);
+            }
+            // Connections to what stays behind are dropped.
+            for (const mx::InputPtr& input : element->asA<mx::InterfaceElement>()->getInputs()) {
+                const bool toSelection = ReadsSibling(input) && selected.count(SiblingName(input));
+                const bool toInterface = keepsInterface && input->hasInterfaceName();
+                if ((ReadsSibling(input) || input->hasInterfaceName()) && !toSelection && !toInterface) {
+                    Disconnect(input);
+                }
+            }
+        }
+        mx::XmlWriteOptions options;
+        options.writeXIncludeEnable = false;
+        xml = mx::writeToXmlString(copy, &options);
+    });
+}
+
+bool Document::pasteNodes(const std::string& parentPath, const std::string& xml, StringVector& newPaths,
+                          std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::GraphElementPtr parent = EditableGraph(document, parentPath);
+        mx::DocumentPtr pasted = mx::createDocument();
+        mx::readFromXmlString(pasted, xml, mx::FileSearchPath(), nullptr);
+
+        std::vector<mx::ElementPtr> sources;
+        for (const mx::ElementPtr& child : pasted->getChildren()) {
+            if (child->isA<mx::Node>() || child->isA<mx::NodeGraph>()) {
+                if (IsMaterial(child) && !parent->isA<mx::Document>()) {
+                    throw Refusal(child->getName() + " is a material: materials go at the top level of the document");
+                }
+                if (child->isA<mx::NodeGraph>()) {
+                    RequireTopLevel(parent);
+                }
+                sources.push_back(child);
+            }
+        }
+        if (sources.empty()) {
+            throw Refusal("There are no MaterialX nodes to paste");
+        }
+        std::map<std::string, std::string> names;
+        std::vector<mx::ElementPtr> added;
+        for (const mx::ElementPtr& source : sources) {
+            mx::ElementPtr copy = CopyNode(source, parent, parent->createValidChildName(source->getName()));
+            // Not from any file of this document's: as if typed in.
+            copy->setSourceUri(document->getSourceUri());
+            names[source->getName()] = copy->getName();
+            added.push_back(copy);
+        }
+        RenameReferences(added, names);
+        KeepColorSpace(added, pasted->getColorSpace(), parent->getActiveColorSpace());
+
+        // Connections that mean nothing here: to nodes that weren't pasted,
+        // or to graph inputs this graph doesn't have.
+        mx::NodeGraphPtr graph = parent->asA<mx::NodeGraph>();
+        std::set<std::string> newNames;
+        for (const auto& [oldName, newName] : names) {
+            newNames.insert(newName);
+        }
+        for (const mx::ElementPtr& element : added) {
+            for (const mx::InputPtr& input : element->asA<mx::InterfaceElement>()->getInputs()) {
+                bool dangling = false;
+                if (ReadsSibling(input)) {
+                    // References to pasted nodes have their new names by now.
+                    dangling = !newNames.count(SiblingName(input));
+                } else if (input->hasInterfaceName()) {
+                    mx::InputPtr interface = graph ? graph->getInput(input->getInterfaceName()) : nullptr;
+                    if (!interface && graph && graph->getNodeDef()) {
+                        interface = graph->getNodeDef()->getActiveInput(input->getInterfaceName());
+                    }
+                    dangling = !interface || interface->getType() != input->getType();
+                }
+                if (dangling) {
+                    Disconnect(input);
+                }
+            }
+        }
+        newPaths.clear();
+        for (const mx::ElementPtr& element : added) {
+            newPaths.push_back(element->getNamePath());
+        }
     });
 }
 

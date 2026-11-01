@@ -7,11 +7,13 @@
 // afterwards (see MXNodeCatalog).
 //
 // A node is added by dragging it onto the canvas, or by double-clicking it
-// (or pressing Return), which puts it in the middle of the canvas.
+// (or pressing Return), which puts it in the middle of the canvas. The
+// first row, "nodegraph", adds an empty nodegraph (M4a).
 //
 // Introduces (SWIFT): `Transferable` and `CodableRepresentation` (drag and
 // drop of our own data), declaring a `UTType`, `Codable`, `Section(isExpanded:)`,
-// `.contextMenu(forSelectionType:primaryAction:)`.
+// `.contextMenu(forSelectionType:primaryAction:)`; `.tag` on a row outside
+// a `ForEach` (M4a).
 
 import MXKit
 import SwiftUI
@@ -27,8 +29,14 @@ import UniformTypeIdentifiers
 /// SWIFT: `Codable` (Encodable + Decodable) lets the compiler write the
 /// encoding and decoding code for a struct whose properties are Codable.
 struct NodeDefinitionDrag: Codable, Transferable {
-    /// The nodedef's name, such as "ND_image_color3".
+    /// The nodedef's name, such as "ND_image_color3", or
+    /// ``emptyNodeGraph``.
     let nodeDef: String
+
+    /// What the library's "nodegraph" row carries: not a nodedef (whose
+    /// names start with "ND_" by convention, and never are just this), but
+    /// an empty nodegraph to add.
+    static let emptyNodeGraph: String = "nodegraph"
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .margolariaNodeDefinition)
@@ -44,8 +52,9 @@ extension UTType {
 /// The Library tab.
 struct LibraryPanel: View {
     let catalog: MXNodeCatalog
-    /// Adds a node of this nodedef in the middle of the canvas.
-    let onAdd: (MXNodeDefinition) -> Void
+    /// Adds a node of this nodedef (by name, or
+    /// NodeDefinitionDrag.emptyNodeGraph) in the middle of the canvas.
+    let onAdd: (String) -> Void
 
     @State private var query: String = ""
 
@@ -63,6 +72,12 @@ struct LibraryPanel: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, 6)
             List(selection: $selection) {
+                if query.isEmpty || "nodegraph".localizedCaseInsensitiveContains(query) {
+                    NodeGraphRow()
+                        // SWIFT: `.tag` gives a row that isn't from a
+                        // ForEach its ID, so the List can select it.
+                        .tag(NodeDefinitionDrag.emptyNodeGraph)
+                }
                 if query.isEmpty {
                     ForEach(catalog.groups) { group in
                         // SWIFT: `Section(isExpanded:)` makes a section the
@@ -86,17 +101,26 @@ struct LibraryPanel: View {
             // gives the list's rows a context menu, and `primaryAction` runs
             // on double-click or Return, with the IDs of the rows concerned.
             .contextMenu(forSelectionType: MXNodeKind.ID.self) { ids in
-                if let kind = ids.first.flatMap({ catalog.kind(named: $0) }) {
-                    Button("Add \(kind.node)") {
-                        onAdd(kind.defaultVariant)
+                if let name = ids.first.flatMap(nodeDefinition(for:)) {
+                    Button(name == NodeDefinitionDrag.emptyNodeGraph ? "Add Empty Nodegraph" : "Add \(ids.first ?? "")") {
+                        onAdd(name)
                     }
                 }
             } primaryAction: { ids in
-                if let kind = ids.first.flatMap({ catalog.kind(named: $0) }) {
-                    onAdd(kind.defaultVariant)
+                if let name = ids.first.flatMap(nodeDefinition(for:)) {
+                    onAdd(name)
                 }
             }
         }
+    }
+
+    /// What the row `id` adds: its node's default variant, or an empty
+    /// nodegraph.
+    private func nodeDefinition(for id: MXNodeKind.ID) -> String? {
+        if id == NodeDefinitionDrag.emptyNodeGraph {
+            return id
+        }
+        return catalog.kind(named: id)?.defaultVariant.name
     }
 
     /// A binding to whether `group` is open, stored in `expandedGroups`.
@@ -112,6 +136,26 @@ struct LibraryPanel: View {
             } else {
                 expandedGroups.remove(group)
             }
+        }
+    }
+}
+
+/// The first row: an empty nodegraph, to build a group of nodes in (M4a).
+/// Nodes can also be collapsed into one (Graph > Collapse into Nodegraph).
+private struct NodeGraphRow: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("nodegraph")
+            Text("An empty nodegraph")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .help("A nodegraph: a group of nodes with inputs and outputs of its own, shown as one node. "
+            + "Selected nodes can also be collapsed into one with ⌥⌘G.")
+        .draggable(NodeDefinitionDrag(nodeDef: NodeDefinitionDrag.emptyNodeGraph)) {
+            Label("nodegraph", systemImage: "square.on.square")
+                .padding(6)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
         }
     }
 }
