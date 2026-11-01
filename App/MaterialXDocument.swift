@@ -221,6 +221,19 @@ final class MaterialXDocument: NSDocument {
         }
     }
 
+    /// Starts saving a new document in `~/Documents/Margolaria/Materials`
+    /// (M4c2), rather than wherever the last save dialog was (Save to
+    /// Library's folder, for one). A document saved before keeps its folder.
+    ///
+    /// SWIFT/AppKit: NSDocument calls this with the Save panel before
+    /// showing it; returning true lets it go ahead.
+    override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
+        if fileURL == nil, let materials = MXLibraryFolders.materials {
+            savePanel.directoryURL = materials
+        }
+        return super.prepareSavePanel(savePanel)
+    }
+
     // MARK: Windows
 
     /// Creates the document's window. AppKit calls this once, after reading.

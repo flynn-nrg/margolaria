@@ -89,7 +89,7 @@ struct ContentView: View {
 
     /// A node to add in the middle of the canvas (its nodedef's name),
     /// from the Library tab; GraphPanel adds it and clears this.
-    @State private var nodeToAdd: String? = nil
+    @State private var nodeToAdd: NodeDefinitionDrag? = nil
 
     /// Whether the viewport is shown, at the top of the right-hand column.
     @State private var showsViewport: Bool = true
@@ -121,11 +121,12 @@ struct ContentView: View {
                         ElementRow(element: element)
                     }
                 case .library:
-                    LibraryPanel(catalog: document.catalog) { nodeDef in
+                    LibraryPanel(catalog: document.catalog, documentFolder: document.fileURL?.deletingLastPathComponent(),
+                                 documentFile: document.fileURL) { item in
                         if viewMode == .text {
                             viewMode = .split
                         }
-                        nodeToAdd = nodeDef
+                        nodeToAdd = item
                     }
                 }
             }

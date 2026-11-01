@@ -21,6 +21,13 @@
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
+	<!--
+	  What macOS shows when Margolaria first touches ~/Documents (M4c2): its
+	  folder there holds the user's libraries and materials. macOS asks
+	  even for apps outside the sandbox.
+	-->
+	<key>NSDocumentsFolderUsageDescription</key>
+	<string>Margolaria keeps your node libraries and materials in Documents › Margolaria.</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSMinimumSystemVersion</key>

@@ -10,10 +10,16 @@
 // (or pressing Return), which puts it in the middle of the canvas. The
 // first row, "nodegraph", adds an empty nodegraph (M4a).
 //
+// Libraries (M4c2): the definitions saved in the user library folder (My
+// Library) and in the document's folder are listed after it, until the
+// document has them. Adding one includes its file in the document
+// (`xi:include`), then adds the node.
+//
 // Introduces (SWIFT): `Transferable` and `CodableRepresentation` (drag and
 // drop of our own data), declaring a `UTType`, `Codable`, `Section(isExpanded:)`,
 // `.contextMenu(forSelectionType:primaryAction:)`; `.tag` on a row outside
-// a `ForEach` (M4a).
+// a `ForEach` (M4a); `.task(id:)`, `.onReceive` with a notification,
+// tuples as list rows (M4c2).
 
 import MXKit
 import SwiftUI
@@ -28,10 +34,13 @@ import UniformTypeIdentifiers
 ///
 /// SWIFT: `Codable` (Encodable + Decodable) lets the compiler write the
 /// encoding and decoding code for a struct whose properties are Codable.
-struct NodeDefinitionDrag: Codable, Transferable {
+struct NodeDefinitionDrag: Codable, Equatable, Transferable {
     /// The nodedef's name, such as "ND_image_color3", or
     /// ``emptyNodeGraph``.
     let nodeDef: String
+    /// The library file defining it, for a definition the document doesn't
+    /// have yet (M4c2): adding the node includes the file first.
+    var libraryFile: URL? = nil
 
     /// What the library's "nodegraph" row carries: not a nodedef (whose
     /// names start with "ND_" by convention, and never are just this), but
@@ -49,12 +58,29 @@ extension UTType {
     static let margolariaNodeDefinition = UTType(exportedAs: "eu.emerald-isle.margolaria.nodedef")
 }
 
+/// Posted after a library file is written (Save to Library…), so Library
+/// panels read their folders again.
+extension Notification.Name {
+    static let margolariaLibrariesChanged = Notification.Name("MargolariaLibrariesChanged")
+}
+
 /// The Library tab.
 struct LibraryPanel: View {
     let catalog: MXNodeCatalog
+    /// The document's folder, whose library files are listed too (M4c2);
+    /// nil for a document never saved.
+    let documentFolder: URL?
+    /// The document's own file, left out of its folder's list.
+    let documentFile: URL?
     /// Adds a node of this nodedef (by name, or
-    /// NodeDefinitionDrag.emptyNodeGraph) in the middle of the canvas.
-    let onAdd: (String) -> Void
+    /// NodeDefinitionDrag.emptyNodeGraph), from a library file if it says
+    /// so, in the middle of the canvas.
+    let onAdd: (NodeDefinitionDrag) -> Void
+
+    /// The library files found: the user library folder's, then the
+    /// document folder's. Read when the panel appears, and again after
+    /// Save to Library.
+    @State private var libraries: [(title: String, files: [MXLibraryFile])] = []
 
     @State private var query: String = ""
 
@@ -77,6 +103,17 @@ struct LibraryPanel: View {
                         // SWIFT: `.tag` gives a row that isn't from a
                         // ForEach its ID, so the List can select it.
                         .tag(NodeDefinitionDrag.emptyNodeGraph)
+                }
+                ForEach(libraries, id: \.title) { library in
+                    let rows: [(file: MXLibraryFile, definition: MXNodeDefinition)] = libraryRows(library.files)
+                    if !rows.isEmpty {
+                        Section(library.title) {
+                            ForEach(rows, id: \.definition.name) { row in
+                                LibraryFileRow(file: row.file, definition: row.definition)
+                                    .tag(Self.libraryTag(row.file, row.definition))
+                            }
+                        }
+                    }
                 }
                 if query.isEmpty {
                     ForEach(catalog.groups) { group in
@@ -101,26 +138,73 @@ struct LibraryPanel: View {
             // gives the list's rows a context menu, and `primaryAction` runs
             // on double-click or Return, with the IDs of the rows concerned.
             .contextMenu(forSelectionType: MXNodeKind.ID.self) { ids in
-                if let name = ids.first.flatMap(nodeDefinition(for:)) {
-                    Button(name == NodeDefinitionDrag.emptyNodeGraph ? "Add Empty Nodegraph" : "Add \(ids.first ?? "")") {
-                        onAdd(name)
+                if let item = ids.first.flatMap(nodeDefinition(for:)) {
+                    Button(item.nodeDef == NodeDefinitionDrag.emptyNodeGraph ? "Add Empty Nodegraph"
+                                                                             : "Add \(item.nodeDef)") {
+                        onAdd(item)
                     }
                 }
             } primaryAction: { ids in
-                if let name = ids.first.flatMap(nodeDefinition(for:)) {
-                    onAdd(name)
+                if let item = ids.first.flatMap(nodeDefinition(for:)) {
+                    onAdd(item)
                 }
+            }
+            // SWIFT: `.task(id:)` runs when the view appears and again when
+            // the id changes (another document folder); `.onReceive` runs
+            // for each notification posted.
+            .task(id: documentFolder) {
+                loadLibraries()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .margolariaLibrariesChanged)) { _ in
+                loadLibraries()
             }
         }
     }
 
-    /// What the row `id` adds: its node's default variant, or an empty
-    /// nodegraph.
-    private func nodeDefinition(for id: MXNodeKind.ID) -> String? {
+    /// What the row `id` adds: its node's default variant, an empty
+    /// nodegraph, or a definition from a library file.
+    private func nodeDefinition(for id: MXNodeKind.ID) -> NodeDefinitionDrag? {
         if id == NodeDefinitionDrag.emptyNodeGraph {
-            return id
+            return NodeDefinitionDrag(nodeDef: id)
         }
-        return catalog.kind(named: id)?.defaultVariant.name
+        for library in libraries {
+            for (file, definition) in libraryRows(library.files) where Self.libraryTag(file, definition) == id {
+                return NodeDefinitionDrag(nodeDef: definition.name, libraryFile: file.url)
+            }
+        }
+        return catalog.kind(named: id).map { NodeDefinitionDrag(nodeDef: $0.defaultVariant.name) }
+    }
+
+    /// A library row's ID in the list: its file and nodedef, unlike any
+    /// node category.
+    private static func libraryTag(_ file: MXLibraryFile, _ definition: MXNodeDefinition) -> String {
+        file.url.path(percentEncoded: false) + "#" + definition.name
+    }
+
+    /// The definitions of `files` to list: those the document doesn't
+    /// have yet (once included, they are the document's), matching the
+    /// search.
+    private func libraryRows(_ files: [MXLibraryFile]) -> [(file: MXLibraryFile, definition: MXNodeDefinition)] {
+        files.flatMap { file in
+            file.definitions.map { (file: file, definition: $0) }
+        }
+        .filter { row in
+            catalog.definition(named: row.definition.name) == nil
+                && (query.isEmpty || row.definition.node.localizedCaseInsensitiveContains(query))
+        }
+    }
+
+    /// Reads the library folders.
+    private func loadLibraries() {
+        var found: [(title: String, files: [MXLibraryFile])] = []
+        if let user = MXLibraryFolders.user {
+            found.append((title: "My Library", files: MXLibraryFolders.files(in: user)))
+        }
+        if let documentFolder, documentFolder.standardizedFileURL != MXLibraryFolders.user?.standardizedFileURL {
+            found.append((title: "This Document's Folder", files: MXLibraryFolders.files(in: documentFolder,
+                                                                                       except: documentFile)))
+        }
+        libraries = found
     }
 
     /// A binding to whether `group` is open, stored in `expandedGroups`.
@@ -154,6 +238,28 @@ private struct NodeGraphRow: View {
             + "Selected nodes can also be collapsed into one with ⌥⌘G.")
         .draggable(NodeDefinitionDrag(nodeDef: NodeDefinitionDrag.emptyNodeGraph)) {
             Label("nodegraph", systemImage: "square.on.square")
+                .padding(6)
+                .background(.regularMaterial, in: .rect(cornerRadius: 6))
+        }
+    }
+}
+
+/// A definition in a library file (M4c2): its node, and the file it is in.
+/// Adding it includes the file in the document.
+private struct LibraryFileRow: View {
+    let file: MXLibraryFile
+    let definition: MXNodeDefinition
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(definition.node)
+            Text("\(definition.type) · \(file.url.lastPathComponent)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .help((definition.documentation.map { $0 + "\n" } ?? "") + file.url.path(percentEncoded: false))
+        .draggable(NodeDefinitionDrag(nodeDef: definition.name, libraryFile: file.url)) {
+            Label(definition.node, systemImage: "shippingbox")
                 .padding(6)
                 .background(.regularMaterial, in: .rect(cornerRadius: 6))
         }
