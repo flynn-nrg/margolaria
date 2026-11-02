@@ -10,7 +10,8 @@
 //
 // The app uses the Core Animation renderer; this one stays for the M0d
 // comparison benchmark. Of M2d's wiring, it draws the dragged wire and the
-// cut line, but doesn't dim or highlight.
+// cut line, but doesn't dim or highlight. Backdrops (M4d) are drawn plainly:
+// frame, header and title.
 //
 // Introduces (SWIFT): `Canvas` and `GraphicsContext`, `Color(red:green:blue:)`,
 // `Path(_ cgPath:)`, reading `@Observable` properties in `body`, `.overlay`.
@@ -39,6 +40,7 @@ public struct CanvasGraphView: View {
         let zoom: CGFloat = controller.zoom
         let offset: CGPoint = controller.offset
         let selection: Set<Int> = controller.selection
+        let backdropSelection: Set<Int> = controller.backdropSelection
         let marquee: CGRect? = controller.marquee
         let wirePreview: WirePreview? = controller.wirePreview
         let cutLine: CutLine? = controller.cutLine
@@ -54,6 +56,9 @@ public struct CanvasGraphView: View {
             let visible = CGRect(x: -offset.x / zoom, y: -offset.y / zoom,
                                  width: size.width / zoom, height: size.height / zoom)
 
+            for backdrop in model.backdrops where backdrop.frame.intersects(visible) {
+                Self.drawBackdrop(backdrop, selected: backdropSelection.contains(backdrop.id), zoom: zoom, in: &context)
+            }
             Self.drawWires(model, visible: visible, in: &context)
             for node in model.nodes {
                 let frame: CGRect = GraphLayout.frame(of: node)
@@ -105,6 +110,28 @@ public struct CanvasGraphView: View {
             }
         }
         context.stroke(Path(path), with: .color(color(GraphPalette.wire)), lineWidth: 2)
+    }
+
+    /// A backdrop: tinted, outlined, with a header and its title.
+    static func drawBackdrop(_ backdrop: GraphBackdrop, selected: Bool, zoom: CGFloat,
+                             in context: inout GraphicsContext) {
+        let radius: CGFloat = GraphLayout.backdropCornerRadius
+        let shape = Path(roundedRect: backdrop.frame, cornerRadius: radius)
+        context.fill(shape, with: .color(color(GraphPalette.backdrop, opacity: GraphPalette.backdropOpacity)))
+        context.fill(Path(GraphLayout.roundedPath(GraphLayout.backdropHeaderFrame(of: backdrop), topRadius: radius,
+                                                  bottomRadius: 0)),
+                     with: .color(color(GraphPalette.backdrop, opacity: GraphPalette.backdropOpacity * 2)))
+        context.stroke(shape, with: .color(selected ? color(GraphPalette.selection)
+                                                    : color(GraphPalette.backdropEdge, opacity: 0.5)),
+                       lineWidth: selected ? 2 : 1)
+        if zoom >= GraphLayout.titleMinimumZoom {
+            let title = Text(backdrop.title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(color(GraphPalette.backdropTitle))
+            context.draw(title, at: CGPoint(x: backdrop.frame.minX + 10,
+                                            y: backdrop.frame.minY + GraphLayout.backdropHeaderHeight / 2),
+                         anchor: .leading)
+        }
     }
 
     static func drawNode(_ node: GraphNode, frame: CGRect, selected: Bool, zoom: CGFloat,

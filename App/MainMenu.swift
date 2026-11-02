@@ -14,9 +14,17 @@
 // The Graph menu (M4a) and Edit > Duplicate act on the canvas; their
 // actions are GraphEventView's.
 //
+// ⌘G is shared (M4d): Graph > Group in Backdrop while the canvas has
+// keyboard focus, Edit > Find Next everywhere else (the XML tab). AppKit
+// lets only one item of the menu bar have a key equivalent (it clears it
+// from any other item it is given to), so the key moves between the two
+// items as the focus does, and each menu shows ⌘G where it applies.
+//
 // Introduces (SWIFT): `#selector` with a type name (`NSDocument.save(_:)`),
 // `Selector(("name:"))` for actions with no Swift declaration, variadic
-// parameters (`Item...`), option sets (`[.command, .shift]`).
+// parameters (`Item...`), option sets (`[.command, .shift]`);
+// `NotificationCenter.addObserver(forName:object:queue:using:)` and
+// `MainActor.assumeIsolated` (M4d).
 
 import AppKit
 import GraphKit
@@ -121,6 +129,9 @@ enum MainMenu {
                 // SWIFT: `rawValue` is the enum case's underlying Int.
                 item.tag = action.rawValue
                 editMenu.addItem(item)
+                if action == .nextMatch {
+                    findNextItem = item
+                }
             }
         }
 
@@ -132,12 +143,18 @@ enum MainMenu {
 
         // Graph: canvas commands (M4a), handled by the canvas view
         // (GraphEventView) when it has keyboard focus, and greyed out
-        // otherwise. "G" in capitals adds Shift.
-        bar.addItem(submenu: menu("Graph",
-                                  Item("Collapse into Nodegraph", #selector(GraphEventView.collapseIntoNodeGraph(_:)),
-                                       "g", [.command, .option]),
-                                  Item("Ungroup Nodegraph", #selector(GraphEventView.ungroupNodeGraph(_:)),
-                                       "G", [.command, .option])))
+        // otherwise. "G" in capitals adds Shift. Group in Backdrop gets ⌘G
+        // while the canvas has focus (see the file comment).
+        let graphMenu: NSMenu = menu("Graph",
+                                     Item("Group in Backdrop", #selector(GraphEventView.groupInBackdrop(_:))),
+                                     .separator,
+                                     Item("Collapse into Nodegraph", #selector(GraphEventView.collapseIntoNodeGraph(_:)),
+                                          "g", [.command, .option]),
+                                     Item("Ungroup Nodegraph", #selector(GraphEventView.ungroupNodeGraph(_:)),
+                                          "G", [.command, .option]))
+        backdropItem = graphMenu.items.first
+        bar.addItem(submenu: graphMenu)
+        shareCommandG()
 
         // Window. Registering it as the windows menu makes AppKit list the
         // open windows at its end.
@@ -155,6 +172,52 @@ enum MainMenu {
         bar.addItem(submenu: helpMenu)
 
         return bar
+    }
+
+    // MARK: ⌘G (M4d)
+
+    /// Edit > Find Next and Graph > Group in Backdrop, which share ⌘G.
+    ///
+    /// SWIFT: `static var` on a `@MainActor` type: shared state, only used
+    /// on the main thread, which the compiler checks.
+    private static var findNextItem: NSMenuItem? = nil
+    private static var backdropItem: NSMenuItem? = nil
+    /// The registration for window updates, kept so it lasts.
+    private static var focusObserver: (any NSObjectProtocol)? = nil
+
+    /// Gives ⌘G to the item that applies now, and again whenever a window
+    /// updates: after every event, so after every change of focus too.
+    ///
+    /// SWIFT: The observer's closure may be called from any thread as far
+    /// as the compiler knows; `queue: .main` makes it the main thread, and
+    /// `MainActor.assumeIsolated` tells the compiler so (it checks, at run
+    /// time, and stops the app if it isn't).
+    private static func shareCommandG() {
+        giveCommandG()
+        focusObserver = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil,
+                                                               queue: .main) { _ in
+            MainActor.assumeIsolated {
+                giveCommandG()
+            }
+        }
+    }
+
+    /// ⌘G to Group in Backdrop if the key window's focus is a canvas, to
+    /// Find Next otherwise. Nothing changes if it already has it.
+    private static func giveCommandG() {
+        guard let findNextItem, let backdropItem else {
+            return
+        }
+        let onCanvas: Bool = NSApp.keyWindow?.firstResponder is GraphEventView
+        let (owner, other): (NSMenuItem, NSMenuItem) = onCanvas ? (backdropItem, findNextItem) : (findNextItem, backdropItem)
+        guard owner.keyEquivalent != "g" else {
+            return
+        }
+        // The other one's first: AppKit wouldn't give a key equivalent
+        // another item has.
+        other.keyEquivalent = ""
+        owner.keyEquivalent = "g"
+        owner.keyEquivalentModifierMask = .command
     }
 
     /// A menu with the given items.

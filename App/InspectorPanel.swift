@@ -29,6 +29,9 @@
 // a slider or colour drag is one undo step. The panel reads the element
 // from the document again after each change (`document.revision`).
 //
+// Backdrops (M4d): their name (to rename them), what they contain, and their
+// note, which the canvas shows under the title.
+//
 // Read-only: elements from `xi:include`d files (saving writes the include
 // back, so changes would be lost), and the inputs of a nodegraph that
 // implements a nodedef (their defaults belong to the nodedef: M4).
@@ -153,6 +156,8 @@ private struct InspectedElementView: View {
                 // An <output> has no value, only what it is connected to.
                 InputRow(document: document, input: output, ownerPath: graphPath, sourceGraph: graphPath,
                          isReadOnly: true, onShow: onShow)
+            case .backdrop(let backdrop):
+                BackdropSettings(document: document, backdrop: backdrop, onShow: onShow)
             }
         }
     }
@@ -376,6 +381,81 @@ private struct NodeHeader: View {
         document.edit("Rename \(node.name)") { content in
             let newPath: String = try content.renameNode(at: path, to: name)
             onShow(newPath)
+        }
+    }
+}
+
+// MARK: - Backdrops (M4d)
+
+/// A backdrop's name, what it contains and its note.
+private struct BackdropSettings: View {
+    let document: MaterialXDocument
+    let backdrop: MXBackdrop
+    let onShow: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                if backdrop.isIncluded {
+                    Text(backdrop.name)
+                        .font(.headline)
+                } else {
+                    CommitTextField(text: backdrop.name, onCommit: rename)
+                        .font(.headline)
+                        .textFieldStyle(.plain)
+                        .help("The backdrop's name, shown in its header. Type a new one and press Return to rename it.")
+                }
+                Text(contents)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Divider()
+            Text("Note")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if backdrop.isIncluded {
+                Text(backdrop.note.isEmpty ? "None" : backdrop.note)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                Label("From an included file: read-only", systemImage: "lock")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            } else {
+                CommitTextField(text: backdrop.note, prompt: "What these nodes do", axis: .vertical, onCommit: setNote)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(3...12)
+                    .help("Shown in the backdrop, under its name. Return saves it; ⌥-Return starts a new line.")
+                Text("Drag nodes into the backdrop, or out of it, to change what it holds. Deleting it keeps them.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// "Backdrop · 3 nodes".
+    private var contents: String {
+        switch backdrop.contains.count {
+        case 0: return "Backdrop · empty"
+        case 1: return "Backdrop · 1 node"
+        default: return "Backdrop · \(backdrop.contains.count) nodes"
+        }
+    }
+
+    /// Renames the backdrop, and keeps it selected under its new name.
+    private func rename(to name: String) {
+        let path: String = backdrop.path
+        document.edit("Rename \(backdrop.name)") { content in
+            let newPath: String = try content.renameNode(at: path, to: name)
+            onShow(newPath)
+        }
+    }
+
+    private func setNote(_ note: String) {
+        let path: String = backdrop.path
+        let trimmed: String = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        document.edit("Set Note of \(backdrop.name)") { content in
+            try content.setNote(trimmed, ofBackdrop: path)
         }
     }
 }

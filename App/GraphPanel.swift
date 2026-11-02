@@ -70,6 +70,14 @@
 // document, or included from a library file (read-only, M4c2), opens it,
 // and the breadcrumb says "<node> (definition)".
 //
+// Backdrops (M4d): Graph > Group in Backdrop (⌘G) frames the selected nodes
+// in a backdrop, or adds an empty one under the pointer; it is selected,
+// and the inspector edits its name and note. Dragging one moves the nodes
+// it contains, its grip resizes it, and nodes dragged in or out (or added
+// in it) join or leave it: each one undo step, saved in the document as
+// MaterialX's `<backdrop>` (DocumentBackdrops.swift). Delete removes it and
+// keeps its nodes. Arrange fits each backdrop around its nodes again.
+//
 // Introduces (SWIFT): `@Binding` (a property another view owns),
 // `.onChange(of:initial:)`, `ContentUnavailableView`, a `@MainActor` class
 // holding view state, closures capturing a binding, `.dropDestination`,
@@ -157,8 +165,8 @@ struct GraphPanel: View {
     /// canvas): where it points, in view coordinates, and the wire, if any.
     @State private var searchRequest: NodeSearchRequest? = nil
 
-    /// Nodes to select once the level has been rebuilt, by path: one just
-    /// added, pasted nodes, a new nodegraph.
+    /// Nodes and backdrops to select once the level has been rebuilt, by
+    /// path: one just added, pasted nodes, a new nodegraph or backdrop.
     @State private var pendingSelection: [String] = []
 
     /// Whether nodes show swatches (the bar's toggle), kept between launches.
@@ -291,17 +299,30 @@ struct GraphPanel: View {
             addNode(item.nodeDef, atView: CGPoint(x: size.width / 2, y: size.height / 2), in: level,
                     from: item.libraryFile)
         }
-        // SWIFT: Reading `level?.controller.selection` here, in `body`, makes
-        // SwiftUI observe it (the controller is `@Observable`), so this runs
-        // whenever the canvas selection changes, or the level is replaced.
-        .onChange(of: level?.controller.selection, initial: true) {
-            guard let level, level.controller.selection.count == 1,
-                  let id = level.controller.selection.first else {
-                selectedPath = nil
-                return
-            }
-            selectedPath = level.graph.elementPaths[id]
+        // SWIFT: Reading the canvas selection here, in `body` (through
+        // `selectionPath`), makes SwiftUI observe it (the controller is
+        // `@Observable`), so this runs whenever it changes, or the level is
+        // replaced.
+        .onChange(of: selectionPath, initial: true) {
+            selectedPath = selectionPath
         }
+    }
+
+    /// The path of the one node, or the one backdrop, selected on the
+    /// canvas; nil for none or several.
+    private var selectionPath: String? {
+        guard let level else {
+            return nil
+        }
+        let nodes: Set<Int> = level.controller.selection
+        let backdrops: Set<Int> = level.controller.backdropSelection
+        if nodes.count == 1, backdrops.isEmpty, let id = nodes.first {
+            return level.graph.elementPaths[id]
+        }
+        if nodes.isEmpty, backdrops.count == 1, let id = backdrops.first {
+            return level.graph.backdropPaths[id]
+        }
+        return nil
     }
 
     /// The breadcrumb's names for implementations of definitions, by path:
@@ -366,17 +387,17 @@ struct GraphPanel: View {
         newLevel.controller.onNavigateUp = {
             levelPath = BreadcrumbBar.parent(of: levelPath)
         }
-        newLevel.controller.onNodesMoved = { [weak newLevel] moved in
+        newLevel.controller.onMove = { [weak newLevel] move in
             guard let newLevel else {
                 return
             }
-            saveMove(of: moved, in: newLevel)
+            save(move, in: newLevel)
         }
-        newLevel.controller.onDeleteNodes = { [weak newLevel] ids in
+        newLevel.controller.onDelete = { [weak newLevel] deletion in
             guard let newLevel else {
                 return
             }
-            delete(ids, in: newLevel)
+            delete(deletion, in: newLevel)
         }
         newLevel.controller.onConnect = { [weak newLevel] connection in
             guard let newLevel else {
@@ -450,28 +471,40 @@ struct GraphPanel: View {
             // view size, and keep the selection.
             newLevel.controller.viewSize = previous.controller.viewSize
             newLevel.controller.frame(.all)
-            let selectedPaths: [String] = previous.controller.selection.map { previous.graph.elementPaths[$0] }
-            newLevel.controller.selection = Set(selectedPaths.compactMap { graph.nodeIndex(forPath: $0) })
+            select(Self.selectedPaths(in: previous), in: newLevel)
         } else if let previous {
             newLevel.controller.zoom = previous.controller.zoom
             newLevel.controller.offset = previous.controller.offset
             // The new canvas view sets it too, but only once it is laid
             // out; the swatches asked for below need it now.
             newLevel.controller.viewSize = previous.controller.viewSize
-            let selectedPaths: [String] = previous.controller.selection.map { previous.graph.elementPaths[$0] }
-            newLevel.controller.selection = Set(selectedPaths.compactMap { graph.nodeIndex(forPath: $0) })
+            select(Self.selectedPaths(in: previous), in: newLevel)
         } else {
             newLevel.controller.frame(.all)
         }
         framesAfterRebuild = false
         if !pendingSelection.isEmpty {
-            newLevel.controller.selection = Set(pendingSelection.compactMap { graph.nodeIndex(forPath: $0) })
+            select(pendingSelection, in: newLevel)
         }
         pendingSelection = []
         requestSwatches(for: newLevel)
         level = newLevel
         failure = nil
         applyFocus()
+    }
+
+    /// The paths of the nodes and backdrops selected on `level`'s canvas.
+    private static func selectedPaths(in level: GraphLevel) -> [String] {
+        level.controller.selection.map { level.graph.elementPaths[$0] }
+            + level.controller.backdropSelection.map { level.graph.backdropPaths[$0] }
+    }
+
+    /// Selects the nodes and backdrops at `paths` on `level`'s canvas, as
+    /// many of them as are there. (Names are unique among a graph's
+    /// elements, backdrops included, so one list can hold both.)
+    private func select(_ paths: [String], in level: GraphLevel) {
+        level.controller.selection = Set(paths.compactMap { level.graph.nodeIndex(forPath: $0) })
+        level.controller.backdropSelection = Set(paths.compactMap { level.graph.backdropIndex(forPath: $0) })
     }
 
     /// How swatches look now: the viewport's settings, at twice the
@@ -539,7 +572,8 @@ struct GraphPanel: View {
 
     /// Lays the whole level out again (GraphAutoLayout) and saves every
     /// node's position, as one "Arrange" step. Nodes from included files
-    /// can't move; the others are arranged around them.
+    /// can't move; the others are arranged around them. Backdrops are
+    /// fitted around their nodes' new places (M4d).
     private func arrange(_ level: GraphLevel) {
         var model: GraphModel = level.controller.model
         GraphAutoLayout.apply(to: &model)
@@ -549,10 +583,16 @@ struct GraphPanel: View {
         guard !positions.isEmpty else {
             return
         }
+        let frames: [(String, CGRect)] = level.graph.fittedBackdropFrames(in: model).map { id, frame in
+            (level.graph.backdropPaths[id], DocumentGraph.units(fromPoints: frame))
+        }
         framesAfterRebuild = true
         document.edit("Arrange") { content in
             for (path, position) in positions {
                 try content.setPosition(position, of: path)
+            }
+            for (path, frame) in frames {
+                try content.setFrame(frame, ofBackdrop: path)
             }
         }
     }
@@ -613,6 +653,11 @@ struct GraphPanel: View {
         let name: String = definition?.node ?? nodeDef
         let graph: DocumentGraph = level.graph
         let folder: URL? = document.fileURL?.deletingLastPathComponent()
+        // Added in a backdrop (M4d): it joins it, as a node dragged there does.
+        let graphPoint: CGPoint = level.controller.graphPoint(fromView: point)
+        let backdrops: [GraphBackdrop] = level.controller.model.backdrops.filter {
+            !$0.isLocked && $0.frame.contains(graphPoint)
+        }
         document.edit("Add \(name)") { content in
             if let library {
                 try content.include(library: library, from: folder)
@@ -622,6 +667,10 @@ struct GraphPanel: View {
             }
             let path: String = try content.addNode(nodeDef: nodeDef, in: parent)
             try content.setPosition(position, of: path)
+            for backdrop in backdrops {
+                try content.setContents(graph.contentNames(backdrop.contents) + [Self.name(of: path)],
+                                        ofBackdrop: graph.backdropPaths[backdrop.id])
+            }
             if let wire, let port {
                 try graph.connect(newNode: path, port: port, outputCount: definition?.outputs.count ?? 1,
                                   to: wire, in: content)
@@ -641,41 +690,49 @@ struct GraphPanel: View {
         return positions
     }
 
-    /// Saves moved nodes' positions in the document, as one "Move" step.
+    /// Saves what a drag did (nodes moved, backdrops moved or resized,
+    /// what they contain), as one "Move" step.
     ///
     /// The first move in a level whose nodes were placed by auto-layout
     /// also saves every other node's position: otherwise the auto-layout
     /// could rearrange them after the next edit, around the moved ones.
-    private func saveMove(of moved: [Int: CGPoint], in level: GraphLevel) {
-        let model: GraphModel = level.controller.model
-        var positions: [String: CGPoint] = autoLayoutPositions(in: level)
-        for id in moved.keys where !model.nodes[id].isLocked {
-            positions[level.graph.elementPaths[id]] = DocumentGraph.units(fromPoints: model.nodes[id].position)
-        }
-        document.edit(moved.count == 1 ? "Move" : "Move \(moved.count) Nodes") { content in
-            for (path, position) in positions {
-                try content.setPosition(position, of: path)
-            }
+    private func save(_ move: GraphMove, in level: GraphLevel) {
+        let positions: [String: CGPoint] = autoLayoutPositions(in: level)
+        let graph: DocumentGraph = level.graph
+        document.edit(graph.undoName(for: move)) { content in
+            try save(positions, in: content)
+            try graph.save(move, in: content)
         }
     }
 
-    /// Deletes nodes from the document, as one step called `title` (or
-    /// "Delete …"). A nodegraph's own
-    /// inputs and outputs (shown at the graph's edges) aren't nodes, and
-    /// are left alone.
-    private func delete(_ ids: Set<Int>, in level: GraphLevel, as title: String? = nil) {
-        let nodes: [GraphNode] = ids.map { level.graph.model.nodes[$0] }.filter { $0.category != .graphInterface }
-        guard !nodes.isEmpty else {
+    /// Deletes nodes and backdrops from the document, as one step called
+    /// `title` (or "Delete …"). A nodegraph's own inputs and outputs (shown
+    /// at the graph's edges) aren't nodes, and are left alone; a deleted
+    /// backdrop's nodes stay.
+    private func delete(_ deletion: GraphDeletion, in level: GraphLevel, as title: String? = nil) {
+        let graph: DocumentGraph = level.graph
+        guard graph.deletes(deletion) else {
             NSSound.beep()
             return
         }
-        let name: String = title ?? (nodes.count == 1 ? "Delete \(nodes[0].title)" : "Delete \(nodes.count) Nodes")
-        let paths: [String] = nodes.map { level.graph.elementPaths[$0.id] }
         level.controller.selection = []
-        document.edit(name) { content in
-            for path in paths {
-                try content.removeNode(at: path)
-            }
+        level.controller.backdropSelection = []
+        document.edit(title ?? graph.undoName(forDeleting: deletion)) { content in
+            try graph.delete(deletion, in: content)
+        }
+    }
+
+    /// Group in Backdrop (M4d): a backdrop around the canvas nodes `ids`,
+    /// or an empty one under the pointer (`location`, view coordinates),
+    /// as one step; it is selected, for the inspector to name it.
+    private func addBackdrop(around ids: Set<Int>, at location: CGPoint, in level: GraphLevel) {
+        let graph: DocumentGraph = level.graph
+        let model: GraphModel = level.controller.model
+        let point: CGPoint = level.controller.graphPoint(fromView: location)
+        let positions: [String: CGPoint] = autoLayoutPositions(in: level)
+        document.edit("Group in Backdrop") { content in
+            try save(positions, in: content)
+            pendingSelection = [try graph.addBackdrop(around: ids, in: model, at: point, to: content)]
         }
     }
 
@@ -683,6 +740,12 @@ struct GraphPanel: View {
 
     /// Does a menu command on the canvas's selection.
     private func perform(_ request: GraphCommandRequest, in level: GraphLevel) {
+        // A backdrop frames anything on the canvas, a graph's own inputs
+        // and outputs too.
+        if request.command == .backdrop {
+            addBackdrop(around: request.nodes, at: request.location, in: level)
+            return
+        }
         // A nodegraph's own inputs and outputs, at the graph's edges, aren't
         // nodes to copy or group.
         let nodes: [GraphNode] = request.nodes.map { level.graph.model.nodes[$0] }
@@ -705,7 +768,7 @@ struct GraphPanel: View {
             guard copy(names, in: level) else {
                 return
             }
-            delete(Set(nodes.map(\.id)), in: level, as: "Cut \(title)")
+            delete(GraphDeletion(nodes: Set(nodes.map(\.id))), in: level, as: "Cut \(title)")
         case .paste:
             guard let xml = NodePasteboard.text() else {
                 NSSound.beep()
@@ -740,6 +803,9 @@ struct GraphPanel: View {
                 try save(positions, in: content)
                 pendingSelection = try content.ungroup(path)
             }
+        case .backdrop:
+            // Done above.
+            break
         }
     }
 
@@ -806,12 +872,14 @@ struct GraphPanel: View {
         path.split(separator: "/").last.map(String.init) ?? path
     }
 
-    /// Selects and frames `focus`, if it is on the level shown.
+    /// Selects and frames `focus` (a node or a backdrop), if it is on the
+    /// level shown.
     private func applyFocus() {
-        guard let path = focus, let level, let index = level.graph.nodeIndex(forPath: path) else {
+        guard let path = focus, let level,
+              level.graph.nodeIndex(forPath: path) != nil || level.graph.backdropIndex(forPath: path) != nil else {
             return
         }
-        level.controller.selection = [index]
+        select([path], in: level)
         level.controller.frame(.selection)
         focus = nil
     }
@@ -843,7 +911,7 @@ private struct BreadcrumbBar: View {
                 crumb(definitions[target] ?? parts[i], target: target)
             }
             Spacer()
-            Text("Tab adds a node · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · ⌘G groups in a backdrop · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)

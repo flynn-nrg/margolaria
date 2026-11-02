@@ -31,6 +31,10 @@
 
 namespace mxbridge {
 
+/// A list of strings, such as element names. Swift can't name a C++
+/// template instantiation itself, only an alias for one.
+using StringVector = std::vector<std::string>;
+
 /// A short description of one element in a document, for listing in the UI.
 /// All fields are empty strings when the attribute doesn't apply.
 struct ElementSummary {
@@ -241,6 +245,32 @@ struct ColorUse {
     std::string value;
 };
 
+/// A backdrop (M4d): a frame drawn behind some of a graph's elements, to
+/// group and annotate them. MaterialX's `<backdrop>`: layout only, ignored
+/// by shader generation and renderers.
+struct BackdropInfo {
+    std::string name;
+    /// Path from the document root, such as "NG_copper/grain_notes".
+    std::string path;
+    /// The elements it frames (`contains`), by name: nodes, nodegraphs,
+    /// and a nodegraph's own inputs and outputs, all siblings of it.
+    StringVector contains;
+    /// Its `note`: text shown in it. Empty without one.
+    std::string note;
+    /// True if it came from an `xi:include`d file (read-only).
+    bool isIncluded = false;
+    /// `xpos`/`ypos`, its top-left corner, in the units nodes' positions
+    /// are in. Unset when another tool wrote it without one.
+    bool hasPosition = false;
+    float xpos = 0;
+    float ypos = 0;
+    /// `width`/`height`, in the same units. Unset when another tool wrote
+    /// it without them: the canvas then fits it around what it contains.
+    bool hasSize = false;
+    float width = 0;
+    float height = 0;
+};
+
 /// One level of a document's graph: the document root, or one nodegraph.
 struct GraphInfo {
     /// "" for the document root; otherwise the nodegraph's path.
@@ -252,6 +282,8 @@ struct GraphInfo {
     std::vector<PortInfo> interfaceInputs;
     /// The <output> elements directly in this graph, with their connections.
     std::vector<PortInfo> outputs;
+    /// Its backdrops (M4d), in file order.
+    std::vector<BackdropInfo> backdrops;
 };
 
 /// One problem found by validation, attached to the element it is about.
@@ -290,10 +322,6 @@ struct NodeDefSummary {
     std::vector<NodeDefPort> inputs;
     std::vector<NodeDefPort> outputs;
 };
-
-/// A list of strings, such as element names. Swift can't name a C++
-/// template instantiation itself, only an alias for one.
-using StringVector = std::vector<std::string>;
 
 /// What a new node definition is called and how it is described (M4c1).
 struct NodeDefSpec {
@@ -506,13 +534,43 @@ public:
     /// nodedef (see removeNodeDefinition).
     bool removeNode(const std::string& path, std::string& errorMessage);
 
-    /// Renames the node or nodegraph at `path`, updating the connections
-    /// and material assignments that refer to it. Sets `newPath`.
+    /// Renames the node, nodegraph or backdrop at `path`, updating the
+    /// connections, material assignments and backdrops that refer to it.
+    /// Sets `newPath`.
     bool renameNode(const std::string& path, const std::string& newName,
                     std::string& newPath, std::string& errorMessage);
 
     /// Sets the `xpos`/`ypos` attributes of the element at `path`.
     bool setPosition(const std::string& path, float x, float y, std::string& errorMessage);
+
+    // --- Backdrops (M4d) --------------------------------------------------------
+    //
+    // A backdrop's `contains` names siblings, so the edits that remove or
+    // rename elements keep it up to date: every edit drops the names that
+    // are gone, renames follow, collapsing puts the new nodegraph where its
+    // nodes were, and ungrouping puts the nodes where their graph was.
+
+    /// Adds a backdrop to the graph at `parentPath` ("" for the document),
+    /// named `nameHint` ("backdrop" if empty, made unique), containing the
+    /// elements `contains` (siblings of it), at `x`, `y` and `width` by
+    /// `height`. Sets `newPath`.
+    bool addBackdrop(const std::string& parentPath, const StringVector& contains, const std::string& nameHint,
+                     float x, float y, float width, float height, std::string& newPath, std::string& errorMessage);
+
+    /// Sets the position (`xpos`/`ypos`) and size (`width`/`height`) of
+    /// the backdrop at `path`.
+    bool setBackdropFrame(const std::string& path, float x, float y, float width, float height,
+                          std::string& errorMessage);
+
+    /// Sets what the backdrop at `path` contains: siblings of it, by name.
+    /// An empty list removes the `contains` attribute.
+    bool setBackdropContents(const std::string& path, const StringVector& contains, std::string& errorMessage);
+
+    /// Sets the backdrop's `note`; "" removes it.
+    bool setBackdropNote(const std::string& path, const std::string& note, std::string& errorMessage);
+
+    /// Removes the backdrop at `path`. What it contains stays.
+    bool removeBackdrop(const std::string& path, std::string& errorMessage);
 
     // --- Nodegraphs, outputs, copy and paste (M4a) --------------------------
 

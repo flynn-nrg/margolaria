@@ -16,7 +16,7 @@
 // Tab asks the app for its node search (M2e). The right button is kept
 // free for a context menu. Copy, Cut, Paste, Duplicate, Collapse into
 // Nodegraph and Ungroup come from the menus, through the responder chain
-// (M4a).
+// (M4a), and so does Group in Backdrop (M4d).
 //
 // Introduces (SWIFT): `open class` vs `final class`, `isFlipped` override as
 // a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option
@@ -189,6 +189,11 @@ public class GraphEventView: NSView {
         perform(.ungroup)
     }
 
+    /// Graph > Group in Backdrop (⌘G, M4d).
+    @objc public func groupInBackdrop(_ sender: Any?) {
+        perform(.backdrop)
+    }
+
     private func perform(_ command: GraphCommand) {
         if !controller.perform(command, at: pointerLocation()) {
             NSSound.beep()
@@ -203,6 +208,7 @@ public class GraphEventView: NSView {
         #selector(duplicateNodes(_:)): .duplicate,
         #selector(collapseIntoNodeGraph(_:)): .collapse,
         #selector(ungroupNodeGraph(_:)): .ungroup,
+        #selector(groupInBackdrop(_:)): .backdrop,
     ]
 
     /// Keeps the controller's idea of the view size current, for framing.
@@ -366,7 +372,8 @@ extension GraphEventView: NSMenuItemValidation {
             return controller.canPerform(command)
         }
         if menuItem.action == #selector(delete(_:)) {
-            return controller.selection.contains { !controller.model.nodes[$0].isLocked }
+            let deletable: GraphDeletion = controller.deletableSelection
+            return !deletable.nodes.isEmpty || !deletable.backdrops.isEmpty
         }
         return true
     }

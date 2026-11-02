@@ -1,7 +1,7 @@
 // GraphLayout.swift
 //
 // Where things are on the canvas, in graph coordinates: node frames, port
-// positions and wire curves. Both renderers (Canvas and Core Animation) and
+// positions, wire curves and backdrops (M4d). Both renderers (Canvas and Core Animation) and
 // hit testing use these functions, so they always agree.
 //
 // Node anatomy (PLAN.md §4.1), top to bottom:
@@ -207,13 +207,69 @@ public enum GraphLayout {
         return d1 * d2 <= 0 && d3 * d4 <= 0
     }
 
-    /// The bounding box of all nodes, or an empty rect for an empty graph.
+    /// The bounding box of all nodes and backdrops, or an empty rect for
+    /// an empty graph.
     public static func bounds(of model: GraphModel) -> CGRect {
         // SWIFT: `reduce` folds a collection into one value: start with the
         // first argument, then combine it with each element in turn.
-        model.nodes.reduce(CGRect.null) { (result: CGRect, node: GraphNode) in
+        let nodes: CGRect = model.nodes.reduce(CGRect.null) { (result: CGRect, node: GraphNode) in
             result.union(frame(of: node))
         }
+        return model.backdrops.reduce(nodes) { $0.union($1.frame) }
+    }
+
+    // MARK: Backdrops (M4d)
+    //
+    //   ┌──────────────────────────────┐
+    //   │ title                        │  backdropHeaderHeight
+    //   │ note, wrapped                │
+    //   │      ┌──────┐   ┌──────┐     │  the nodes it contains,
+    //   │      │ node │   │ node │     │  backdropPadding from its edges
+    //   │      └──────┘   └──────┘   ◢ │  the grip resizes it
+    //   └──────────────────────────────┘
+
+    public static let backdropHeaderHeight: CGFloat = 28
+    /// Space between a new backdrop's edges and the nodes it frames.
+    public static let backdropPadding: CGFloat = 30
+    /// The smallest a backdrop can be resized to.
+    public static let backdropMinimumSize = CGSize(width: 160, height: 80)
+    /// The square in the bottom-right corner that resizes it.
+    public static let backdropGripSize: CGFloat = 16
+    public static let backdropCornerRadius: CGFloat = 8
+    /// The widest a backdrop's note is drawn: wider lines are hard to read.
+    public static let backdropNoteMaximumWidth: CGFloat = 420
+
+    /// A backdrop around `frames` (nodes' frames): padded, with room for
+    /// its header, and at least the minimum size. Nil if `frames` is empty.
+    public static func backdropFrame(around frames: [CGRect]) -> CGRect? {
+        guard let first = frames.first else {
+            return nil
+        }
+        let bounds: CGRect = frames.dropFirst().reduce(first) { $0.union($1) }
+        let padded = CGRect(x: bounds.minX - backdropPadding, y: bounds.minY - backdropPadding - backdropHeaderHeight,
+                            width: bounds.width + 2 * backdropPadding,
+                            height: bounds.height + 2 * backdropPadding + backdropHeaderHeight)
+        return CGRect(origin: padded.origin, size: CGSize(width: max(padded.width, backdropMinimumSize.width),
+                                                          height: max(padded.height, backdropMinimumSize.height)))
+    }
+
+    /// A backdrop's header: the top of its frame, where it is picked up.
+    public static func backdropHeaderFrame(of backdrop: GraphBackdrop) -> CGRect {
+        CGRect(x: backdrop.frame.minX, y: backdrop.frame.minY, width: backdrop.frame.width,
+               height: min(backdropHeaderHeight, backdrop.frame.height))
+    }
+
+    /// The grip in a backdrop's bottom-right corner, which resizes it.
+    public static func backdropGripFrame(of backdrop: GraphBackdrop) -> CGRect {
+        CGRect(x: backdrop.frame.maxX - backdropGripSize, y: backdrop.frame.maxY - backdropGripSize,
+               width: backdropGripSize, height: backdropGripSize)
+    }
+
+    /// The middle of a node: it is in a backdrop when this is (moving
+    /// and resizing decide what a backdrop contains by it).
+    public static func centre(of node: GraphNode) -> CGPoint {
+        let frame: CGRect = frame(of: node)
+        return CGPoint(x: frame.midX, y: frame.midY)
     }
 }
 
@@ -235,6 +291,13 @@ public enum GraphPalette {
     /// How strongly rows a dragged wire can't connect to are dimmed: the
     /// opacity of the background colour laid over them.
     public static let dimOpacity: CGFloat = 0.7
+    /// Backdrops (M4d): a muted violet, laid over the background at
+    /// `backdropOpacity` (its header twice as strong), with an edge and a
+    /// lighter title, as in the mockup (docs/mockup).
+    public static let backdrop: (CGFloat, CGFloat, CGFloat) = (0.31, 0.29, 0.53)
+    public static let backdropOpacity: CGFloat = 0.14
+    public static let backdropEdge: (CGFloat, CGFloat, CGFloat) = (0.43, 0.40, 0.72)
+    public static let backdropTitle: (CGFloat, CGFloat, CGFloat) = (0.71, 0.69, 0.94)
 
     /// Muted header colours by category.
     public static func header(_ category: NodeCategory) -> (CGFloat, CGFloat, CGFloat) {

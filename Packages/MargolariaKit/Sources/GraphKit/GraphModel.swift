@@ -1,7 +1,7 @@
 // GraphModel.swift
 //
-// The data a graph canvas draws: nodes with typed ports, and wires between
-// them. Spike M0d (docs/spikes/M0d-graph-canvas.md) used synthetic graphs;
+// The data a graph canvas draws: nodes with typed ports, wires between
+// them, and backdrops behind them (M4d). Spike M0d (docs/spikes/M0d-graph-canvas.md) used synthetic graphs;
 // since M1 the app fills it from a MaterialX document (GraphBuilder.swift).
 //
 // Plain value types with no UI dependency, so the canvas can be tested and
@@ -203,15 +203,47 @@ public struct GraphWire: Hashable, Sendable {
     public var to: PortReference
 }
 
+/// A backdrop (M4d): a frame drawn behind some nodes, with a title and a
+/// note. Moving it moves the nodes it contains.
+public struct GraphBackdrop: Identifiable, Sendable {
+    /// Its index in ``GraphModel/backdrops``.
+    public let id: Int
+    /// Shown in its header: the backdrop's name.
+    public var title: String
+    /// Shown under the header, wrapped; "" for none.
+    public var note: String
+    /// Where it is, in graph coordinates: top-left corner and size.
+    public var frame: CGRect
+    /// The nodes it contains, by ID. Not necessarily inside ``frame``: a
+    /// file can say otherwise.
+    public var contents: Set<Int>
+    /// True for a backdrop from an included file: it can be selected, not
+    /// moved, resized or deleted.
+    public var isLocked: Bool = false
+
+    public init(id: Int, title: String, note: String = "", frame: CGRect, contents: Set<Int>, isLocked: Bool = false) {
+        self.id = id
+        self.title = title
+        self.note = note
+        self.frame = frame
+        self.contents = contents
+        self.isLocked = isLocked
+    }
+}
+
 /// A whole graph.
 public struct GraphModel: Sendable {
     /// All nodes. `nodes[i].id == i`; later nodes draw on top.
     public var nodes: [GraphNode]
     public var wires: [GraphWire]
+    /// The backdrops, drawn behind everything else, later ones on top.
+    /// `backdrops[i].id == i`.
+    public var backdrops: [GraphBackdrop]
 
-    public init(nodes: [GraphNode], wires: [GraphWire]) {
+    public init(nodes: [GraphNode], wires: [GraphWire], backdrops: [GraphBackdrop] = []) {
         self.nodes = nodes
         self.wires = wires
+        self.backdrops = backdrops
     }
 
     /// A synthetic graph shaped like a big material: nodes in columns, each
