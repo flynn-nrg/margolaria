@@ -612,6 +612,33 @@ NodeInfo DescribeNodeGraph(const mx::NodeGraphPtr& graph) {
     return info;
 }
 
+BackdropInfo DescribeBackdrop(const mx::BackdropPtr& backdrop) {
+    BackdropInfo info;
+    info.name = backdrop->getName();
+    info.path = backdrop->getNamePath();
+    info.isIncluded = IsIncluded(backdrop);
+    info.note = backdrop->getAttribute("note");
+    ReadPosition(backdrop, info);
+    if (backdrop->hasContainsString()) {
+        for (const std::string& name : SplitList(backdrop->getContainsString())) {
+            if (!name.empty()) {
+                info.contains.push_back(name);
+            }
+        }
+    }
+    // Both, and positive, or neither: the canvas fits it to its contents.
+    try {
+        if (backdrop->hasWidth() && backdrop->hasHeight() && backdrop->getWidth() > 0 && backdrop->getHeight() > 0) {
+            info.width = backdrop->getWidth();
+            info.height = backdrop->getHeight();
+            info.hasSize = true;
+        }
+    } catch (const std::exception&) {
+        // Not numbers: as if unset.
+    }
+    return info;
+}
+
 /// The file a filename input or value refers to: its value with
 /// `fileprefix` (from it or any ancestor) applied, made absolute against
 /// the folder of the file it was read from. Relative still if the
@@ -968,9 +995,11 @@ bool Document::graph(const std::string& path, GraphInfo& graph, std::string& err
             } else if (mx::InputPtr input = child->asA<mx::Input>()) {
                 // Only nodegraphs have inputs as direct children.
                 graph.interfaceInputs.push_back(DescribePort(input));
+            } else if (mx::BackdropPtr backdrop = child->asA<mx::Backdrop>()) {
+                graph.backdrops.push_back(DescribeBackdrop(backdrop));
             }
-            // Everything else (nodedefs, looks, backdrops, ...) is not part
-            // of the graph view.
+            // Everything else (nodedefs, looks, ...) is not part of the
+            // graph view.
         }
 
         // A functional nodegraph declares its interface in its nodedef, not
@@ -1306,24 +1335,123 @@ std::string SourceOutputType(const mx::ElementPtr& source, const std::string& ou
     return output->getType();
 }
 
-/// Sets `xpos`/`ypos` on `element`, with three decimals: a thousandth of
-/// a node is far below a pixel, and shorter numbers keep the file tidy.
+/// A position or size as written in the file, with three decimals: a
+/// thousandth of a node is far below a pixel, and shorter numbers keep
+/// the file tidy.
+std::string FormatUnits(float value) {
+    std::ostringstream stream;
+    stream.setf(std::ios::fixed);
+    stream.precision(3);
+    stream << value;
+    std::string text = stream.str();
+    // "1.500" → "1.5", "2.000" → "2".
+    text.erase(text.find_last_not_of('0') + 1);
+    if (!text.empty() && text.back() == '.') {
+        text.pop_back();
+    }
+    return text == "-0" ? std::string("0") : text;
+}
+
+/// Sets `xpos`/`ypos` on `element` (see FormatUnits).
 void SetPosition(const mx::ElementPtr& element, float x, float y) {
-    auto format = [](float value) {
-        std::ostringstream stream;
-        stream.setf(std::ios::fixed);
-        stream.precision(3);
-        stream << value;
-        std::string text = stream.str();
-        // "1.500" → "1.5", "2.000" → "2".
-        text.erase(text.find_last_not_of('0') + 1);
-        if (!text.empty() && text.back() == '.') {
-            text.pop_back();
+    element->setAttribute(mx::Element::XPOS_ATTRIBUTE, FormatUnits(x));
+    element->setAttribute(mx::Element::YPOS_ATTRIBUTE, FormatUnits(y));
+}
+
+// --- Keeping backdrops current (M4d) ----------------------------------------
+//
+// A backdrop names what it contains; MaterialX's validation rejects a name
+// that isn't a sibling. So every edit ends with KeepBackdropsCurrent, and
+// the edits that rename or regroup elements update the names themselves.
+
+/// The names a backdrop contains, in order.
+std::vector<std::string> Contents(const mx::BackdropPtr& backdrop) {
+    std::vector<std::string> names;
+    for (const std::string& name : SplitList(backdrop->getContainsString())) {
+        if (!name.empty()) {
+            names.push_back(name);
         }
-        return text == "-0" ? std::string("0") : text;
-    };
-    element->setAttribute(mx::Element::XPOS_ATTRIBUTE, format(x));
-    element->setAttribute(mx::Element::YPOS_ATTRIBUTE, format(y));
+    }
+    return names;
+}
+
+/// Sets what a backdrop contains; nothing removes the attribute.
+void SetContents(const mx::BackdropPtr& backdrop, const std::vector<std::string>& names) {
+    if (names.empty()) {
+        backdrop->removeAttribute(mx::Backdrop::CONTAINS_ATTRIBUTE);
+    } else {
+        backdrop->setContainsString(mx::joinStrings(names, ","));
+    }
+}
+
+/// The backdrops in `graph` that can be changed (not included).
+std::vector<mx::BackdropPtr> EditableBackdrops(const mx::ElementPtr& graph) {
+    std::vector<mx::BackdropPtr> backdrops;
+    for (const mx::ElementPtr& child : graph->getChildren()) {
+        if (mx::BackdropPtr backdrop = child->asA<mx::Backdrop>(); backdrop && !IsIncluded(backdrop)) {
+            backdrops.push_back(backdrop);
+        }
+    }
+    return backdrops;
+}
+
+/// Drops, from every backdrop in the document, the names of elements that
+/// aren't beside it any more (removed, or moved into a nodegraph).
+void KeepBackdropsCurrent(const mx::DocumentPtr& document) {
+    for (const mx::ElementPtr& element : document->traverseTree()) {
+        mx::BackdropPtr backdrop = element->asA<mx::Backdrop>();
+        if (!backdrop || IsIncluded(backdrop) || !backdrop->hasContainsString()) {
+            continue;
+        }
+        const std::vector<std::string> names = Contents(backdrop);
+        std::vector<std::string> kept;
+        for (const std::string& name : names) {
+            if (backdrop->getParent()->getChildOfType<mx::TypedElement>(name)) {
+                kept.push_back(name);
+            }
+        }
+        if (kept != names) {
+            SetContents(backdrop, kept);
+        }
+    }
+}
+
+/// In the backdrops of `graph`, the element `oldName` is now `newName`.
+void RenameInBackdrops(const mx::ElementPtr& graph, const std::string& oldName, const std::string& newName) {
+    for (const mx::BackdropPtr& backdrop : EditableBackdrops(graph)) {
+        std::vector<std::string> names = Contents(backdrop);
+        if (std::find(names.begin(), names.end(), oldName) != names.end()) {
+            std::replace(names.begin(), names.end(), oldName, newName);
+            SetContents(backdrop, names);
+        }
+    }
+}
+
+/// The backdrops of `graph` that contain any of `names`.
+std::vector<mx::BackdropPtr> BackdropsContaining(const mx::ElementPtr& graph, const std::set<std::string>& names) {
+    std::vector<mx::BackdropPtr> found;
+    for (const mx::BackdropPtr& backdrop : EditableBackdrops(graph)) {
+        for (const std::string& name : Contents(backdrop)) {
+            if (names.count(name)) {
+                found.push_back(backdrop);
+                break;
+            }
+        }
+    }
+    return found;
+}
+
+/// Adds `names` to each of `backdrops`, after what they contain.
+void AddToBackdrops(const std::vector<mx::BackdropPtr>& backdrops, const std::vector<std::string>& names) {
+    for (const mx::BackdropPtr& backdrop : backdrops) {
+        std::vector<std::string> contents = Contents(backdrop);
+        for (const std::string& name : names) {
+            if (std::find(contents.begin(), contents.end(), name) == contents.end()) {
+                contents.push_back(name);
+            }
+        }
+        SetContents(backdrop, contents);
+    }
 }
 
 /// Runs an edit on `document`, turning any exception into `false` and a
@@ -1337,6 +1465,7 @@ bool Perform(const mx::DocumentPtr& document, std::string& errorMessage, Edit ed
     }
     try {
         edit(document);
+        KeepBackdropsCurrent(document);
         return true;
     } catch (const std::exception& e) {
         errorMessage = e.what();
@@ -1561,6 +1690,7 @@ bool Document::renameNode(const std::string& path, const std::string& newName,
             throw Refusal("There is already a " + newName + " here");
         }
         element->setName(newName);
+        RenameInBackdrops(graph, oldName, newName);
         // Connections in the same graph that refer to it by name.
         for (const mx::PortElementPtr& port : SiblingPorts(graph)) {
             if (port->getNodeName() == oldName) {
@@ -1585,6 +1715,93 @@ bool Document::renameNode(const std::string& path, const std::string& newName,
 bool Document::setPosition(const std::string& path, float x, float y, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
         SetPosition(EditableElement(document, path), x, y);
+    });
+}
+
+// --- Backdrops (M4d) ----------------------------------------------------------
+
+namespace {
+
+// Defined with the M4a edits below.
+mx::GraphElementPtr EditableGraph(const mx::DocumentPtr& document, const std::string& path);
+
+/// The backdrop at `path`, which may be edited.
+mx::BackdropPtr EditableBackdrop(const mx::DocumentPtr& document, const std::string& path) {
+    mx::BackdropPtr backdrop = EditableElement(document, path)->asA<mx::Backdrop>();
+    if (!backdrop) {
+        throw Refusal(path + " is not a backdrop");
+    }
+    return backdrop;
+}
+
+/// Refuses names in `contains` that aren't elements of `graph` a backdrop
+/// can frame (MaterialX: typed elements, so not other backdrops).
+void RequireFramable(const mx::ElementPtr& graph, const StringVector& contains) {
+    for (const std::string& name : contains) {
+        if (!graph->getChildOfType<mx::TypedElement>(name)) {
+            throw Refusal("There is no node called " + name + " here to put in a backdrop");
+        }
+    }
+}
+
+/// Sets `width`/`height` on `backdrop` (see FormatUnits).
+void SetSize(const mx::BackdropPtr& backdrop, float width, float height) {
+    if (!(width > 0 && height > 0)) {
+        throw Refusal("A backdrop needs a width and a height");
+    }
+    backdrop->setAttribute(mx::Backdrop::WIDTH_ATTRIBUTE, FormatUnits(width));
+    backdrop->setAttribute(mx::Backdrop::HEIGHT_ATTRIBUTE, FormatUnits(height));
+}
+
+} // namespace
+
+bool Document::addBackdrop(const std::string& parentPath, const StringVector& contains, const std::string& nameHint,
+                           float x, float y, float width, float height, std::string& newPath,
+                           std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::GraphElementPtr parent = EditableGraph(document, parentPath);
+        RequireFramable(parent, contains);
+        mx::BackdropPtr backdrop =
+            parent->addBackdrop(parent->createValidChildName(nameHint.empty() ? "backdrop" : mx::createValidName(nameHint)));
+        SetContents(backdrop, contains);
+        SetPosition(backdrop, x, y);
+        SetSize(backdrop, width, height);
+        newPath = backdrop->getNamePath();
+    });
+}
+
+bool Document::setBackdropFrame(const std::string& path, float x, float y, float width, float height,
+                                std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::BackdropPtr backdrop = EditableBackdrop(document, path);
+        SetSize(backdrop, width, height);
+        SetPosition(backdrop, x, y);
+    });
+}
+
+bool Document::setBackdropContents(const std::string& path, const StringVector& contains, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::BackdropPtr backdrop = EditableBackdrop(document, path);
+        RequireFramable(backdrop->getParent(), contains);
+        SetContents(backdrop, contains);
+    });
+}
+
+bool Document::setBackdropNote(const std::string& path, const std::string& note, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::BackdropPtr backdrop = EditableBackdrop(document, path);
+        if (note.empty()) {
+            backdrop->removeAttribute("note");
+        } else {
+            backdrop->setAttribute("note", note);
+        }
+    });
+}
+
+bool Document::removeBackdrop(const std::string& path, std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::BackdropPtr backdrop = EditableBackdrop(document, path);
+        backdrop->getParent()->removeChild(backdrop->getName());
     });
 }
 
@@ -1783,6 +2000,8 @@ bool Document::collapseIntoNodeGraph(const std::string& parentPath, const String
             }
         }
         const int index = parent->getChildIndex(elements.front()->getName());
+        // The backdrops that framed some of the nodes frame the graph.
+        const std::vector<mx::BackdropPtr> framing = BackdropsContaining(parent, selected);
 
         // Outside ports reading the selection, before anything moves.
         std::vector<mx::PortElementPtr> outbound;
@@ -1807,6 +2026,7 @@ bool Document::collapseIntoNodeGraph(const std::string& parentPath, const String
             parent->removeChild(name);
         }
         parent->setChildIndex(graph->getName(), index);
+        AddToBackdrops(framing, {graph->getName()});
 
         // Inbound: each input reading something outside reads one of the
         // graph's own inputs instead, one per thing read, which reads it.
@@ -2104,7 +2324,14 @@ bool Document::ungroupNodeGraph(const std::string& path, StringVector& newPaths,
             throw Refusal(graph->getName() + " implements " + graph->getNodeDefString() +
                           ": ungrouping it would leave the definition without an implementation");
         }
+        // The backdrops that framed the graph frame its nodes.
+        const std::vector<mx::BackdropPtr> framing = BackdropsContaining(graph->getParent(), {graph->getName()});
         Ungroup(graph, newPaths);
+        std::vector<std::string> names;
+        for (const std::string& newPath : newPaths) {
+            names.push_back(newPath.substr(newPath.rfind('/') + 1));
+        }
+        AddToBackdrops(framing, names);
     });
 }
 
@@ -2163,6 +2390,7 @@ bool Document::renameGraphOutput(const std::string& graphPath, const std::string
             }
         }
         output->setName(newName);
+        RenameInBackdrops(graph, outputName, newName);
     });
 }
 
@@ -2399,6 +2627,7 @@ bool Document::renameGraphInput(const std::string& graphPath, const std::string&
             }
         }
         input->setName(newName);
+        RenameInBackdrops(target.graph, inputName, newName);
     });
 }
 

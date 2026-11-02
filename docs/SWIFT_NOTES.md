@@ -38,6 +38,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `CaseIterable` | The compiler generates `allCases`, an array of every case of an enum | An X-macro list | `GraphModel.swift` |
 | Wrapping arithmetic `&+`, `&*` | Plain `+` traps on overflow; `&+` wraps around like unsigned C arithmetic | C unsigned `+` | `GraphModel.swift` (`SeededRandom`) |
 | `Set` algebra | `union`, `symmetricDifference`, `contains`; sets are values like arrays | `std::set` + `<algorithm>` | `GraphCanvasController.swift`, `LayerGraphView.swift` |
+| `CGRect` parts | A rectangle is an `origin` (`CGPoint`) and a `size` (`CGSize`); `minX`/`maxY`/`midX` read it normalised, `offsetBy`, `union`, `contains` work on it | `NSRect`/`CGRect` and their C functions | `MXBackdropEdit.swift`, `GraphLayout.swift` (M4d) |
 | Enum as a state machine | Each case carries the data that state needs (`.movingNodes(start:original:)`) | A tagged union with a `switch` | `GraphCanvasController.swift` (`DragState`) |
 | `if case` / `guard case` | Matches one enum case and binds its values, without a full `switch` | — | `ContentView.swift` (`IssuesBadge`), `MXInspectableTests.swift` |
 | Multi-pattern `case` | `case .a(let x), .b(let x):` binds the same name in each pattern | Fall-through `case` labels | `GraphCanvasController.swift` (`mouseDown`) |
@@ -45,6 +46,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `switch` on a tuple, optional patterns | `switch (a, b)` matches both at once; `.x(let v)?` matches an optional holding `.x` | Nested `switch`es | `GraphCanvasController.swift` (`endWire`) |
 | `case .x(var v)` | Binds a mutable *copy* of the associated value; store it back with `state = .x(v)` | Copying a struct out of a union | `GraphCanvasController.swift` (`mouseDragged`) |
 | `Set.insert(_:).inserted` | `insert` returns whether the element was new | `std::set::insert(...).second` | `GraphWiring.swift` |
+| `formUnion` vs `union` | `formUnion` adds another set's elements in place; `union` returns a new set (likewise `formIntersection`, …) | `s.insert(b.begin(), b.end())` vs a copy | `GraphCanvasController.swift` (`movingSelection`, M4d) |
 | `dict[key, default: v]` | Reads a dictionary value, or `v` if the key is missing, without an optional | `map.value(key, v)` in Qt | `GraphWiring.swift` |
 | `(0...n).map`, `indices.dropFirst()` | Map over a range of integers; every index but the first | A `for` loop filling a vector | `GraphLayout.swift` (`wirePoints`), `GraphWiring.swift` |
 | `Dictionary(grouping:by:)` | Builds a dictionary from each key to the array of elements with that key, in order | Go: a `map[K][]V` filled in a loop | `MXNodeCatalog.swift` |
@@ -131,6 +133,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Initializer rules | Set your own properties *before* `super.init`; `required init?(coder:)` must be provided | Reverse of `[super init]` first | `ViewportView.swift` |
 | `RandomNumberGenerator` | Implement `next() -> UInt64` and every `random(in:using:)` API accepts your generator | — | `GraphModel.swift` (`SeededRandom`) |
 | Subclassing `CALayer` | Override `draw(in:)`; also `init(layer:)`, which Core Animation uses to copy layers | ObjC `CALayer` subclass | `LayerGraphView.swift` (`NodeLayer`) |
+| `CATextLayer`, `insertSublayer(_:at:)` | A layer that draws a string at `fontSize` and `contentsScale`, wrapped or truncated; `insertSublayer` places a layer in the stack where `addSublayer` puts it on top | The same Core Animation API in ObjC | `LayerGraphView.swift` (`BackdropLayer`, M4d) |
 | Subclassing AppKit classes | `override func read(from:ofType:)`; `override class var` for class properties AppKit asks the type | ObjC subclassing | `MaterialXDocument.swift` |
 | `UndoManager.registerUndo(withTarget:)` | Stores a closure to call on Undo; registering during an undo becomes the redo | `-registerUndoWithTarget:handler:` | `MaterialXDocument.swift` |
 | `Codable` | Declaring `Codable` on a struct of Codable properties makes the compiler write its encoding and decoding (JSON, property lists) | Go's `encoding/json` struct tags, without the tags | `LibraryPanel.swift` (`NodeDefinitionDrag`) |
@@ -198,6 +201,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `LazyVGrid`, `ForEach` | A grid that creates cells as they scroll into view; one view per element of a collection | `Spikes/M0cSwatches/SwatchSpikeApp.swift` |
 | `@Observable` | A class whose property reads are tracked; views that read a property redraw when it changes. Replaces `ObservableObject` + `@Published` | KVO, without the strings | `GraphCanvasController.swift` |
 | `withObservationTracking` | Observe an `@Observable` from non-SwiftUI code: fires once, *before* the change, so re-register and read the new value later | A one-shot KVO observer | `LayerGraphView.swift` |
+| `NotificationCenter` closures and `MainActor.assumeIsolated` | `addObserver(forName:object:queue:using:)` calls a closure; with `queue: .main` it runs on the main thread, and `assumeIsolated` lets it use main-actor state (checked at run time) | `addObserverForName:object:queue:usingBlock:` | `MainMenu.swift` (`shareCommandG`, M4d) |
 | `Canvas` | Immediate-mode drawing into a `GraphicsContext`, redrawn whenever state it reads changes | `drawRect:` | `CanvasGraphView.swift` |
 | `ZStack`, `.overlay` | Stack views on top of each other | Subviews in z order | `GraphSpikeApp.swift`, `CanvasGraphView.swift` |
 | `Picker` + `.tag` | A choice control; `.tag(value)` is what selecting a row writes into the binding | `NSPopUpButton` + `representedObject` | `GraphSpikeApp.swift` |

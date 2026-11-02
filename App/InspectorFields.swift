@@ -100,6 +100,10 @@ struct CommitTextField: View {
     /// The value to show, from the document.
     let text: String
     var prompt: String = ""
+    /// `.vertical` for text of several lines (a backdrop's note, M4d): the
+    /// field grows as it is typed into; Return still commits, ⌥-Return
+    /// starts a new line.
+    var axis: Axis = .horizontal
     /// Called with the new text, if it differs from `text`.
     let onCommit: (String) -> Void
 
@@ -112,7 +116,7 @@ struct CommitTextField: View {
     @FocusState private var isFocused: Bool
 
     var body: some View {
-        TextField(prompt, text: $draft)
+        TextField(prompt, text: $draft, axis: axis)
             .focused($isFocused)
             .onSubmit(commit)
             .onChange(of: isFocused) {

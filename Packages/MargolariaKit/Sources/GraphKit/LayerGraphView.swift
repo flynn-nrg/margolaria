@@ -4,6 +4,7 @@
 //
 //   root layer (background)
 //    └─ content layer          transform = pan + zoom; everything below is in graph coordinates
+//        ├─ backdrop 0 … N     one layer per backdrop (M4d): shapes and two text layers
 //        ├─ wires              one CAShapeLayer with every wire's curve
 //        ├─ cut wires          the wires an ⌥-drag will cut, highlighted
 //        ├─ node 0 … node N    one layer per node, drawn once with Core Graphics
@@ -25,10 +26,17 @@
 // swatch only replaces its thumbnail layer's image: the node isn't
 // redrawn either, so swatches arriving during an edit cost almost nothing.
 //
+// Backdrops (M4d) aren't drawn into an image like nodes: one can be far
+// bigger than a node, and an image of it at 400% on a Retina screen would
+// take hundreds of megabytes. Shape layers (vectors, drawn by the GPU at
+// any zoom) make its fill, header, edge and grip; text layers its title
+// and note, sized to the text.
+//
 // Introduces (SWIFT): subclassing `CALayer` and overriding `draw(in:)`,
 // `withObservationTracking`, CoreText from Swift, `CATransaction`,
 // `log2`/`ceil` and `pow`, `@discardableResult`; `nonisolated` on one
-// method of a main-actor type (M3c).
+// method of a main-actor type (M3c); `CATextLayer`, `insertSublayer(_:at:)`,
+// `CTFramesetter` to measure wrapped text (M4d).
 
 import AppKit
 import CoreText
@@ -49,6 +57,7 @@ public final class LayerGraphView: GraphEventView {
     private let cutLineLayer = CAShapeLayer()
     private let marqueeLayer = CAShapeLayer()
     private var nodeLayers: [NodeLayer] = []
+    private var backdropLayers: [BackdropLayer] = []
 
     /// The detail level the node images were last drawn at; see `detail(for:)`.
     private var drawnDetail: NodeLayer.Detail? = nil
@@ -57,6 +66,7 @@ public final class LayerGraphView: GraphEventView {
     private var drawnRevision: Int = -1
     private var drawnHiddenWires: Set<GraphWire> = []
     private var drawnSelection: Set<Int> = []
+    private var drawnBackdropSelection: Set<Int> = []
     private var drawnSolo: Int? = nil
     private var drawnCandidates: WireCandidates? = nil
 
@@ -86,6 +96,15 @@ public final class LayerGraphView: GraphEventView {
         cutWiresLayer.strokeColor = Self.cgColor(GraphPalette.cut)
         cutWiresLayer.lineWidth = 3
         contentLayer.addSublayer(cutWiresLayer)
+
+        // Behind the wires and nodes, in order: later backdrops on top.
+        // SWIFT/Core Animation: `insertSublayer(_:at:)` puts a layer at a
+        // place in the stack, where `addSublayer` puts it on top.
+        for (index, backdrop) in controller.model.backdrops.enumerated() {
+            let backdropLayer = BackdropLayer(backdrop: backdrop)
+            backdropLayers.append(backdropLayer)
+            contentLayer.insertSublayer(backdropLayer, at: UInt32(index))
+        }
 
         for node in controller.model.nodes {
             let nodeLayer = NodeLayer(node: node, thumbnail: thumbnail)
@@ -147,6 +166,7 @@ public final class LayerGraphView: GraphEventView {
             _ = controller.zoom
             _ = controller.offset
             _ = controller.selection
+            _ = controller.backdropSelection
             _ = controller.marquee
             _ = controller.positionsRevision
             _ = controller.wirePreview
@@ -189,6 +209,9 @@ public final class LayerGraphView: GraphEventView {
             for (index, node) in controller.model.nodes.enumerated() {
                 nodeLayers[index].frame = NodeLayer.layerFrame(for: node)
             }
+            for (index, backdrop) in controller.model.backdrops.enumerated() {
+                backdropLayers[index].place(at: backdrop.frame)
+            }
             wiresLayer.path = GraphLayout.wiresPath(for: controller.model, excluding: drawnHiddenWires)
         }
         updateWiring()
@@ -209,6 +232,9 @@ public final class LayerGraphView: GraphEventView {
                 nodeLayer.detail = detail
                 nodeLayer.contentsScale = detail.scale
                 nodeLayer.setNeedsDisplay()
+            }
+            for backdropLayer in backdropLayers {
+                backdropLayer.show(detail)
             }
         }
 
@@ -238,6 +264,13 @@ public final class LayerGraphView: GraphEventView {
                 nodeLayers[id].isSelected = selection.contains(id)
             }
             drawnSelection = selection
+        }
+        let backdropSelection: Set<Int> = controller.backdropSelection
+        if backdropSelection != drawnBackdropSelection {
+            for id in backdropSelection.symmetricDifference(drawnBackdropSelection) where id < backdropLayers.count {
+                backdropLayers[id].isSelected = backdropSelection.contains(id)
+            }
+            drawnBackdropSelection = backdropSelection
         }
 
         if let marquee = controller.marquee {
@@ -675,6 +708,142 @@ final class NodeLayer: CALayer {
         CTLineDraw(line, context)
         context.restoreGState()
         return width
+    }
+}
+
+/// One backdrop (M4d): a tinted, outlined rectangle with a header, its
+/// title and note, and a grip in the bottom-right corner. Built from shape
+/// and text layers rather than drawn into an image (see the file comment).
+final class BackdropLayer: CALayer {
+    private let fillLayer = CAShapeLayer()
+    private let headerLayer = CAShapeLayer()
+    private let gripLayer = CAShapeLayer()
+    private let selectionLayer = CAShapeLayer()
+    private let titleLayer = CATextLayer()
+    private let noteLayer = CATextLayer()
+    private let note: String
+    private var detail = NodeLayer.Detail(scale: 0, showsTitle: false, showsPortLabels: false)
+
+    var isSelected: Bool = false {
+        didSet { selectionLayer.isHidden = !isSelected }
+    }
+
+    init(backdrop: GraphBackdrop) {
+        note = backdrop.note
+        super.init()
+        let tint: (CGFloat, CGFloat, CGFloat) = GraphPalette.backdrop
+        fillLayer.fillColor = LayerGraphView.cgColor(tint, alpha: GraphPalette.backdropOpacity)
+        fillLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.backdropEdge, alpha: 0.5)
+        fillLayer.lineWidth = 1
+        headerLayer.fillColor = LayerGraphView.cgColor(tint, alpha: GraphPalette.backdropOpacity * 2)
+        gripLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.backdropEdge, alpha: 0.8)
+        gripLayer.lineWidth = 1.5
+        gripLayer.fillColor = nil
+        // A backdrop from an included file can't be resized.
+        gripLayer.isHidden = backdrop.isLocked
+        selectionLayer.fillColor = nil
+        selectionLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.selection)
+        selectionLayer.lineWidth = 2
+        selectionLayer.isHidden = true
+
+        // SWIFT/Core Animation: a CATextLayer draws a string in its bounds,
+        // in a font of `fontSize` points (the font's own size is ignored),
+        // at `contentsScale` pixels per point. A CTFont works as its font.
+        titleLayer.string = backdrop.isLocked ? backdrop.title + " · included" : backdrop.title
+        titleLayer.font = NodeLayer.titleFont
+        titleLayer.fontSize = 13
+        titleLayer.foregroundColor = LayerGraphView.cgColor(GraphPalette.backdropTitle)
+        titleLayer.truncationMode = .end
+        noteLayer.string = backdrop.note
+        noteLayer.font = NodeLayer.labelFont
+        noteLayer.fontSize = 11
+        noteLayer.foregroundColor = LayerGraphView.cgColor(GraphPalette.text, alpha: 0.85)
+        noteLayer.isWrapped = true
+        noteLayer.truncationMode = .end
+        noteLayer.isHidden = backdrop.note.isEmpty
+        for layer in [fillLayer, headerLayer, gripLayer, titleLayer, noteLayer, selectionLayer] as [CALayer] {
+            addSublayer(layer)
+        }
+        place(at: backdrop.frame)
+    }
+
+    override init(layer: Any) {
+        let other = layer as! BackdropLayer
+        note = other.note
+        super.init(layer: layer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("BackdropLayer is not used in nibs or storyboards")
+    }
+
+    /// Puts the backdrop at `rect` (graph coordinates), reshaping its parts
+    /// for a new size.
+    func place(at rect: CGRect) {
+        let sizeChanged: Bool = rect.size != frame.size
+        frame = rect
+        guard sizeChanged else {
+            return
+        }
+        // The layer's own coordinates: (0, 0) is its top-left corner (the
+        // content layer is flipped, like the view).
+        let local = CGRect(origin: .zero, size: rect.size)
+        let radius: CGFloat = GraphLayout.backdropCornerRadius
+        fillLayer.path = CGPath(roundedRect: local.insetBy(dx: 0.5, dy: 0.5), cornerWidth: radius, cornerHeight: radius,
+                                transform: nil)
+        let header = CGRect(x: 0, y: 0, width: local.width, height: min(GraphLayout.backdropHeaderHeight, local.height))
+        headerLayer.path = GraphLayout.roundedPath(header, topRadius: radius, bottomRadius: 0)
+        selectionLayer.path = CGPath(roundedRect: local, cornerWidth: radius, cornerHeight: radius, transform: nil)
+
+        // Three short diagonal lines in the corner.
+        let grip = CGMutablePath()
+        let size: CGFloat = GraphLayout.backdropGripSize
+        for step in 1...3 {
+            let inset: CGFloat = CGFloat(step) * size / 4
+            grip.move(to: CGPoint(x: local.maxX - inset, y: local.maxY - 3))
+            grip.addLine(to: CGPoint(x: local.maxX - 3, y: local.maxY - inset))
+        }
+        gripLayer.path = grip
+
+        let left: CGFloat = 10
+        titleLayer.frame = CGRect(x: left, y: (GraphLayout.backdropHeaderHeight - 17) / 2,
+                                  width: max(0, local.width - 2 * left), height: 17)
+        // The note under the header, no wider than is easy to read, and
+        // only as tall as its text (or the backdrop) needs.
+        let width: CGFloat = max(0, min(local.width - 2 * left, GraphLayout.backdropNoteMaximumWidth))
+        let available: CGFloat = max(0, local.height - GraphLayout.backdropHeaderHeight - 10)
+        noteLayer.frame = CGRect(x: left, y: GraphLayout.backdropHeaderHeight + 4, width: width,
+                                 height: min(available, Self.height(of: note, width: width)))
+    }
+
+    /// Draws the text at the detail level's resolution; the note only when
+    /// port labels are shown, the title only with node titles.
+    func show(_ detail: NodeLayer.Detail) {
+        guard detail != self.detail else {
+            return
+        }
+        self.detail = detail
+        titleLayer.contentsScale = detail.scale
+        noteLayer.contentsScale = detail.scale
+        titleLayer.isHidden = !detail.showsTitle
+        noteLayer.isHidden = note.isEmpty || !detail.showsPortLabels
+    }
+
+    /// The height `text` takes wrapped at `width`, in the note's font.
+    ///
+    /// SWIFT/CoreText: a framesetter lays text out in a shape; asked for a
+    /// size, it answers how much of a given width the text fills.
+    private static func height(of text: String, width: CGFloat) -> CGFloat {
+        guard !text.isEmpty, width > 0 else {
+            return 0
+        }
+        let font: CTFont = CTFontCreateCopyWithAttributes(NodeLayer.labelFont, 11, nil, nil)
+        let attributed = NSAttributedString(string: text, attributes: [.font: font])
+        let framesetter: CTFramesetter = CTFramesetterCreateWithAttributedString(attributed)
+        let size: CGSize = CTFramesetterSuggestFrameSizeWithConstraints(
+            framesetter, CFRange(location: 0, length: 0), nil,
+            CGSize(width: width, height: .greatestFiniteMagnitude), nil)
+        return ceil(size.height) + 2
     }
 }
 

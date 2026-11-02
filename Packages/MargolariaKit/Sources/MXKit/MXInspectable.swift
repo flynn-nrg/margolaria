@@ -3,8 +3,8 @@
 // What the inspector (M2b) can show: the element selected on the canvas,
 // found by its path. The canvas shows three kinds of things, and the
 // inspector treats each differently: nodes (and nodegraphs) with all their
-// inputs, a nodegraph's own inputs (one value each), and `<output>`
-// elements (only a connection).
+// inputs, a nodegraph's own inputs (one value each), `<output>` elements
+// (only a connection), and backdrops (a note, M4d).
 //
 // Introduces (SWIFT): an enum whose cases carry different structs, a
 // computed property that `switch`es over `self`.
@@ -24,6 +24,8 @@ public enum MXInspectable: Hashable, Sendable {
     /// An `<output>` element of the document or of the nodegraph at
     /// `graphPath` ("" for the document).
     case graphOutput(MXPort, graphPath: String)
+    /// A backdrop (M4d).
+    case backdrop(MXBackdrop)
 
     /// The element's name.
     public var name: String {
@@ -32,12 +34,14 @@ public enum MXInspectable: Hashable, Sendable {
             return node.name
         case .graphInput(let port, _), .graphOutput(let port, _):
             return port.name
+        case .backdrop(let backdrop):
+            return backdrop.name
         }
     }
 }
 
 extension MXDocument {
-    /// The node, nodegraph, nodegraph input or output at `path`, such as
+    /// The node, nodegraph, nodegraph input, output or backdrop at `path`, such as
     /// "NG_copper/grain"; nil if there is none.
     ///
     /// This reads the whole graph level the element is in, which is quick
@@ -68,6 +72,9 @@ extension MXDocument {
         }
         if let output = graph.outputs.first(where: { $0.name == name }) {
             return .graphOutput(output, graphPath: graphPath)
+        }
+        if let backdrop = graph.backdrops.first(where: { $0.name == name }) {
+            return .backdrop(backdrop)
         }
         return nil
     }

@@ -37,10 +37,21 @@
 // chain; the controller says which can apply to the selection, and passes
 // them to the app (onCommand).
 //
+// Backdrops (M4d): Group in Backdrop (⌘G) asks the app for one around the
+// selection (onCommand). A backdrop is picked up by its header: clicking
+// it selects it (Shift adds it to the selection), dragging moves it with
+// the nodes it contains, and its corner grip resizes it. Its body lets
+// clicks through, so a marquee can start inside it; a marquee selects the
+// backdrops entirely inside it. What a backdrop contains follows the
+// nodes: one dragged out of it leaves it, one dropped in it joins it, and
+// resizing it takes in or leaves out the nodes its edges pass. Moves,
+// resizes and the new contents are reported together when the button is
+// released (onMove).
+//
 // Introduces (SWIFT): `@Observable` classes, `@MainActor` on a type,
 // `Set`, `enum` state machines with associated values, `private(set)`,
 // matching several patterns in one `case`, a struct stored in an enum
-// case and updated by reassigning the case.
+// case and updated by reassigning the case; `formUnion` (M4d).
 
 import CoreGraphics
 import Observation
@@ -52,6 +63,10 @@ public enum GraphHit: Equatable, Sendable {
     case input(PortReference)
     /// The node's "+N more inputs" (or "Fewer inputs") row.
     case inputToggle(Int)
+    /// A backdrop's header (M4d), by its ID.
+    case backdrop(Int)
+    /// The grip in a backdrop's bottom-right corner, which resizes it.
+    case backdropGrip(Int)
     case empty
 }
 
@@ -136,6 +151,9 @@ public enum GraphCommand: Sendable {
     case copy, cut, paste, duplicate
     /// Graph > Collapse into Nodegraph (⌥⌘G) and Ungroup Nodegraph.
     case collapse, ungroup
+    /// Graph > Group in Backdrop (⌘G, M4d): a backdrop around the selected
+    /// nodes, or an empty one under the pointer.
+    case backdrop
 }
 
 /// A command to do, with the nodes it applies to and where the pointer is.
@@ -152,6 +170,36 @@ public struct GraphCommandRequest: Sendable {
         self.command = command
         self.nodes = nodes
         self.location = location
+    }
+}
+
+/// What a drag moved or resized (M4d), reported once, when the button is
+/// released: new positions and frames (graph coordinates), and what the
+/// backdrops whose contents changed now contain.
+public struct GraphMove: Equatable, Sendable {
+    /// Moved nodes' new positions, by ID.
+    public var nodes: [Int: CGPoint] = [:]
+    /// Moved or resized backdrops' new frames, by ID.
+    public var backdrops: [Int: CGRect] = [:]
+    /// The new contents of the backdrops nodes left or joined, by ID.
+    public var contents: [Int: Set<Int>] = [:]
+
+    public init(nodes: [Int: CGPoint] = [:], backdrops: [Int: CGRect] = [:], contents: [Int: Set<Int>] = [:]) {
+        self.nodes = nodes
+        self.backdrops = backdrops
+        self.contents = contents
+    }
+}
+
+/// What Delete removes: nodes and backdrops, by ID, none of them locked.
+/// Deleting a backdrop leaves what it contains.
+public struct GraphDeletion: Equatable, Sendable {
+    public var nodes: Set<Int>
+    public var backdrops: Set<Int>
+
+    public init(nodes: Set<Int>, backdrops: Set<Int> = []) {
+        self.nodes = nodes
+        self.backdrops = backdrops
     }
 }
 
@@ -178,6 +226,9 @@ public final class GraphCanvasController {
 
     /// IDs of the selected nodes.
     public var selection: Set<Int> = []
+    /// IDs of the selected backdrops (M4d). Selected with nodes or alone;
+    /// moving any of the selection moves them all.
+    public var backdropSelection: Set<Int> = []
 
     /// The marquee rectangle being dragged, in graph coordinates, or nil.
     public private(set) var marquee: CGRect? = nil
@@ -219,13 +270,16 @@ public final class GraphCanvasController {
     /// marquee) can't be represented.
     private enum DragState {
         case idle
-        /// Moving the selected nodes; their positions at mouse-down.
-        /// `toggle` is the node whose "+N more inputs" row was pressed: if
-        /// nothing moves, the click expands (or collapses) it.
-        case movingNodes(start: CGPoint, original: [Int: CGPoint], toggle: Int?)
+        /// Moving the selected nodes and backdrops, and what the backdrops
+        /// contain; their positions and frames at mouse-down. `toggle` is
+        /// the node whose "+N more inputs" row was pressed: if nothing
+        /// moves, the click expands (or collapses) it.
+        case movingNodes(start: CGPoint, original: [Int: CGPoint], backdrops: [Int: CGRect], toggle: Int?)
         /// Rubber-band selection from `start`; the selection before it began
-        /// (kept when Shift is held).
-        case marquee(start: CGPoint, base: Set<Int>)
+        /// (kept when Shift is held), of nodes and of backdrops.
+        case marquee(start: CGPoint, base: Set<Int>, baseBackdrops: Set<Int>)
+        /// Dragging a backdrop's grip (M4d); its frame at mouse-down.
+        case resizingBackdrop(Int, start: CGPoint, original: CGRect)
         /// Dragging a wire from a pin.
         case wiring(WireDrag)
         /// ⌥-dragging a line from `start` to cut the wires it crosses.
@@ -284,13 +338,13 @@ public final class GraphCanvasController {
     /// Called when the user asks to leave the current graph (the U key).
     @ObservationIgnored public var onNavigateUp: (@MainActor () -> Void)? = nil
 
-    /// Called when a drag has moved nodes, with their new positions (graph
-    /// coordinates), when the mouse button is released. The app saves them
-    /// in the document; the canvas has already moved them.
-    @ObservationIgnored public var onNodesMoved: (@MainActor ([Int: CGPoint]) -> Void)? = nil
+    /// Called when a drag has moved nodes or backdrops, or resized a
+    /// backdrop, when the mouse button is released (see ``GraphMove``).
+    /// The app saves it in the document; the canvas has already moved them.
+    @ObservationIgnored public var onMove: (@MainActor (GraphMove) -> Void)? = nil
 
-    /// Called with the IDs of the nodes to delete (see ``deleteSelection()``).
-    @ObservationIgnored public var onDeleteNodes: (@MainActor (Set<Int>) -> Void)? = nil
+    /// Called with the nodes and backdrops to delete (see ``deleteSelection()``).
+    @ObservationIgnored public var onDelete: (@MainActor (GraphDeletion) -> Void)? = nil
 
     /// Called when a wire is dropped on an input (or output) it can
     /// connect to. The canvas doesn't change its model: the app makes the
@@ -429,6 +483,16 @@ public final class GraphCanvasController {
                 return .node(node.id)
             }
         }
+        // Backdrops are under the nodes, and only their header and grip
+        // can be picked up.
+        for backdrop in model.backdrops.reversed() {
+            if GraphLayout.backdropGripFrame(of: backdrop).contains(point) {
+                return .backdropGrip(backdrop.id)
+            }
+            if GraphLayout.backdropHeaderFrame(of: backdrop).contains(point) {
+                return .backdrop(backdrop.id)
+            }
+        }
         return .empty
     }
 
@@ -439,6 +503,12 @@ public final class GraphCanvasController {
             result.insert(node.id)
         }
         return result
+    }
+
+    /// IDs of the backdrops entirely inside `rect`: a marquee over part of
+    /// a big backdrop selects the nodes in it, not the backdrop.
+    public func backdrops(inside rect: CGRect) -> Set<Int> {
+        Set(model.backdrops.filter { rect.contains($0.frame) }.map(\.id))
     }
 
     private static func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat {
@@ -497,6 +567,29 @@ public final class GraphCanvasController {
             break
         }
 
+        // A backdrop's grip resizes it, alone; its header selects it, and
+        // moves it with the rest of the selection (M4d).
+        switch hit {
+        case .backdropGrip(let id) where !model.backdrops[id].isLocked:
+            backdropSelection = [id]
+            selection = []
+            drag = .resizingBackdrop(id, start: point, original: model.backdrops[id].frame)
+            return
+        case .backdrop(let id), .backdropGrip(let id):
+            if extend {
+                if backdropSelection.remove(id) == nil {
+                    backdropSelection.insert(id)
+                }
+            } else if !backdropSelection.contains(id) {
+                backdropSelection = [id]
+                selection = []
+            }
+            drag = movingSelection(from: point, toggle: nil)
+            return
+        default:
+            break
+        }
+
         // Which node was hit, if any.
         //
         // SWIFT: One `case` can match several patterns if they bind the
@@ -514,7 +607,7 @@ public final class GraphCanvasController {
             toggle = id
         case .output(let port), .input(let port):
             hitNode = port.node
-        case .empty:
+        case .empty, .backdrop, .backdropGrip:
             hitNode = nil
         }
 
@@ -530,20 +623,36 @@ public final class GraphCanvasController {
                 }
             } else if !selection.contains(id) {
                 selection = [id]
+                backdropSelection = []
             }
-            var original: [Int: CGPoint] = [:]
-            // Locked nodes stay where they are.
-            for selected in selection where !model.nodes[selected].isLocked {
-                original[selected] = model.nodes[selected].position
-            }
-            drag = .movingNodes(start: point, original: original, toggle: toggle)
+            drag = movingSelection(from: point, toggle: toggle)
         } else {
             if !extend {
                 selection = []
+                backdropSelection = []
             }
-            drag = .marquee(start: point, base: selection)
+            drag = .marquee(start: point, base: selection, baseBackdrops: backdropSelection)
             marquee = CGRect(origin: point, size: .zero)
         }
+    }
+
+    /// A drag from `point` moving the selection: the selected nodes, the
+    /// selected backdrops and what they contain. Locked ones stay where
+    /// they are.
+    private func movingSelection(from point: CGPoint, toggle: Int?) -> DragState {
+        var nodes: Set<Int> = selection
+        var backdrops: [Int: CGRect] = [:]
+        for id in backdropSelection where !model.backdrops[id].isLocked {
+            backdrops[id] = model.backdrops[id].frame
+            // SWIFT: `formUnion` adds another set's elements in place;
+            // `union` would return a new set.
+            nodes.formUnion(model.backdrops[id].contents)
+        }
+        var original: [Int: CGPoint] = [:]
+        for id in nodes where !model.nodes[id].isLocked {
+            original[id] = model.nodes[id].position
+        }
+        return .movingNodes(start: point, original: original, backdrops: backdrops, toggle: toggle)
     }
 
     /// Mouse moved with the button down.
@@ -552,14 +661,24 @@ public final class GraphCanvasController {
         switch drag {
         case .idle, .choosing, .awaitingNode:
             break
-        case .movingNodes(let start, let original, _):
-            moveNodes(original, by: CGSize(width: point.x - start.x, height: point.y - start.y))
-        case .marquee(let start, let base):
+        case .movingNodes(let start, let original, let backdrops, _):
+            let delta = CGSize(width: point.x - start.x, height: point.y - start.y)
+            for (id, frame) in backdrops {
+                model.backdrops[id].frame = frame.offsetBy(dx: delta.width, dy: delta.height)
+            }
+            moveNodes(original, by: delta)
+        case .marquee(let start, let base, let baseBackdrops):
             let rect = CGRect(x: min(start.x, point.x), y: min(start.y, point.y),
                               width: abs(point.x - start.x), height: abs(point.y - start.y))
             marquee = rect
             // SWIFT: `union` returns a new Set with the elements of both.
             selection = base.union(nodes(in: rect))
+            backdropSelection = baseBackdrops.union(backdrops(inside: rect))
+        case .resizingBackdrop(let id, let start, let original):
+            let minimum: CGSize = GraphLayout.backdropMinimumSize
+            model.backdrops[id].frame.size = CGSize(width: max(minimum.width, original.width + point.x - start.x),
+                                                    height: max(minimum.height, original.height + point.y - start.y))
+            positionsRevision += 1
         case .wiring(var wire):
             // SWIFT: `case .wiring(var wire)` binds a mutable *copy* of the
             // struct in the enum. Changing the copy doesn't change `drag`,
@@ -600,17 +719,32 @@ public final class GraphCanvasController {
             marquee = nil
         }
         switch drag {
-        case .movingNodes(_, let original, let toggle):
+        case .movingNodes(_, let original, let backdrops, let toggle):
             drag = .idle
             // Report a finished move, once, with the new positions.
-            var moved: [Int: CGPoint] = [:]
+            var move = GraphMove()
             for (id, start) in original where model.nodes[id].position != start {
-                moved[id] = model.nodes[id].position
+                move.nodes[id] = model.nodes[id].position
             }
-            if !moved.isEmpty {
-                onNodesMoved?(moved)
+            for (id, start) in backdrops where model.backdrops[id].frame != start {
+                move.backdrops[id] = model.backdrops[id].frame
+            }
+            if !move.nodes.isEmpty || !move.backdrops.isEmpty {
+                move.contents = contents(afterMoving: original, with: Set(backdrops.keys))
+                onMove?(move)
             } else if let toggle {
                 onToggleInputs?(toggle)
+            }
+            return nil
+        case .resizingBackdrop(let id, _, let original):
+            drag = .idle
+            let frame: CGRect = model.backdrops[id].frame
+            if frame != original {
+                var move = GraphMove(backdrops: [id: frame])
+                if let contents = contents(of: id, resizedFrom: original) {
+                    move.contents[id] = contents
+                }
+                onMove?(move)
             }
             return nil
         case .wiring(let wire):
@@ -641,6 +775,54 @@ public final class GraphCanvasController {
             }
             return nil
         }
+    }
+
+    /// What the backdrops that didn't move contain after the nodes in
+    /// `original` moved (from those positions) with the backdrops
+    /// `moving`: a node whose middle is now inside one is in it, a node
+    /// dragged out of one isn't. Only the changed backdrops are returned,
+    /// and the model is updated. (A node a file puts in a backdrop it
+    /// isn't drawn in stays in it until it is dragged in and out.)
+    private func contents(afterMoving original: [Int: CGPoint], with moving: Set<Int>) -> [Int: Set<Int>] {
+        var changed: [Int: Set<Int>] = [:]
+        for backdrop in model.backdrops where !backdrop.isLocked && !moving.contains(backdrop.id) {
+            var contents: Set<Int> = backdrop.contents
+            for (id, start) in original {
+                var before: GraphNode = model.nodes[id]
+                before.position = start
+                if backdrop.frame.contains(GraphLayout.centre(of: model.nodes[id])) {
+                    contents.insert(id)
+                } else if backdrop.frame.contains(GraphLayout.centre(of: before)) {
+                    contents.remove(id)
+                }
+            }
+            if contents != backdrop.contents {
+                model.backdrops[backdrop.id].contents = contents
+                changed[backdrop.id] = contents
+            }
+        }
+        return changed
+    }
+
+    /// What the backdrop `id` contains after being resized from `original`:
+    /// the nodes its edges passed over are taken in or left out. Nil if
+    /// that is nothing; otherwise the model is updated.
+    private func contents(of id: Int, resizedFrom original: CGRect) -> Set<Int>? {
+        let frame: CGRect = model.backdrops[id].frame
+        var contents: Set<Int> = model.backdrops[id].contents
+        for node in model.nodes {
+            let centre: CGPoint = GraphLayout.centre(of: node)
+            if frame.contains(centre), !original.contains(centre) {
+                contents.insert(node.id)
+            } else if original.contains(centre), !frame.contains(centre) {
+                contents.remove(node.id)
+            }
+        }
+        guard contents != model.backdrops[id].contents else {
+            return nil
+        }
+        model.backdrops[id].contents = contents
+        return contents
     }
 
     /// The user picked item `index` of the ``WireMenu`` from ``mouseUp()``,
@@ -680,7 +862,7 @@ public final class GraphCanvasController {
             clearWire()
             cutLine = nil
             cutWires = []
-        case .idle, .movingNodes, .marquee:
+        case .idle, .movingNodes, .marquee, .resizingBackdrop:
             break
         }
     }
@@ -870,12 +1052,20 @@ public final class GraphCanvasController {
         hiddenWires = []
     }
 
-    /// Asks the app to delete the selected nodes (the Delete key, or Edit >
-    /// Delete). Locked nodes are left out; nothing happens if none remain.
+    /// The selected nodes and backdrops Delete would remove: those that
+    /// aren't locked.
+    public var deletableSelection: GraphDeletion {
+        GraphDeletion(nodes: selection.filter { !model.nodes[$0].isLocked },
+                      backdrops: backdropSelection.filter { !model.backdrops[$0].isLocked })
+    }
+
+    /// Asks the app to delete the selected nodes and backdrops (the Delete
+    /// key, or Edit > Delete). Locked ones are left out; nothing happens if
+    /// none remain.
     public func deleteSelection() {
-        let deletable: Set<Int> = selection.filter { !model.nodes[$0].isLocked }
-        if !deletable.isEmpty {
-            onDeleteNodes?(deletable)
+        let deletable: GraphDeletion = deletableSelection
+        if !deletable.nodes.isEmpty || !deletable.backdrops.isEmpty {
+            onDelete?(deletable)
         }
     }
 
@@ -885,7 +1075,7 @@ public final class GraphCanvasController {
     private func nodes(for command: GraphCommand) -> Set<Int> {
         let unlocked: Set<Int> = selection.filter { !model.nodes[$0].isLocked }
         switch command {
-        case .copy, .duplicate:
+        case .copy, .duplicate, .backdrop:
             return selection
         case .cut, .collapse:
             return unlocked
@@ -901,6 +1091,10 @@ public final class GraphCanvasController {
     public func canPerform(_ command: GraphCommand) -> Bool {
         if command == .paste {
             return canPaste?() ?? true
+        }
+        // With nothing selected, an empty backdrop under the pointer.
+        if command == .backdrop {
+            return true
         }
         return !nodes(for: command).isEmpty
     }
@@ -957,6 +1151,9 @@ public final class GraphCanvasController {
         if request == .selection {
             for id in selection {
                 bounds = bounds.union(GraphLayout.frame(of: model.nodes[id]))
+            }
+            for id in backdropSelection {
+                bounds = bounds.union(model.backdrops[id].frame)
             }
         }
         if bounds.isNull {
@@ -1029,7 +1226,7 @@ public final class GraphCanvasController {
         case .inputToggle:
             // The first click already expanded or collapsed the node.
             break
-        case .empty:
+        case .backdrop, .backdropGrip, .empty:
             break
         }
     }

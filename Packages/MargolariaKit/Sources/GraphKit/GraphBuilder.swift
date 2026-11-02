@@ -21,6 +21,10 @@
 // nodedef (a graph implementing one) can't hold a position: they are
 // locked.
 //
+// Backdrops (M4d) come last, framing the canvas nodes they contain. One
+// saved without a size (by another tool) is fitted around its nodes once
+// they are placed.
+//
 // Units: MaterialX's Graph Editor stores positions in node sizes (its nodes
 // are 138 × 116 points). Our nodes are 220 points wide, so one unit is 220
 // points across and 220 × 116 / 138 ≈ 185 down: a layout keeps its
@@ -62,12 +66,25 @@ public struct DocumentGraph: Sendable {
     /// The nodes whose position came from the document.
     public let positioned: Set<Int>
 
+    /// The MaterialX path of each backdrop, by index, as ``elementPaths``
+    /// for nodes.
+    public let backdropPaths: [String]
+    /// The backdrops saved without a position and size: ``layout()`` fits
+    /// them around what they contain.
+    public let fittedBackdrops: Set<Int>
+
     /// Canvas points per MaterialX position unit (see the file comment).
     public static let pointsPerUnit = CGSize(width: GraphLayout.nodeWidth, height: GraphLayout.nodeWidth * 116 / 138)
 
     /// Converts a canvas position to MaterialX units, for `xpos`/`ypos`.
     public static func units(fromPoints point: CGPoint) -> CGPoint {
         CGPoint(x: point.x / pointsPerUnit.width, y: point.y / pointsPerUnit.height)
+    }
+
+    /// Converts a canvas rectangle (a backdrop's frame) to MaterialX units.
+    public static func units(fromPoints rect: CGRect) -> CGRect {
+        CGRect(origin: units(fromPoints: rect.origin),
+               size: CGSize(width: rect.width / pointsPerUnit.width, height: rect.height / pointsPerUnit.height))
     }
 
     /// Places every node without a saved position with GraphAutoLayout,
@@ -84,6 +101,19 @@ public struct DocumentGraph: Sendable {
         // nodes taller than when they were saved (M3c).
         if !positioned.isEmpty {
             GraphAutoLayout.separate(&model)
+        }
+        fitBackdrops()
+    }
+
+    /// Fits the backdrops saved without a frame around the nodes they
+    /// contain, now that those are placed. One containing nothing keeps
+    /// the smallest size, where it is.
+    private mutating func fitBackdrops() {
+        for id in fittedBackdrops {
+            let frames: [CGRect] = model.backdrops[id].contents.sorted().map { GraphLayout.frame(of: model.nodes[$0]) }
+            if let frame = GraphLayout.backdropFrame(around: frames) {
+                model.backdrops[id].frame = frame
+            }
         }
     }
 
@@ -114,6 +144,11 @@ public struct DocumentGraph: Sendable {
     /// The canvas node for the element at `path`, if it is on this level.
     public func nodeIndex(forPath path: String) -> Int? {
         elementPaths.firstIndex(of: path)
+    }
+
+    /// The backdrop at `path`, if it is on this level.
+    public func backdropIndex(forPath path: String) -> Int? {
+        backdropPaths.firstIndex(of: path)
     }
 }
 
@@ -250,8 +285,36 @@ public enum GraphBuilder {
             connect(output.connection, to: PortReference(node: firstOutput + offset, index: 0))
         }
 
-        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires), elementPaths: paths, kinds: kinds,
-                             graphPath: graph.path, positioned: positioned)
+        // 5. Backdrops, by the names of what they contain: nodes, and the
+        // graph's own inputs and outputs.
+        var canvasIndex: [String: Int] = [:]
+        for (id, path) in paths.enumerated() {
+            canvasIndex[path] = id
+        }
+        var backdrops: [GraphBackdrop] = []
+        var fitted: Set<Int> = []
+        for backdrop in graph.backdrops {
+            let id: Int = backdrops.count
+            let contents = Set(backdrop.contains.compactMap { canvasIndex[childPath(graph.path, $0)] })
+            let unit: CGSize = DocumentGraph.pointsPerUnit
+            // SWIFT: `map` on an optional converts the value if there is one.
+            let origin: CGPoint = backdrop.position.map { CGPoint(x: $0.x * unit.width, y: $0.y * unit.height) } ?? .zero
+            let frame: CGRect
+            if backdrop.position != nil, let size = backdrop.size {
+                frame = CGRect(origin: origin, size: CGSize(width: size.width * unit.width, height: size.height * unit.height))
+            } else {
+                // Fitted by `layout()`; until then the smallest, where it
+                // says it is.
+                frame = CGRect(origin: origin, size: GraphLayout.backdropMinimumSize)
+                fitted.insert(id)
+            }
+            backdrops.append(GraphBackdrop(id: id, title: backdrop.name, note: backdrop.note, frame: frame,
+                                           contents: contents, isLocked: backdrop.isIncluded))
+        }
+
+        return DocumentGraph(model: GraphModel(nodes: nodes, wires: wires, backdrops: backdrops), elementPaths: paths,
+                             kinds: kinds, graphPath: graph.path, positioned: positioned,
+                             backdropPaths: graph.backdrops.map(\.path), fittedBackdrops: fitted)
     }
 
     /// A saved position (MaterialX units) in canvas points, noting `id` in

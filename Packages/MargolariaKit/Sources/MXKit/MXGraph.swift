@@ -1,9 +1,9 @@
 // MXGraph.swift
 //
 // The graph structure of a document, as plain Swift values: the nodes of one
-// level (the document root or one nodegraph), their inputs and outputs, and
-// how they connect. The graph canvas (M1b) draws from these; nothing here
-// can change the document.
+// level (the document root or one nodegraph), their inputs and outputs,
+// how they connect, and the backdrops framing them (M4d). The graph canvas
+// (M1b) draws from these; nothing here can change the document.
 //
 // These are snapshots: reading a graph copies what MaterialX holds at that
 // moment. When M2 adds editing, each edit produces a new snapshot.
@@ -270,6 +270,41 @@ public struct MXNode: Identifiable, Hashable, Sendable {
     }
 }
 
+/// A backdrop (M4d): a frame drawn behind some of a graph's elements, with
+/// a note. MaterialX's `<backdrop>`, which only editors read.
+public struct MXBackdrop: Identifiable, Hashable, Sendable {
+    /// Its name, unique within its graph (among nodes too).
+    public let name: String
+    /// The path from the document root, such as "NG_copper/notes".
+    public let path: String
+    /// What it frames (`contains`), by name: nodes, nodegraphs, and a
+    /// nodegraph's own inputs and outputs, all in the same graph.
+    public let contains: [String]
+    /// Its `note`, or "" without one.
+    public let note: String
+    /// True if it came from an `xi:include`d file: read-only.
+    public let isIncluded: Bool
+    /// Its top-left corner (`xpos`/`ypos`), in the units of nodes'
+    /// positions. Nil when another tool wrote it without one.
+    public let position: CGPoint?
+    /// Its `width` and `height`, in the same units. Nil when another tool
+    /// wrote it without them: the canvas fits it to what it contains.
+    public let size: CGSize?
+
+    public var id: String { path }
+
+    /// Converts the bridge's C++ struct.
+    init(_ backdrop: mxbridge.BackdropInfo) {
+        name = backdrop.name.swiftString
+        path = backdrop.path.swiftString
+        contains = backdrop.contains.map { $0.swiftString }
+        note = backdrop.note.swiftString
+        isIncluded = backdrop.isIncluded
+        position = backdrop.hasPosition ? CGPoint(x: CGFloat(backdrop.xpos), y: CGFloat(backdrop.ypos)) : nil
+        size = backdrop.hasSize ? CGSize(width: CGFloat(backdrop.width), height: CGFloat(backdrop.height)) : nil
+    }
+}
+
 /// One level of a document's graph: the document root, or one nodegraph.
 public struct MXGraph: Hashable, Sendable {
     /// "" for the document root; otherwise the nodegraph's path.
@@ -280,6 +315,8 @@ public struct MXGraph: Hashable, Sendable {
     public let interfaceInputs: [MXPort]
     /// The `<output>` elements of this level, with what they connect to.
     public let outputs: [MXPort]
+    /// Its backdrops (M4d), in file order.
+    public let backdrops: [MXBackdrop]
 
     /// The node called `name`, or nil.
     public func node(named name: String) -> MXNode? {
@@ -292,15 +329,17 @@ public struct MXGraph: Hashable, Sendable {
     /// clicking a node of the kind opens one.
     public func withoutImplementations() -> MXGraph {
         MXGraph(path: path, nodes: nodes.filter { !($0.isNodeGraph && $0.nodeDefName != nil) },
-                interfaceInputs: interfaceInputs, outputs: outputs)
+                interfaceInputs: interfaceInputs, outputs: outputs, backdrops: backdrops)
     }
 
     /// A level from its parts (for ``withoutImplementations()``).
-    private init(path: String, nodes: [MXNode], interfaceInputs: [MXPort], outputs: [MXPort]) {
+    private init(path: String, nodes: [MXNode], interfaceInputs: [MXPort], outputs: [MXPort],
+                 backdrops: [MXBackdrop]) {
         self.path = path
         self.nodes = nodes
         self.interfaceInputs = interfaceInputs
         self.outputs = outputs
+        self.backdrops = backdrops
     }
 
     /// Converts the bridge's C++ struct.
@@ -309,6 +348,7 @@ public struct MXGraph: Hashable, Sendable {
         nodes = graph.nodes.map { MXNode($0) }
         interfaceInputs = graph.interfaceInputs.map { MXPort($0) }
         outputs = graph.outputs.map { MXPort($0) }
+        backdrops = graph.backdrops.map { MXBackdrop($0) }
     }
 }
 

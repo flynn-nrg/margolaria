@@ -115,13 +115,14 @@ extension MXDocument {
         return newPaths.map { $0.swiftString }
     }
 
-    /// A C++ vector of the strings, for the bridge.
+    /// A C++ vector of the strings, for the bridge. Internal, not private:
+    /// MXBackdropEdit.swift uses it too.
     ///
     /// SWIFT: `reduce(into:)` starts from an empty value and lets the
     /// closure change it in place (`inout`) for each element: here,
     /// `push_back` as in C++. `StringVector` is the bridge's alias for
     /// `std::vector<std::string>`; Swift can't spell the template itself.
-    private static func stringVector(_ strings: [String]) -> mxbridge.StringVector {
+    static func stringVector(_ strings: [String]) -> mxbridge.StringVector {
         strings.reduce(into: mxbridge.StringVector()) { vector, string in
             vector.push_back(std.string(string))
         }

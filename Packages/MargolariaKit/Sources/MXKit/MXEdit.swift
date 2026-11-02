@@ -166,8 +166,8 @@ extension MXDocument {
         }
     }
 
-    /// Renames a node or nodegraph, updating what refers to it. Returns its
-    /// new path.
+    /// Renames a node, nodegraph or backdrop (M4d), updating what refers
+    /// to it. Returns its new path.
     @discardableResult
     public func renameNode(at path: String, to name: String) throws -> String {
         var newPath = std.string()

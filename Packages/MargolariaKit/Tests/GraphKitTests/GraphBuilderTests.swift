@@ -184,7 +184,7 @@ struct CanvasEditingTests {
         controller.zoom = 1
         controller.offset = .zero
         var reports: [[Int: CGPoint]] = []
-        controller.onNodesMoved = { reports.append($0) }
+        controller.onMove = { reports.append($0.nodes) }
 
         let frame: CGRect = GraphLayout.frame(of: controller.model.nodes[3])
         let start = CGPoint(x: frame.midX, y: frame.midY)
@@ -210,7 +210,7 @@ struct CanvasEditingTests {
         controller.zoom = 1
         controller.offset = .zero
         var deleted: Set<Int>? = nil
-        controller.onDeleteNodes = { deleted = $0 }
+        controller.onDelete = { deleted = $0.nodes }
 
         controller.selection = [2]
         controller.deleteSelection()

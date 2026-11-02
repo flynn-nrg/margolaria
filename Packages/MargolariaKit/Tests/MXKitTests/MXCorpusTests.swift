@@ -246,7 +246,7 @@ struct MXCorpusTests {
         switch try document.inspectable(at: path) {
         case .node(let node):
             return node.inputs.first(where: { $0.name == name })
-        case .graphInput, .graphOutput, nil:
+        case .graphInput, .graphOutput, .backdrop, nil:
             // A nodegraph is listed as a node in its parent; `path` here
             // is always a node or a nodegraph.
             return nil
