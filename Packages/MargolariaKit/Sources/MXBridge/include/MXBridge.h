@@ -395,6 +395,13 @@ public:
     /// locations, sharing nothing with this one. Undo keeps these.
     Document copy() const;
 
+    /// Parses `xml` as this document's own text (the XML tab, M4e): its
+    /// `xi:include`s found next to this document's file, that file recorded
+    /// as its source (so included elements and relative texture paths
+    /// resolve as they do here), and this document's data library. On
+    /// failure, returns an empty Document and sets `errorMessage`.
+    Document readText(const std::string& xml, std::string& errorMessage) const;
+
     /// Compares two documents element by element, ignoring formatting
     /// (MaterialX's Element::isEquivalent). On a difference, returns false
     /// and describes the first one in `message`.

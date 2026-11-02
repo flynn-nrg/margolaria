@@ -1100,6 +1100,36 @@ Document Document::copy() const {
     return result;
 }
 
+Document Document::readText(const std::string& xml, std::string& errorMessage) const {
+    if (!_impl) {
+        errorMessage = "No document loaded";
+        return Document();
+    }
+    try {
+        auto impl = std::make_shared<Impl>();
+        impl->document = mx::createDocument();
+        // The file's folder, as readFromFile searches it. A document that
+        // didn't come from a file has no source, and no folder to search.
+        const std::string source = _impl->document->getSourceUri();
+        mx::FileSearchPath searchPath;
+        if (!source.empty()) {
+            searchPath.append(mx::FilePath(source).getParentPath());
+        }
+        const mx::XmlReadOptions options = ReadOptions();
+        mx::readFromXmlString(impl->document, xml, searchPath, &options);
+        impl->document->setSourceUri(source);
+        if (mx::ConstDocumentPtr library = _impl->document->getDataLibrary()) {
+            impl->document->setDataLibrary(library);
+        }
+        Document document;
+        document._impl = impl;
+        return document;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return Document();
+    }
+}
+
 bool Document::isEquivalent(const Document& other, std::string& message) const {
     if (!_impl || !other._impl) {
         message = "No document loaded";

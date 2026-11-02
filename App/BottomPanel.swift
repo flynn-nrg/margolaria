@@ -1,7 +1,8 @@
 // BottomPanel.swift
 //
 // The panel under the canvas (PLAN.md §4.1, region 6), with tabs:
-//   XML      the document's XML, the canvas selection highlighted
+//   XML      the document's XML, the canvas selection highlighted;
+//            editable, applied with ⌘↩ (M4e, XMLTextView.swift)
 //   Issues   MaterialX's validation and Margolaria's checks; clicking one
 //            shows its node on the canvas
 // "Generated Shader" and "Console" come in later milestones.
@@ -25,6 +26,8 @@ enum BottomTab: String, CaseIterable, Identifiable {
 struct BottomPanel: View {
     let document: MaterialXDocument
     @Binding var tab: BottomTab
+    /// The XML tab's edits, kept by the window across tab switches.
+    let xmlDraft: XMLDraft
     /// The element selected on the canvas, highlighted in the XML.
     let selectedPath: String?
     /// Called when the user picks an issue, to show its element.
@@ -67,7 +70,7 @@ struct BottomPanel: View {
     private var content: some View {
         switch tab {
         case .xml:
-            XMLTextView(xml: document.xml, highlightedPath: selectedPath)
+            XMLTab(document: document, draft: xmlDraft, highlightedPath: selectedPath)
         case .issues:
             IssuesList(issues: document.issues, libraryLoaded: document.libraryLoaded, onSelect: onSelectIssue)
         }
@@ -77,6 +80,10 @@ struct BottomPanel: View {
     private func title(for tab: BottomTab) -> String {
         if tab == .issues, !document.issues.isEmpty {
             return "Issues (\(document.issues.count))"
+        }
+        // A dot while the text has edits not applied, as on a document.
+        if tab == .xml, xmlDraft.edits != nil {
+            return "XML •"
         }
         return tab.rawValue
     }
