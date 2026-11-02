@@ -321,6 +321,18 @@ final class MaterialXDocument: NSDocument {
         contentChanged()
     }
 
+    /// Replaces the whole document with `text`, the XML tab's (M4e), as
+    /// one undo step, "Edit XML". `applied` is called once the document
+    /// is the text's; not if MaterialX can't read it (the error is shown,
+    /// and the text stays in the tab), nor before the user agrees to an
+    /// upgrade (see `edit`).
+    func apply(text: String, applied: @escaping () -> Void) {
+        edit("Edit XML") { content in
+            try content.replaceContents(withText: text)
+            applied()
+        }
+    }
+
     /// Ends the continuous edit in progress, if any: the next edit is a new
     /// undo step even with the same key. Sliders call it when released.
     func endContinuousEdit() {

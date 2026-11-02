@@ -8,9 +8,12 @@
 // regular: one element per tag, attributes in double quotes, no CDATA. It is
 // a highlighter, not an XML parser; MaterialX does the real parsing.
 //
-// Introduces (SWIFT): regex literals (`#/.../#`), `firstMatch`/`matches`,
-// `Range<String.Index>`, substrings sharing their parent's indices,
-// `popLast()`, `compactMap`.
+// It scans the text's bytes (M4e: it runs on every key typed in the XML
+// tab). Until M4e it used regular expressions, kept in MXXMLTextTests as
+// the reference the scanning must agree with.
+//
+// Introduces (SWIFT): `Range<String.Index>`, `String.utf8` and its
+// indices, `UInt8(ascii:)`, `elementsEqual`, `popLast()`, `compactMap`.
 
 import Foundation
 
@@ -41,46 +44,22 @@ public enum MXXMLText {
         public let range: Range<String.Index>
     }
 
-    // SWIFT: A *regex literal*, written between slashes, is checked by the
-    // compiler like any other code: a typo in it is a compile error, not a
-    // run-time one. `#/.../#` (with hashes) allows "/" inside. The `(...)`
-    // groups become fields of each match's output tuple: `.1`, `.2`, ...
-    //
-    // SWIFT: These are computed properties (`static var ... { }`), built
-    // on each use, rather than `static let`s. `Regex` isn't `Sendable`, so
-    // Swift 6 rejects a shared constant of it (as for CTFont, see
-    // LayerGraphView.swift). The compiler has already parsed the literal,
-    // so building one is cheap.
-
-    /// A comment, or any other tag from `<` to `>`.
-    private static var tagOrComment: Regex<Substring> { #/<!--[\s\S]*?-->|<[^>]*>/# }
-    /// The name at the start of a tag: `<name`, `</name`, `<?name`.
-    private static var tagName: Regex<(Substring, Substring)> { #/^<[/?]?([\w:.-]+)/# }
-    /// `name="value"` inside a tag.
-    private static var attribute: Regex<(Substring, Substring, Substring)> { #/([\w:.-]+)\s*=\s*("[^"]*")/# }
-    /// The `name` attribute inside a tag.
-    private static var nameAttribute: Regex<(Substring, Substring)> { #/\sname\s*=\s*"([^"]*)"/# }
-
     /// Every tag name, attribute name, attribute value and comment in `xml`,
     /// in order.
     public static func tokens(in xml: String) -> [Token] {
+        let text = Bytes(xml)
         var tokens: [Token] = []
-        // SWIFT: `matches(of:)` returns every non-overlapping match. Each
-        // match's `.range` is a range in `xml`; `.0` is the matched text.
-        for match in xml.matches(of: tagOrComment) {
-            let tag: Substring = match.0
-            if tag.hasPrefix("<!--") {
-                tokens.append(Token(kind: .comment, range: match.range))
+        for tag in text.tags() {
+            if tag.isComment {
+                tokens.append(Token(kind: .comment, range: text.range(tag.start..<tag.end)))
                 continue
             }
-            // SWIFT: A Substring shares its parent's storage *and indices*,
-            // so ranges found inside `tag` are valid ranges in `xml` too.
-            if let name = tag.firstMatch(of: tagName) {
-                tokens.append(Token(kind: .tagName, range: name.1.startIndex..<name.1.endIndex))
+            if let name = text.tagName(in: tag) {
+                tokens.append(Token(kind: .tagName, range: text.range(name)))
             }
-            for pair in tag.matches(of: attribute) {
-                tokens.append(Token(kind: .attributeName, range: pair.1.startIndex..<pair.1.endIndex))
-                tokens.append(Token(kind: .attributeValue, range: pair.2.startIndex..<pair.2.endIndex))
+            for (name, value) in text.attributes(in: tag) {
+                tokens.append(Token(kind: .attributeName, range: text.range(name)))
+                tokens.append(Token(kind: .attributeValue, range: text.range(value)))
             }
         }
         return tokens
@@ -92,44 +71,46 @@ public enum MXXMLText {
     /// The path is the element names from the root, as MaterialX builds it;
     /// elements without a `name` (the root `<materialx>`) don't count.
     public static func range(ofElementAt path: String, in xml: String) -> Range<String.Index>? {
-        let target: [Substring] = path.split(separator: "/")
+        // SWIFT: `Array(part.utf8)` copies a string's UTF-8 bytes into an
+        // array, here to compare with the names' bytes in the text.
+        let target: [[UInt8]] = path.split(separator: "/").map { Array($0.utf8) }
         guard !target.isEmpty else {
             return nil
         }
+        let text = Bytes(xml)
         // The names of the open elements around the current position; nil
         // for elements without a name.
-        var open: [Substring?] = []
+        var open: [[UInt8]?] = []
         // Where the matching element's start tag began, and how many
         // elements were open outside it.
-        var start: String.Index? = nil
+        var start: Int? = nil
         var startDepth: Int = 0
 
-        for match in xml.matches(of: tagOrComment) {
-            let tag: Substring = match.0
-            if tag.hasPrefix("<!--") || tag.hasPrefix("<?") {
+        for tag in text.tags() {
+            if tag.isComment || text.byte(at: tag.start + 1) == Bytes.question {
                 continue
             }
-            if tag.hasPrefix("</") {
+            if text.byte(at: tag.start + 1) == Bytes.slash {
                 // An end tag closes the innermost open element.
                 // SWIFT: `popLast()` removes and returns the last element,
                 // or nil if the array is empty (unlike `removeLast()`, which
                 // would crash).
                 _ = open.popLast()
                 if let begin = start, open.count == startDepth {
-                    return begin..<match.range.upperBound
+                    return text.range(begin..<tag.end)
                 }
                 continue
             }
-            let name: Substring? = tag.firstMatch(of: nameAttribute).map { $0.1 }
-            let selfClosing: Bool = tag.hasSuffix("/>")
+            let name: [UInt8]? = text.nameAttribute(in: tag).map { Array(text.bytes[$0]) }
+            let selfClosing: Bool = tag.end - tag.start >= 2 && text.byte(at: tag.end - 2) == Bytes.slash
             open.append(name)
             // SWIFT: `compactMap` is `map` that drops the nils: the names of
             // the named open elements, outermost first.
-            if start == nil, open.compactMap({ $0 }) == target, name != nil {
+            if start == nil, name != nil, open.compactMap({ $0 }) == target {
                 if selfClosing {
-                    return match.range
+                    return text.range(tag.start..<tag.end)
                 }
-                start = match.range.lowerBound
+                start = tag.start
                 startDepth = open.count - 1
             }
             if selfClosing {
@@ -137,6 +118,208 @@ public enum MXXMLText {
             }
         }
         return nil
+    }
+
+    /// A tag in the text, by byte offsets: from its `<` to just after its
+    /// `>`. A comment is one tag, from `<!--` to `-->`.
+    struct Tag {
+        let start: Int
+        let end: Int
+        let isComment: Bool
+    }
+
+    /// The text's UTF-8 bytes, and the scanning the XML panel needs.
+    ///
+    /// Scanning bytes rather than Characters is many times faster: these
+    /// run on every key typed in the XML tab, over up to tens of kilobytes.
+    /// What it finds is what these regular expressions would (the tests
+    /// check it, keeping them as the reference):
+    ///   tag or comment   `<!--[\s\S]*?-->|<[^>]*>`
+    ///   tag name         `^<[/?]?([\w:.-]+)`
+    ///   attribute        `([\w:.-]+)\s*=\s*("[^"]*")`
+    ///   name attribute   `\sname\s*=\s*"([^"]*)"`
+    /// The markup is all ASCII, so a byte offset never falls inside a
+    /// character, and every range found is one of `xml`'s String ranges.
+    ///
+    /// SWIFT: `UInt8(ascii: "<")` is the byte of an ASCII character, checked
+    /// at compile time, like C's `'<'`.
+    struct Bytes {
+        static let less = UInt8(ascii: "<")
+        static let greater = UInt8(ascii: ">")
+        static let slash = UInt8(ascii: "/")
+        static let question = UInt8(ascii: "?")
+        static let equals = UInt8(ascii: "=")
+        static let quote = UInt8(ascii: "\"")
+        static let commentStart: [UInt8] = Array("<!--".utf8)
+        static let commentEnd: [UInt8] = Array("-->".utf8)
+        static let name: [UInt8] = Array("name".utf8)
+
+        /// The string the bytes are from, for its indices.
+        let string: String
+        let bytes: [UInt8]
+
+        init(_ string: String) {
+            self.string = string
+            self.bytes = Array(string.utf8)
+        }
+
+        /// The byte at `offset`, or nil past the end.
+        func byte(at offset: Int) -> UInt8? {
+            offset < bytes.count ? bytes[offset] : nil
+        }
+
+        /// The String range of a byte range.
+        ///
+        /// SWIFT: For a native Swift string (stored as UTF-8), moving a
+        /// `utf8` index by an offset takes constant time.
+        func range(_ offsets: Range<Int>) -> Range<String.Index> {
+            let utf8: String.UTF8View = string.utf8
+            let lower: String.Index = utf8.index(utf8.startIndex, offsetBy: offsets.lowerBound)
+            let upper: String.Index = utf8.index(lower, offsetBy: offsets.count)
+            return lower..<upper
+        }
+
+        /// True for the bytes of a name: `\w` (letters, digits, `_`, and
+        /// anything not ASCII), `:`, `.` and `-`.
+        static func isNameByte(_ byte: UInt8) -> Bool {
+            switch byte {
+            case UInt8(ascii: "a")...UInt8(ascii: "z"), UInt8(ascii: "A")...UInt8(ascii: "Z"),
+                 UInt8(ascii: "0")...UInt8(ascii: "9"), UInt8(ascii: "_"), UInt8(ascii: ":"),
+                 UInt8(ascii: "."), UInt8(ascii: "-"), 0x80...:
+                return true
+            default:
+                return false
+            }
+        }
+
+        /// True for `\s`: space, tab, newline, carriage return, vertical
+        /// tab and form feed.
+        static func isSpace(_ byte: UInt8) -> Bool {
+            byte == 0x20 || (0x09...0x0D).contains(byte)
+        }
+
+        /// True if `sequence` is at `offset`.
+        func matches(_ sequence: [UInt8], at offset: Int) -> Bool {
+            guard offset >= 0, offset + sequence.count <= bytes.count else {
+                return false
+            }
+            // SWIFT: `elementsEqual` compares two sequences element by
+            // element; here the slice of `bytes` and `sequence`.
+            return bytes[offset..<offset + sequence.count].elementsEqual(sequence)
+        }
+
+        /// The first offset of `byte` in `start..<end`, or nil.
+        func first(_ byte: UInt8, from start: Int, to end: Int) -> Int? {
+            start < end ? bytes[start..<end].firstIndex(of: byte) : nil
+        }
+
+        /// The offset after whitespace from `offset`, up to `end`.
+        func skippingSpace(from offset: Int, to end: Int) -> Int {
+            var offset = offset
+            while offset < end, Bytes.isSpace(bytes[offset]) {
+                offset += 1
+            }
+            return offset
+        }
+
+        /// The tags and comments in the text, in order.
+        func tags() -> [Tag] {
+            var tags: [Tag] = []
+            var offset: Int = 0
+            while offset < bytes.count {
+                guard bytes[offset] == Bytes.less else {
+                    offset += 1
+                    continue
+                }
+                // A comment ends at the first `-->` after `<!--`; one that
+                // doesn't end runs to the next `>` instead (still a
+                // comment, as the regular expression read it).
+                let isComment: Bool = matches(Bytes.commentStart, at: offset)
+                if isComment {
+                    var close: Int = offset + Bytes.commentStart.count
+                    while close + Bytes.commentEnd.count <= bytes.count, !matches(Bytes.commentEnd, at: close) {
+                        close += 1
+                    }
+                    if matches(Bytes.commentEnd, at: close) {
+                        tags.append(Tag(start: offset, end: close + Bytes.commentEnd.count, isComment: true))
+                        offset = close + Bytes.commentEnd.count
+                        continue
+                    }
+                }
+                // No `>` left: no more tags (nor comments, which end in one).
+                guard let close = first(Bytes.greater, from: offset + 1, to: bytes.count) else {
+                    break
+                }
+                tags.append(Tag(start: offset, end: close + 1, isComment: isComment))
+                offset = close + 1
+            }
+            return tags
+        }
+
+        /// The tag's name: `name` in `<name`, `</name`, `<?name`.
+        func tagName(in tag: Tag) -> Range<Int>? {
+            var start: Int = tag.start + 1
+            if let byte = byte(at: start), byte == Bytes.slash || byte == Bytes.question {
+                start += 1
+            }
+            var end: Int = start
+            while end < tag.end, Bytes.isNameByte(bytes[end]) {
+                end += 1
+            }
+            return end > start ? start..<end : nil
+        }
+
+        /// The tag's `name="value"` pairs: each name, and its value with
+        /// the quotes.
+        func attributes(in tag: Tag) -> [(name: Range<Int>, value: Range<Int>)] {
+            var pairs: [(name: Range<Int>, value: Range<Int>)] = []
+            var offset: Int = tag.start
+            while offset < tag.end {
+                guard Bytes.isNameByte(bytes[offset]) else {
+                    offset += 1
+                    continue
+                }
+                // A name, then `=` and a quoted value, with or without
+                // spaces between. Anything else: not an attribute, and
+                // neither is any part of this name, so skip all of it.
+                var end: Int = offset
+                while end < tag.end, Bytes.isNameByte(bytes[end]) {
+                    end += 1
+                }
+                var value: Int = skippingSpace(from: end, to: tag.end)
+                if value < tag.end, bytes[value] == Bytes.equals {
+                    value = skippingSpace(from: value + 1, to: tag.end)
+                    if value < tag.end, bytes[value] == Bytes.quote,
+                       let close = first(Bytes.quote, from: value + 1, to: tag.end) {
+                        pairs.append((name: offset..<end, value: value..<close + 1))
+                        offset = close + 1
+                        continue
+                    }
+                }
+                offset = end
+            }
+            return pairs
+        }
+
+        /// The value of the tag's first ` name="..."`, without the quotes.
+        func nameAttribute(in tag: Tag) -> Range<Int>? {
+            for offset in tag.start..<tag.end where Bytes.isSpace(bytes[offset]) {
+                guard matches(Bytes.name, at: offset + 1) else {
+                    continue
+                }
+                var value: Int = skippingSpace(from: offset + 1 + Bytes.name.count, to: tag.end)
+                guard value < tag.end, bytes[value] == Bytes.equals else {
+                    continue
+                }
+                value = skippingSpace(from: value + 1, to: tag.end)
+                guard value < tag.end, bytes[value] == Bytes.quote,
+                      let close = first(Bytes.quote, from: value + 1, to: tag.end) else {
+                    continue
+                }
+                return value + 1..<close
+            }
+            return nil
+        }
     }
 }
 

@@ -61,7 +61,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `for … where` | Loops only over elements for which the condition holds | `continue` at the top of the loop | `MXIssue.swift` |
 | `try?` | Turns a thrown error into `nil` | Ignoring an error return | `MXIssue.swift` |
 | String indices | Strings are sliced with `String.Index` values (`path[..<slash]`), not integers, because characters vary in size | — | `GraphPanel.swift` (`parent(of:)`) |
-| Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLText.swift` |
+| Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLTextTests.swift` (`Reference`; MXXMLText.swift until M4e) |
 | `popLast()`, `compactMap` | Remove-and-return the last element (nil if empty); `map` that drops nils | `pop_back` with a check | `MXXMLText.swift` |
 | `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
 | `ClosedRange` | `0...1`: a range including both ends; SwiftUI sliders take one | — | `MXValue.swift` (`sliderRange`) |
@@ -85,6 +85,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Float16` | A 16-bit float, the same as Metal's `half` | `_Float16` | `SwatchEnvironment.swift` |
 | CryptoKit's `SHA256` | Hashes bytes into a digest; here, to key a cache by a long text without keeping it | CommonCrypto's `CC_SHA256` | `SwatchRenderer.swift` (`key(for:)`) |
 
+| `String.utf8`, `UInt8(ascii:)`, `elementsEqual` | A string's UTF-8 bytes (`Array(s.utf8)` to scan them by offset); the byte of an ASCII character; comparing two sequences element by element. A native string's `utf8` index moves by an offset in constant time | `const char *`, `'<'`, `memcmp` | `MXXMLText.swift` |
+| `stride(from:to:by:)` | Counts from a start up to (not including) an end in steps | `for (i = 0; i < n; i += 7)` | `MXXMLEditTests.swift` |
 ## Functions and closures
 
 | Concept | In one line | Closest thing you know | First appears |
@@ -141,6 +143,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `LocalizedError` | Gives an error the message alerts show (`errorDescription`) | `NSLocalizedDescriptionKey` | `MXError.swift` |
 | `NSMenuItemValidation` in an extension | `validateMenuItem(_:)` enables or greys out the menu items whose actions the object receives; conforming in an extension keeps it beside its method | `-validateMenuItem:` (an informal protocol in ObjC) | `GraphEventView.swift` |
 
+| `XMLParser` and its delegate | Foundation's event-driven XML parser; a delegate object (an `NSObject` subclass, held weakly) hears about each tag and error | `NSXMLParser`, SAX | `MXXMLEdit.swift` |
+| Overriding an AppKit view's property and actions | `override var undoManager` with a computed one; `@objc func undo(_:)` answers the menu's action before the window does, and `validateUserInterfaceItem` enables and titles the item | An Objective-C subclass | `XMLTextView.swift` (`XMLEditingTextView`) |
+| A coordinator as an AppKit delegate | The `NSViewRepresentable`'s coordinator (an `NSObject`) adopts `NSTextViewDelegate` and hears `textDidChange` | A controller as a view's delegate | `XMLTextView.swift` |
 ## Modules and access
 
 | Concept | In one line | First appears |
@@ -164,7 +169,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Sendable` | Safe to share between threads; checked by the compiler | `MXError.swift` |
 | `@unchecked Sendable` | "I checked this by hand." Always explain why. | `MXLibrary.swift` |
 | `Task { @MainActor in }` | Schedule work to run later on the main thread | `dispatch_async(dispatch_get_main_queue(), ^{})` | `ViewportView.swift` |
-| Global/static non-`Sendable` values | `static let x: SomeClass` is rejected: any thread could reach it. Make it an instance property, a computed `static var` (cheap values such as regex literals), or, if it is truly thread-safe, `nonisolated(unsafe)` with a comment | — | `SwatchRenderer.swift`, `MXXMLText.swift`, `LayerGraphView.swift` |
+| Global/static non-`Sendable` values | `static let x: SomeClass` is rejected: any thread could reach it. Make it an instance property, a computed `static var` (cheap values such as regex literals), or, if it is truly thread-safe, `nonisolated(unsafe)` with a comment | — | `SwatchRenderer.swift`, `MXXMLTextTests.swift`, `LayerGraphView.swift` |
 | `@MainActor` on a type | Every property and method runs on the main thread; callers from elsewhere must `await` | "Main thread only" in the docs, but checked | `GraphCanvasController.swift`, `GraphCanvasControllerTests.swift` (suite) |
 | `@MainActor` in a function type | `@MainActor (T) -> Void`: the closure runs on the main actor, so it may touch main-actor state | — | `GraphBenchmark.swift` (`Scenario`) |
 | Function types as parameters | `(([Double], String, String) throws -> [Double])?`: an optional function; function types have no argument labels, so calls are `convert(a, b, c)` | A C function pointer or a C++ `std::function` | `MXWorkingSpace.swift` (`setWorkingSpace`) |
@@ -245,6 +250,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Menu` with an inline `Picker`, `.menuStyle(.borderlessButton)` | A pop-up menu button whose content mixes a checkmarked choice (`.pickerStyle(.inline)`), buttons and submenus; drawn as plain text with an arrow | `NSPopUpButton` with a pull-down menu | `InspectorFields.swift` (`ColorSpaceMenu`) |
 | `.confirmationDialog(_:isPresented:presenting:)` | Asks a question with several buttons; `presenting` hands each button the value it is about | `NSAlert` with several buttons | `WorkingSpaceMenu.swift` |
 
+| `.alert(_:isPresented:actions:message:)` | An alert sheet while a binding is true; its buttons are views, and the one with `role: .cancel` is Escape's | `XMLTextView.swift` (`XMLTab`) |
+| Debouncing with `.task(id:)` and `Task.sleep` | A task that sleeps first, restarted whenever `id` changes: only the last of a burst of changes gets past the sleep | `XMLTextView.swift` (`XMLTab`) |
+| `.safeAreaInset` vs `HSplitView`/`VSplitView` | An inset only makes room in views that respect safe areas; the split views (NSSplitView underneath) don't, and run under it. A `VStack` makes room for anything | `ContentView.swift` (`LibraryStatusBar`) |
 ## Swift ↔ C++
 
 | Concept | In one line | First appears |

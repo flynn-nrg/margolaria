@@ -67,6 +67,10 @@ struct ContentView: View {
     /// The bottom panel's tab.
     @State private var bottomTab: BottomTab = .xml
 
+    /// The XML tab's edits not applied yet (M4e). Here, not in the tab,
+    /// so they stay when the tab or the panel is hidden.
+    @State private var xmlDraft = XMLDraft()
+
     /// The node selected on the canvas (one only), for the XML panel.
     @State private var canvasSelection: String? = nil
 
@@ -98,6 +102,18 @@ struct ContentView: View {
     @State private var showsInspector: Bool = true
 
     var body: some View {
+        // The window, with a thin bar along its bottom. In a VStack, not
+        // `.safeAreaInset(edge: .bottom)`: the split views (AppKit's
+        // NSSplitView underneath) ignore safe areas, and ran under the bar,
+        // hiding the bottom of the XML tab and the inspector.
+        VStack(spacing: 0) {
+            columns
+            LibraryStatusBar(documentVersion: document.content.documentVersion)
+        }
+    }
+
+    /// The sidebar and the detail: canvas, bottom panel, viewport and inspector.
+    private var columns: some View {
         // A two-column layout: sidebar on the left, detail on the right.
         NavigationSplitView {
             // SWIFT: `$selection` is a *binding*, a read/write reference to
@@ -147,7 +163,7 @@ struct ContentView: View {
                             .frame(minHeight: 200, maxHeight: .infinity)
                     }
                     if viewMode != .graph {
-                        BottomPanel(document: document, tab: $bottomTab, selectedPath: canvasSelection,
+                        BottomPanel(document: document, tab: $bottomTab, xmlDraft: xmlDraft, selectedPath: canvasSelection,
                                     onSelectIssue: show)
                             .frame(minHeight: 120, idealHeight: 260, maxHeight: .infinity)
                     }
@@ -252,10 +268,6 @@ struct ContentView: View {
             } onOpen: {
                 document.openExistingInstead()
             }
-        }
-        // A thin bar along the bottom of the window.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            LibraryStatusBar(documentVersion: document.content.documentVersion)
         }
     }
 
