@@ -86,6 +86,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | CryptoKit's `SHA256` | Hashes bytes into a digest; here, to key a cache by a long text without keeping it | CommonCrypto's `CC_SHA256` | `SwatchRenderer.swift` (`key(for:)`) |
 
 | `String.utf8`, `UInt8(ascii:)`, `elementsEqual` | A string's UTF-8 bytes (`Array(s.utf8)` to scan them by offset); the byte of an ASCII character; comparing two sequences element by element. A native string's `utf8` index moves by an offset in constant time | `const char *`, `'<'`, `memcmp` | `MXXMLText.swift` |
+| `Array(string)` to index characters | A `String` can't be indexed by `Int` (characters vary in length in memory); an array of its `Character`s can, at the cost of a copy | `std::u32string` | `CommandPalette.swift` (`FuzzyMatch`) |
 | `stride(from:to:by:)` | Counts from a start up to (not including) an end in steps | `for (i = 0; i < n; i += 7)` | `MXXMLEditTests.swift` |
 ## Functions and closures
 
@@ -120,6 +121,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `&variable` to a pointer parameter | Lends a C API a pointer to a `var` for the length of the call | `&x` in C | `DisplayPass.swift` (`setFragmentBytes`) |
 | `withUnsafeMutableBytes` | Lends a writable raw pointer to an array's storage for the length of a closure | Passing `vec.data()` to a C function that fills it | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
 | `oldValue` in `didSet` | The value before the assignment; observers don't run for assignments in the type's own `init` | Comparing in a custom setter | `ViewportView.swift` (`StormMTKView.environment`) |
+| Generic functions `func f<Item>(...)` | Work for any type; the body is checked once against what every type allows, not per use | C++ function templates, Go generics | `CommandPalette.swift` (`FuzzyMatch.rank`) |
+| A closure stored in a struct | `let run: @MainActor () -> Void`: code as data, carrying what it captured; such structs can't be `Equatable` | A block property in ObjC | `CommandPalette.swift` (`PaletteCommand`) |
+| `Set.insert(_:).inserted` | `insert` returns whether the element was new: filtering repeats in one line | `std::set::insert(...).second` | `ContentView.swift` (`unique`) |
 
 ## Protocols and extensions
 
@@ -253,6 +257,10 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.alert(_:isPresented:actions:message:)` | An alert sheet while a binding is true; its buttons are views, and the one with `role: .cancel` is Escape's | `XMLTextView.swift` (`XMLTab`) |
 | Debouncing with `.task(id:)` and `Task.sleep` | A task that sleeps first, restarted whenever `id` changes: only the last of a burst of changes gets past the sleep | `XMLTextView.swift` (`XMLTab`) |
 | `.safeAreaInset` vs `HSplitView`/`VSplitView` | An inset only makes room in views that respect safe areas; the split views (NSSplitView underneath) don't, and run under it. A `VStack` makes room for anything | `ContentView.swift` (`LibraryStatusBar`) |
+| `PreferenceKey`, `.transformPreference`, `.overlayPreferenceValue` | Values passed *up* the view tree: views add theirs under a key, `reduce` combines siblings', and an ancestor reads the result to build an overlay | `NodeSearchPopup.swift` (`PaletteCommandsKey`), `ContentView.swift` |
+| `.onExitCommand` | Runs on Escape (AppKit's `cancelOperation:`) in the focused view | `NodeSearchPopup.swift` (`CommandPalette`) |
+| `LazyVStack` | Makes its rows only as they scroll into view, for long lists | `NodeSearchPopup.swift` (`CommandPalette`) |
+| `@objc` action on an `NSDocument` | The document is in its window's responder chain, after the views, window and controller: a menu item's action reaches it from wherever the focus is | `MaterialXDocument.swift` (`showCommandPalette`) |
 ## Swift ↔ C++
 
 | Concept | In one line | First appears |

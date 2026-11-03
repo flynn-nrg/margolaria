@@ -1,16 +1,29 @@
 // NodeSearchPopup.swift
 //
-// The canvas's node search (M2e): Tab on the canvas opens it under the
-// pointer, in a popover. Type part of a name, pick a result with the arrow
-// keys (or the mouse), and Return adds that node there; Escape closes it.
-// The results are MXNodeCatalog.search's, best first.
+// The app's two searches, both a field over a list picked from with the
+// arrow keys and Return:
 //
+// NodeSearchPopup: the canvas's node search (M2e). Tab on the canvas opens
+// it under the pointer, in a popover. Type part of a name, pick a result
+// with the arrow keys (or the mouse), and Return adds that node there;
+// Escape closes it. The results are MXNodeCatalog.search's, best first.
 // Opened by a wire dropped on empty canvas, it lists only the nodes that
 // can take the wire, each as the variant that does, and shows which of
 // its ports the wire will go to.
 //
-// Introduces (SWIFT): `.onKeyPress`, `ScrollViewReader`.
+// CommandPalette: the command palette (⌘K, M4f), at the top of the
+// window. It lists every menu command enabled where the focus was
+// (MaterialXDocument reads the menus), the inspector's actions for the
+// selection and the toolbar's (which views add with `.paletteCommands`),
+// and every node (Return adds it in the middle of the canvas, as the
+// Library does). Fuzzy-matched (GraphKit's FuzzyMatch), with each
+// command's shortcut. Escape, ⌘K again or a click outside closes it.
+//
+// Introduces (SWIFT): `.onKeyPress`, `ScrollViewReader`; `PreferenceKey`
+// and `.transformPreference` (M4f: values passed up the view tree, as
+// bindings pass them down), `.onExitCommand`, `LazyVStack`.
 
+import GraphKit
 import MXKit
 import SwiftUI
 
@@ -117,6 +130,164 @@ struct NodeSearchPopup: View {
         .background(isHighlighted ? Color.accentColor.opacity(0.35) : .clear)
         // SWIFT: `.contentShape` makes the whole row clickable, not just
         // its text.
+        .contentShape(.rect)
+    }
+}
+
+// MARK: - Command palette (M4f)
+
+/// The commands views offer the palette: the inspector's for the
+/// selection, the toolbar's. Collected from the whole window.
+///
+/// SWIFT: A *preference* passes values up the view tree, from children to
+/// an ancestor, the opposite of how bindings and plain properties pass
+/// them down. Each view that has commands adds them under this key;
+/// `reduce` combines siblings' values; the window reads the result
+/// (`.overlayPreferenceValue`, ContentView). Views that aren't shown
+/// (a hidden inspector) offer nothing.
+struct PaletteCommandsKey: PreferenceKey {
+    /// SWIFT: A computed `static var`, not a stored one: Swift 6 refuses
+    /// a stored static `var` (global mutable state, unsafe across threads).
+    static var defaultValue: [PaletteCommand] { [] }
+
+    static func reduce(value: inout [PaletteCommand], nextValue: () -> [PaletteCommand]) {
+        value += nextValue()
+    }
+}
+
+extension View {
+    /// Offers `commands` to the command palette while this view is shown.
+    ///
+    /// SWIFT: `.transformPreference` adds to what the view's children
+    /// offered; `.preference(key:value:)` would replace it.
+    func paletteCommands(_ commands: [PaletteCommand]) -> some View {
+        transformPreference(PaletteCommandsKey.self) { value in
+            value += commands
+        }
+    }
+}
+
+struct CommandPalette: View {
+    /// Everything it can run, in the order listed for an empty query.
+    let commands: [PaletteCommand]
+    /// Closes the palette (before a command runs, too).
+    let onClose: () -> Void
+
+    @State private var query: String = ""
+
+    /// The result Return would run, as an index into the results.
+    @State private var highlighted: Int = 0
+
+    @FocusState private var fieldFocused: Bool
+
+    /// The commands matching the query, best first. A command's title is
+    /// matched, and its group then its title ("edit dup" finds Edit ›
+    /// Duplicate).
+    private var results: [PaletteCommand] {
+        FuzzyMatch.rank(commands, by: query) { [$0.title, "\($0.group) \($0.title)"] }
+    }
+
+    var body: some View {
+        // Ranking every command and node: once per update.
+        let results: [PaletteCommand] = results
+        VStack(alignment: .leading, spacing: 0) {
+            TextField("Command", text: $query, prompt: Text("Search commands and nodes…"))
+                .textFieldStyle(.plain)
+                .font(.title2)
+                .padding(10)
+                .focused($fieldFocused)
+                .onSubmit {
+                    if results.indices.contains(highlighted) {
+                        run(results[highlighted])
+                    }
+                }
+                .onKeyPress(.downArrow) {
+                    highlighted = min(highlighted + 1, results.count - 1)
+                    return .handled
+                }
+                .onKeyPress(.upArrow) {
+                    highlighted = max(highlighted - 1, 0)
+                    return .handled
+                }
+                // SWIFT: `.onExitCommand` runs on Escape (AppKit's
+                // `cancelOperation:`), which a text field doesn't use itself.
+                .onExitCommand(perform: onClose)
+            Divider()
+            if results.isEmpty {
+                Text("No commands or nodes match")
+                    .foregroundStyle(.secondary)
+                    .padding(10)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        // SWIFT: `LazyVStack` makes its rows only as they
+                        // scroll into view: with every node listed, there
+                        // are over a thousand.
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(results.indices, id: \.self) { index in
+                                row(results[index], isHighlighted: index == highlighted)
+                                    .id(index)
+                                    .onTapGesture {
+                                        run(results[index])
+                                    }
+                            }
+                        }
+                    }
+                    .onChange(of: highlighted) {
+                        proxy.scrollTo(highlighted)
+                    }
+                }
+                .frame(maxHeight: 360)
+            }
+        }
+        .frame(width: 560)
+        .background(.regularMaterial, in: .rect(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(.separator)
+        }
+        .shadow(radius: 20, y: 8)
+        .onAppear {
+            fieldFocused = true
+        }
+        .onChange(of: query) {
+            highlighted = 0
+        }
+    }
+
+    /// Closes the palette, then runs `command`, once the palette has gone:
+    /// a command may open a sheet or move the focus, which the palette
+    /// (with the focus, over the window) would get in the way of.
+    ///
+    /// SWIFT: `Task { @MainActor in ... }` runs the closure later, on the
+    /// main thread, after the current event (like `dispatch_async` to the
+    /// main queue in C).
+    private func run(_ command: PaletteCommand) {
+        onClose()
+        Task { @MainActor in
+            command.run()
+        }
+    }
+
+    /// One command: its title, where it comes from, and its shortcut.
+    private func row(_ command: PaletteCommand, isHighlighted: Bool) -> some View {
+        HStack(spacing: 8) {
+            Text(command.title)
+                .lineLimit(1)
+            Text(command.group)
+                .font(.caption)
+                .foregroundStyle(isHighlighted ? .primary : .secondary)
+                .lineLimit(1)
+            Spacer()
+            if !command.shortcut.isEmpty {
+                Text(command.shortcut)
+                    .font(.system(.callout, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(isHighlighted ? Color.accentColor.opacity(0.35) : .clear)
         .contentShape(.rect)
     }
 }

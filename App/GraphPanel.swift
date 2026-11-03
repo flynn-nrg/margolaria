@@ -384,8 +384,12 @@ struct GraphPanel: View {
                 levelPath = implementation
             }
         }
-        newLevel.controller.onNavigateUp = {
-            levelPath = BreadcrumbBar.parent(of: levelPath)
+        // Only inside a nodegraph: none enables Graph > Go Up One Level
+        // (M4f).
+        if !levelPath.isEmpty {
+            newLevel.controller.onNavigateUp = {
+                levelPath = BreadcrumbBar.parent(of: levelPath)
+            }
         }
         newLevel.controller.onMove = { [weak newLevel] move in
             guard let newLevel else {

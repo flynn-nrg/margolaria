@@ -12,7 +12,9 @@
 // greyed out automatically.
 //
 // The Graph menu (M4a) and Edit > Duplicate act on the canvas; their
-// actions are GraphEventView's.
+// actions are GraphEventView's. View > Command Palette… (⌘K, M4f) lists
+// every item of this menu bar that is enabled when it opens, so a new item
+// here is in the palette too.
 //
 // ⌘G is shared (M4d): Graph > Group in Backdrop while the canvas has
 // keyboard focus, Edit > Find Next everywhere else (the XML tab). AppKit
@@ -136,7 +138,11 @@ enum MainMenu {
         }
 
         // View.
+        // The command palette (M4f) is the document's: it lists this menu
+        // bar's commands, read when ⌘K is pressed (MaterialXDocument).
         bar.addItem(submenu: menu("View",
+                                  Item("Command Palette…", #selector(MaterialXDocument.showCommandPalette(_:)), "k"),
+                                  .separator,
                                   Item("Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
                                   .separator,
                                   Item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])))
@@ -145,14 +151,25 @@ enum MainMenu {
         // (GraphEventView) when it has keyboard focus, and greyed out
         // otherwise. "G" in capitals adds Shift. Group in Backdrop gets ⌘G
         // while the canvas has focus (see the file comment).
+        //
+        // The first four are the canvas's single keys (Tab, A, F, U; M4f).
+        // They have no key equivalents here: AppKit looks for a menu item's
+        // key equivalent before the focused view gets the key, so a plain
+        // "a" would be taken from every text field. The command palette
+        // shows the keys (GraphEventView.keys).
         let graphMenu: NSMenu = menu("Graph",
+                                     Item("Add Node…", #selector(GraphEventView.addNode(_:))),
+                                     Item("Frame All", #selector(GraphEventView.frameAll(_:))),
+                                     Item("Frame Selection", #selector(GraphEventView.frameSelection(_:))),
+                                     Item("Go Up One Level", #selector(GraphEventView.goUpOneLevel(_:))),
+                                     .separator,
                                      Item("Group in Backdrop", #selector(GraphEventView.groupInBackdrop(_:))),
                                      .separator,
                                      Item("Collapse into Nodegraph", #selector(GraphEventView.collapseIntoNodeGraph(_:)),
                                           "g", [.command, .option]),
                                      Item("Ungroup Nodegraph", #selector(GraphEventView.ungroupNodeGraph(_:)),
                                           "G", [.command, .option]))
-        backdropItem = graphMenu.items.first
+        backdropItem = graphMenu.items.first { $0.action == #selector(GraphEventView.groupInBackdrop(_:)) }
         bar.addItem(submenu: graphMenu)
         shareCommandG()
 

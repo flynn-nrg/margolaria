@@ -32,6 +32,11 @@
 // Backdrops (M4d): their name (to rename them), what they contain, and their
 // note, which the canvas shows under the title.
 //
+// The command palette (M4f) lists the panel's buttons for the selection
+// (`.paletteCommands`): Edit Definition, Show in Viewport Alone, Make Node
+// Definition…, Save to Library…, adding and removing a graph's inputs and
+// outputs. Not the inputs' own right-click actions (Reset, Promote).
+//
 // Read-only: elements from `xi:include`d files (saving writes the include
 // back, so changes would be lost), and the inputs of a nodegraph that
 // implements a nodedef (their defaults belong to the nodedef: M4).
@@ -263,8 +268,7 @@ private struct NodeHeader: View {
             }
             // A node of a definition made here (M4c1), or included from a
             // library (M4c2, read-only): open its body.
-            if !node.isNodeGraph, let nodeDef = node.nodeDefName,
-               let implementation = document.content.implementation(of: nodeDef) {
+            if let implementation = implementationToOpen {
                 let isIncluded: Bool = document.content.isIncluded(implementation)
                 Button(isIncluded ? "Show Definition" : "Edit Definition", systemImage: "shippingbox") {
                     onOpen(implementation)
@@ -277,11 +281,9 @@ private struct NodeHeader: View {
             }
             // Solo (M3d): the node alone in the viewport, or back to the
             // material. For every node with a swatch, and materials.
-            if SwatchPlan.shaderPath(for: node) != nil {
-                let isSoloed: Bool = soloPath == node.path
-                Button(isSoloed ? "Show the Material in the Viewport" : "Show in Viewport Alone",
-                       systemImage: "scope") {
-                    soloPath = isSoloed ? nil : node.path
+            if canSolo {
+                Button(soloTitle, systemImage: "scope") {
+                    toggleSolo()
                 }
                 .controlSize(.small)
                 .help("Solo: show this node's output on the viewport's sphere, on its own (⌥-click its swatch on the canvas, or press S)")
@@ -313,7 +315,7 @@ private struct NodeHeader: View {
                 if node.isLocalDefinition {
                     DefinitionSettings(document: document, graph: node, onOpen: onOpen)
                         .padding(.top, 4)
-                } else if !node.isIncluded, node.nodeDefName == nil, !node.path.contains("/") {
+                } else if canMakeDefinition {
                     Button("Make Node Definition…", systemImage: "shippingbox") {
                         isMakingDefinition = true
                     }
@@ -339,10 +341,59 @@ private struct NodeHeader: View {
         .sheet(isPresented: $isMakingDefinition) {
             NodeDefinitionSheet(document: document, graph: node, onShow: onShow)
         }
+        .paletteCommands(paletteCommands)
     }
 
     /// True while the Make Node Definition sheet is open.
     @State private var isMakingDefinition: Bool = false
+
+    /// The implementation of the node's definition, if it was made here
+    /// or included from a library: Edit (or Show) Definition opens it.
+    private var implementationToOpen: String? {
+        guard !node.isNodeGraph, let nodeDef = node.nodeDefName else {
+            return nil
+        }
+        return document.content.implementation(of: nodeDef)
+    }
+
+    /// Whether the node can be shown alone in the viewport (it has a swatch).
+    private var canSolo: Bool {
+        SwatchPlan.shaderPath(for: node) != nil
+    }
+
+    private var soloTitle: String {
+        soloPath == node.path ? "Show the Material in the Viewport" : "Show in Viewport Alone"
+    }
+
+    private func toggleSolo() {
+        soloPath = soloPath == node.path ? nil : node.path
+    }
+
+    /// Whether Make Node Definition… is offered: for a top-level nodegraph
+    /// of this document that isn't a definition yet.
+    private var canMakeDefinition: Bool {
+        node.isNodeGraph && !node.isIncluded && node.nodeDefName == nil && !node.path.contains("/")
+    }
+
+    /// The buttons above, for the command palette (M4f): those enabled.
+    private var paletteCommands: [PaletteCommand] {
+        var commands: [PaletteCommand] = []
+        if let implementation = implementationToOpen {
+            let title: String = document.content.isIncluded(implementation) ? "Show Definition" : "Edit Definition"
+            commands.append(PaletteCommand(title: title, group: "Inspector") {
+                onOpen(implementation)
+            })
+        }
+        if canSolo {
+            commands.append(PaletteCommand(title: soloTitle, group: "Inspector", shortcut: "S", run: toggleSolo))
+        }
+        if canMakeDefinition, !node.outputs.isEmpty {
+            commands.append(PaletteCommand(title: "Make Node Definition…", group: "Inspector") {
+                isMakingDefinition = true
+            })
+        }
+        return commands
+    }
 
     /// "open_pbr_surface · ND_open_pbr_surface_surfaceshader".
     private var subtitle: String {
@@ -594,6 +645,10 @@ private struct DefinitionSettings: View {
             .controlSize(.small)
         }
         .font(.callout)
+        .paletteCommands([
+            PaletteCommand(title: "Save to Library…", group: "Inspector", run: saveToLibrary),
+            PaletteCommand(title: "Delete Definition", group: "Inspector", run: deleteDefinition),
+        ])
     }
 
     /// Asks where to save the definition (My Library by default, named
@@ -771,6 +826,26 @@ private struct GraphPortList: View {
                                      : "Add an output to the nodegraph; connect it inside, to the node whose result it gives")
             }
         }
+        .paletteCommands(paletteCommands)
+    }
+
+    /// Adding a port of each type and removing each port, for the command
+    /// palette (M4f): "Add Output: float", "Remove Input base".
+    private var paletteCommands: [PaletteCommand] {
+        guard !isReadOnly else {
+            return []
+        }
+        let adding: [PaletteCommand] = kind.types.map { type in
+            PaletteCommand(title: "Add \(kind.title): \(type)", group: "Inspector") {
+                add(type)
+            }
+        }
+        let removing: [PaletteCommand] = ports.map { port in
+            PaletteCommand(title: "Remove \(kind.title) \(port.name)", group: "Inspector") {
+                remove(port.name)
+            }
+        }
+        return adding + removing
     }
 
     private func add(_ type: String) {
@@ -816,17 +891,20 @@ private struct GraphPortHeader: View {
             Text("\(kind.title) of \(graphPath) · \(port.type)")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("Remove \(kind.title)", systemImage: "minus.circle") {
-                let name: String = port.name
-                let path: String = graphPath
-                let kind: GraphPortKind = kind
-                document.edit("Remove \(kind.title) \(name)") { content in
-                    try kind.remove(name, of: path, in: content)
-                }
-            }
-            .controlSize(.small)
-            .help(kind == .input ? "Remove this input; the nodes that read it keep its value"
-                                 : "Remove this output, disconnecting what reads it")
+            Button("Remove \(kind.title)", systemImage: "minus.circle", action: remove)
+                .controlSize(.small)
+                .help(kind == .input ? "Remove this input; the nodes that read it keep its value"
+                                     : "Remove this output, disconnecting what reads it")
+        }
+        .paletteCommands([PaletteCommand(title: "Remove \(kind.title) \(port.name)", group: "Inspector", run: remove)])
+    }
+
+    private func remove() {
+        let name: String = port.name
+        let path: String = graphPath
+        let kind: GraphPortKind = kind
+        document.edit("Remove \(kind.title) \(name)") { content in
+            try kind.remove(name, of: path, in: content)
         }
     }
 

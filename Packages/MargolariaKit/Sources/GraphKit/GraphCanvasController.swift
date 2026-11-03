@@ -336,6 +336,7 @@ public final class GraphCanvasController {
     @ObservationIgnored public var onOpenNode: (@MainActor (Int) -> Void)? = nil
 
     /// Called when the user asks to leave the current graph (the U key).
+    /// Nil at the top level, where there is nowhere to go.
     @ObservationIgnored public var onNavigateUp: (@MainActor () -> Void)? = nil
 
     /// Called when a drag has moved nodes or backdrops, or resized a
