@@ -74,6 +74,13 @@ struct CommandPaletteTests {
         let commands = [("Duplicate", "File"), ("Duplicate", "Edit"), ("Delete", "Edit")]
         let edit = FuzzyMatch.rank(commands, by: "edit dup") { [$0.0, "\($0.1) \($0.0)"] }
         #expect(edit.map(\.1) == ["Edit"])
+        // A title that matches beats any match through the group, however
+        // well the group matches (seen in the app: "const" listed
+        // colortransform nodes before "contrast").
+        let nodes = [("srgb_texture_to_lin_rec709", "Add Node · colortransform"), ("contrast", "Add Node · adjustment"),
+                     ("constant", "Add Node · procedural")]
+        let const = FuzzyMatch.rank(nodes, by: "const") { [$0.0, "\($0.1) \($0.0)"] }
+        #expect(const.map(\.0) == ["constant", "contrast", "srgb_texture_to_lin_rec709"])
     }
 
     // MARK: Menus

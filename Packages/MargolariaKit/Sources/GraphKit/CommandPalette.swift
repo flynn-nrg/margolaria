@@ -39,17 +39,23 @@ public struct PaletteCommand: Identifiable {
     /// Its keyboard shortcut, as menus show it ("⌘D", "⌥⌘G", "F"); empty
     /// for none.
     public let shortcut: String
+    /// False for commands listed only once something is typed: one of a
+    /// family ("Add Output: float" and its thirteen siblings), which would
+    /// otherwise fill the list before anything is typed.
+    public let listsBeforeTyping: Bool
     /// Runs the command. The palette has closed by then.
     ///
     /// SWIFT: `@MainActor` on a closure type: it may only be called on the
     /// main thread, and may therefore touch AppKit and SwiftUI state.
     public let run: @MainActor () -> Void
 
-    public init(title: String, group: String, shortcut: String = "", run: @escaping @MainActor () -> Void) {
+    public init(title: String, group: String, shortcut: String = "", listsBeforeTyping: Bool = true,
+                run: @escaping @MainActor () -> Void) {
         self.id = "\(group)/\(title)"
         self.title = title
         self.group = group
         self.shortcut = shortcut
+        self.listsBeforeTyping = listsBeforeTyping
         self.run = run
     }
 }
@@ -240,14 +246,17 @@ public enum FuzzyMatch {
         return 0
     }
 
-    /// `items` that match `query`, best first; for equal scores, shorter
-    /// texts first (the basic command before its relatives), then in their
-    /// given order. An empty query keeps them all, in order.
+    /// `items` that match `query`, best first. An empty query keeps them
+    /// all, in order.
     ///
-    /// - Parameter texts: what to match in each item, such as its title
-    ///   and its title after its group ("Edit Duplicate", so "edit dup"
-    ///   finds it too). The best score of them counts; the first one's
-    ///   length breaks ties.
+    /// - Parameter texts: what to match in each item, most important
+    ///   first, such as its title, then its group and title ("Edit
+    ///   Duplicate", so "edit dup" finds it too). Items are ranked by the
+    ///   first text that matches: every item whose title matches comes
+    ///   before those found only through their group ("const" lists
+    ///   "contrast" before nodes in the "colortransform" group). Then by
+    ///   score; then shorter first (the basic command before its
+    ///   relatives), then in their given order.
     ///
     /// SWIFT: `<Item>` makes this a *generic* function, like a C++ function
     /// template: it works for an array of any type, and the closure says
@@ -260,19 +269,21 @@ public enum FuzzyMatch {
         // SWIFT: `enumerated()` pairs each item with its position, kept to
         // break ties in the original order (`sorted` isn't guaranteed to
         // keep equal items in order).
-        let scored: [(score: Int, length: Int, order: Int, item: Item)] = items.enumerated().compactMap { order, item in
-            let itemTexts: [String] = texts(item)
-            // SWIFT: `compactMap` drops the texts that don't match; `max()`
-            // of nothing is nil, and so the item is left out.
-            guard let best = itemTexts.compactMap({ score(query, in: $0) }).max() else {
+        let scored: [(tier: Int, score: Int, length: Int, order: Int, item: Item)] =
+            items.enumerated().compactMap { order, item in
+                let itemTexts: [String] = texts(item)
+                // The first text that matches, and its score.
+                for (tier, text) in itemTexts.enumerated() {
+                    if let score = score(query, in: text) {
+                        return (tier, score, itemTexts[0].count, order, item)
+                    }
+                }
                 return nil
             }
-            return (best, itemTexts.first?.count ?? 0, order, item)
-        }
         // SWIFT: Tuples compare element by element, the first difference
         // deciding; negating the score sorts the highest first.
         return scored.sorted { a, b in
-            (-a.score, a.length, a.order) < (-b.score, b.length, b.order)
+            (a.tier, -a.score, a.length, a.order) < (b.tier, -b.score, b.length, b.order)
         }
         .map(\.item)
     }

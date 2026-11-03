@@ -836,7 +836,9 @@ private struct GraphPortList: View {
             return []
         }
         let adding: [PaletteCommand] = kind.types.map { type in
-            PaletteCommand(title: "Add \(kind.title): \(type)", group: "Inspector") {
+            // Listed once something is typed ("add out", "output float"):
+            // 24 of them would fill the list before.
+            PaletteCommand(title: "Add \(kind.title): \(type)", group: "Inspector", listsBeforeTyping: false) {
                 add(type)
             }
         }

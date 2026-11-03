@@ -183,8 +183,12 @@ struct CommandPalette: View {
     /// The commands matching the query, best first. A command's title is
     /// matched, and its group then its title ("edit dup" finds Edit ›
     /// Duplicate).
+    /// Before anything is typed, only the commands that list then.
     private var results: [PaletteCommand] {
-        FuzzyMatch.rank(commands, by: query) { [$0.title, "\($0.group) \($0.title)"] }
+        if query.allSatisfy({ $0 == " " }) {
+            return commands.filter(\.listsBeforeTyping)
+        }
+        return FuzzyMatch.rank(commands, by: query) { [$0.title, "\($0.group) \($0.title)"] }
     }
 
     var body: some View {

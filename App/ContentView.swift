@@ -128,7 +128,7 @@ struct ContentView: View {
                     // not `.clear`, which clicks would go through.
                     Color.black.opacity(0.001)
                         .onTapGesture(perform: document.closeCommandPalette)
-                    CommandPalette(commands: unique(offered + menuCommands + nodeCommands),
+                    CommandPalette(commands: unique(offered + ordered(menuCommands) + nodeCommands),
                                    onClose: document.closeCommandPalette)
                         .padding(.top, 40)
                 }
@@ -165,13 +165,16 @@ struct ContentView: View {
     /// canvas. Not yet the library files' definitions, which the Tab
     /// search doesn't list either.
     private var nodeCommands: [PaletteCommand] {
-        let emptyGraph = PaletteCommand(title: "nodegraph", group: "Add Node") {
+        // Listed once something is typed: before, they would only push
+        // the commands down.
+        let emptyGraph = PaletteCommand(title: "nodegraph", group: "Add Node", listsBeforeTyping: false) {
             add(NodeDefinitionDrag(nodeDef: NodeDefinitionDrag.emptyNodeGraph))
         }
         // SWIFT: `[emptyGraph] + ...map { }`: an array literal joined to
         // the mapped array.
         return [emptyGraph] + document.catalog.kinds.map { kind in
-            PaletteCommand(title: kind.node, group: kind.group.map { "Add Node · \($0)" } ?? "Add Node") {
+            PaletteCommand(title: kind.node, group: kind.group.map { "Add Node · \($0)" } ?? "Add Node",
+                           listsBeforeTyping: false) {
                 add(NodeDefinitionDrag(nodeDef: kind.defaultVariant.name))
             }
         }
@@ -191,6 +194,15 @@ struct ContentView: View {
             viewMode = .split
         }
         bottomTab = tab
+    }
+
+    /// The menus' commands, the app menu's (About, Hide, Quit) last
+    /// rather than first: they are the least likely to be looked for here,
+    /// and lead the list before anything is typed.
+    private func ordered(_ menuCommands: [PaletteCommand]) -> [PaletteCommand] {
+        let appMenu: String = ProcessInfo.processInfo.processName
+        // SWIFT: `filter` twice keeps each half in its order.
+        return menuCommands.filter { $0.group != appMenu } + menuCommands.filter { $0.group == appMenu }
     }
 
     /// `commands` without repeats (the same group and title), keeping the
