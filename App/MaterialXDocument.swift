@@ -18,9 +18,11 @@
 // overriding its methods, `override class var`, `@Observable` on an AppKit
 // subclass, `NSHostingController` (SwiftUI inside AppKit), `LocalizedError`,
 // `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets, labelled
-// tuples, `Optional.map`.
+// tuples, `Optional.map`; an `@objc` action on the document, a `weak`
+// stored property (M4f).
 
 import AppKit
+import GraphKit
 import MXKit
 import Observation
 import PreviewKit
@@ -255,6 +257,63 @@ final class MaterialXDocument: NSDocument {
         window.toolbarStyle = .unified
 
         addWindowController(NSWindowController(window: window))
+    }
+
+    // MARK: Command palette (M4f)
+
+    /// The menu bar's commands while the command palette is open, read
+    /// when it opened; nil while it is closed. ContentView shows the
+    /// palette, adding the inspector's commands and the nodes.
+    ///
+    /// Window state rather than document state, kept here because the
+    /// document is where ⌘K arrives: it is in the window's responder chain
+    /// (after the views, the window and its controller), which SwiftUI
+    /// views aren't.
+    private(set) var paletteCommands: [PaletteCommand]? = nil
+
+    /// Where the window's keyboard focus was when the palette opened, to
+    /// put it back when it closes.
+    ///
+    /// SWIFT: `weak`: not kept alive by this (a view may go away while
+    /// the palette is open); it reads nil then.
+    @ObservationIgnored private weak var focusBeforePalette: NSResponder? = nil
+
+    /// View > Command Palette… (⌘K): opens the palette, or closes it.
+    ///
+    /// The menus are read now, while the focus is still where it was
+    /// (the canvas, the XML), so the commands listed are those the menus
+    /// would offer there. Closing the palette puts the focus back before
+    /// a command runs, so its action goes where the menu's would have.
+    ///
+    /// SWIFT: `@objc` makes the method an Objective-C action, found by
+    /// the menu item's selector through the responder chain.
+    @objc func showCommandPalette(_ sender: Any?) {
+        guard paletteCommands == nil else {
+            closeCommandPalette()
+            return
+        }
+        guard let window = windowControllers.first?.window, let menuBar = NSApp.mainMenu else {
+            return
+        }
+        // A text field's typing goes to a shared text view (the window's
+        // *field editor*), which is then the first responder; the field is
+        // its delegate. Put the focus back on the field.
+        var focus: NSResponder? = window.firstResponder
+        if let editor = focus as? NSTextView, editor.isFieldEditor, let field = editor.delegate as? NSResponder {
+            focus = field
+        }
+        focusBeforePalette = focus
+        paletteCommands = MenuCommands.commands(in: menuBar, skipping: [#selector(showCommandPalette(_:))],
+                                                keys: GraphEventView.keys)
+    }
+
+    /// Closes the command palette, and puts the focus back where it was.
+    func closeCommandPalette() {
+        paletteCommands = nil
+        if let focus = focusBeforePalette {
+            windowControllers.first?.window?.makeFirstResponder(focus)
+        }
+        focusBeforePalette = nil
     }
 
     // MARK: Editing

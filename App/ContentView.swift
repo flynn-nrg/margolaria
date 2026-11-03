@@ -7,15 +7,18 @@
 // The layout of docs/PLAN.md §4.1: the canvas with the bottom panel (XML,
 // Issues) under it, and on the right the viewport above the inspector
 // (M2b). The toolbar shows or hides each of the right-hand panels. A new
-// document first asks what to start from (TemplateSheet, M2e).
+// document first asks what to start from (TemplateSheet, M2e). ⌘K opens
+// the command palette over the window (M4f, NodeSearchPopup.swift).
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
 // `ForEach`, `ViewBuilder` helpers, private sub-views, enums for view
-// modes, `Picker` in a toolbar.
+// modes, `Picker` in a toolbar; `.overlayPreferenceValue` and
+// `Set.insert(_:).inserted` (M4f).
 
-import SwiftUI
+import GraphKit
 import MXKit
+import SwiftUI
 
 /// What the main area shows (PLAN.md §4.1): the canvas, the canvas with
 /// the bottom panel (XML, Issues) under it, or the bottom panel alone.
@@ -110,6 +113,106 @@ struct ContentView: View {
             columns
             LibraryStatusBar(documentVersion: document.content.documentVersion)
         }
+        .paletteCommands(viewCommands)
+        // The command palette (⌘K, M4f), over the top of the window while
+        // open: what the views offer (the inspector's commands, then the
+        // ones above), the menus' and the nodes.
+        //
+        // SWIFT: `.overlayPreferenceValue` reads a preference the views
+        // inside passed up (PaletteCommandsKey), and builds an overlay
+        // from it.
+        .overlayPreferenceValue(PaletteCommandsKey.self, alignment: .top) { offered in
+            if let menuCommands = document.paletteCommands {
+                ZStack(alignment: .top) {
+                    // A click anywhere else closes it. Nearly transparent,
+                    // not `.clear`, which clicks would go through.
+                    Color.black.opacity(0.001)
+                        .onTapGesture(perform: document.closeCommandPalette)
+                    CommandPalette(commands: unique(offered + ordered(menuCommands) + nodeCommands),
+                                   onClose: document.closeCommandPalette)
+                        .padding(.top, 40)
+                }
+            }
+        }
+    }
+
+    // MARK: Command palette (M4f)
+
+    /// The toolbar's and the panels' choices, as commands: the view mode,
+    /// the bottom panel's tabs, the sidebar's tabs, the right-hand panels.
+    private var viewCommands: [PaletteCommand] {
+        var commands: [PaletteCommand] = []
+        let modes: [(ViewMode, String)] = [(.graph, "Show Graph Only"), (.split, "Show Graph and Panel"),
+                                           (.text, "Show Panel Only")]
+        for (mode, title) in modes where mode != viewMode {
+            commands.append(PaletteCommand(title: title, group: "View") { viewMode = mode })
+        }
+        commands.append(PaletteCommand(title: "Show XML", group: "View") { showBottomTab(.xml) })
+        commands.append(PaletteCommand(title: "Show Issues", group: "View") { showBottomTab(.issues) })
+        commands.append(PaletteCommand(title: "Show Document Elements", group: "View") { sidebarTab = .document })
+        commands.append(PaletteCommand(title: "Show Library", group: "View") { sidebarTab = .library })
+        commands.append(PaletteCommand(title: showsViewport ? "Hide Viewport" : "Show Viewport", group: "View") {
+            showsViewport.toggle()
+        })
+        commands.append(PaletteCommand(title: showsInspector ? "Hide Inspector" : "Show Inspector", group: "View") {
+            showsInspector.toggle()
+        })
+        return commands
+    }
+
+    /// Every node the document can add (the Tab search's, and an empty
+    /// nodegraph, as the Library offers), added in the middle of the
+    /// canvas. Not yet the library files' definitions, which the Tab
+    /// search doesn't list either.
+    private var nodeCommands: [PaletteCommand] {
+        // Listed once something is typed: before, they would only push
+        // the commands down.
+        let emptyGraph = PaletteCommand(title: "nodegraph", group: "Add Node", listsBeforeTyping: false) {
+            add(NodeDefinitionDrag(nodeDef: NodeDefinitionDrag.emptyNodeGraph))
+        }
+        // SWIFT: `[emptyGraph] + ...map { }`: an array literal joined to
+        // the mapped array.
+        return [emptyGraph] + document.catalog.kinds.map { kind in
+            PaletteCommand(title: kind.node, group: kind.group.map { "Add Node · \($0)" } ?? "Add Node",
+                           listsBeforeTyping: false) {
+                add(NodeDefinitionDrag(nodeDef: kind.defaultVariant.name))
+            }
+        }
+    }
+
+    /// Adds a node in the middle of the canvas, showing the canvas first.
+    private func add(_ node: NodeDefinitionDrag) {
+        if viewMode == .text {
+            viewMode = .split
+        }
+        nodeToAdd = node
+    }
+
+    /// Shows a tab of the bottom panel, and the panel.
+    private func showBottomTab(_ tab: BottomTab) {
+        if viewMode == .graph {
+            viewMode = .split
+        }
+        bottomTab = tab
+    }
+
+    /// The menus' commands, the app menu's (About, Hide, Quit) last
+    /// rather than first: they are the least likely to be looked for here,
+    /// and lead the list before anything is typed.
+    private func ordered(_ menuCommands: [PaletteCommand]) -> [PaletteCommand] {
+        let appMenu: String = ProcessInfo.processInfo.processName
+        // SWIFT: `filter` twice keeps each half in its order.
+        return menuCommands.filter { $0.group != appMenu } + menuCommands.filter { $0.group == appMenu }
+    }
+
+    /// `commands` without repeats (the same group and title), keeping the
+    /// first of each.
+    ///
+    /// SWIFT: `Set.insert` returns a tuple whose `inserted` is false if
+    /// the element was already there: a one-line "first time seen?" test.
+    private func unique(_ commands: [PaletteCommand]) -> [PaletteCommand] {
+        var seen: Set<String> = []
+        return commands.filter { seen.insert($0.id).inserted }
     }
 
     /// The sidebar and the detail: canvas, bottom panel, viewport and inspector.
@@ -139,10 +242,7 @@ struct ContentView: View {
                 case .library:
                     LibraryPanel(catalog: document.catalog, documentFolder: document.fileURL?.deletingLastPathComponent(),
                                  documentFile: document.fileURL) { item in
-                        if viewMode == .text {
-                            viewMode = .split
-                        }
-                        nodeToAdd = item
+                        add(item)
                     }
                 }
             }

@@ -13,7 +13,8 @@
 //   - pan: two-finger scroll on a trackpad, middle-button drag, or
 //     Space + drag;
 //   - zoom around the pointer: pinch, mouse wheel, or ⌥-scroll.
-// Tab asks the app for its node search (M2e). The right button is kept
+// Tab asks the app for its node search (M2e). The keys are actions too,
+// in the Graph menu and the command palette (M4f). The right button is kept
 // free for a context menu. Copy, Cut, Paste, Duplicate, Collapse into
 // Nodegraph and Ungroup come from the menus, through the responder chain
 // (M4a), and so does Group in Backdrop (M4d).
@@ -110,18 +111,16 @@ public class GraphEventView: NSView {
             // is enough.
             spaceHeld = true
         case "a":
-            controller.frame(.all)
+            frameAll(nil)
         case "f":
-            controller.frame(.selection)
+            frameSelection(nil)
         case "u":
-            controller.onNavigateUp?()
+            goUpOneLevel(nil)
         case "s":
-            if !controller.soloSelection() {
-                NSSound.beep()
-            }
+            showSelectionAlone(nil)
         case "\t":
             // Tab: add a node where the pointer is (M2e).
-            controller.requestNodeSearch(at: pointerLocation())
+            addNode(nil)
         case "\u{1B}":
             // Escape: abandon a wire or cut being dragged.
             controller.cancelDrag()
@@ -209,6 +208,53 @@ public class GraphEventView: NSView {
         #selector(collapseIntoNodeGraph(_:)): .collapse,
         #selector(ungroupNodeGraph(_:)): .ungroup,
         #selector(groupInBackdrop(_:)): .backdrop,
+    ]
+
+    // MARK: Canvas keys as actions (M4f)
+
+    // The single keys above, also as actions, for the Graph menu and the
+    // command palette (which lists the menus). Their items have no key
+    // equivalents: a menu item's key equivalent is looked for before the
+    // focused view sees the key, so a plain "a" there would take the
+    // letter from every text field. The palette shows the keys from
+    // `keys` instead.
+
+    /// Graph > Add Node… (Tab): the node search, under the pointer, or in
+    /// the middle if the pointer isn't on the canvas.
+    @objc public func addNode(_ sender: Any?) {
+        controller.requestNodeSearch(at: pointerLocation())
+    }
+
+    /// Graph > Frame All (A).
+    @objc public func frameAll(_ sender: Any?) {
+        controller.frame(.all)
+    }
+
+    /// Graph > Frame Selection (F).
+    @objc public func frameSelection(_ sender: Any?) {
+        controller.frame(.selection)
+    }
+
+    /// Graph > Go Up One Level (U): out of a nodegraph.
+    @objc public func goUpOneLevel(_ sender: Any?) {
+        controller.onNavigateUp?()
+    }
+
+    /// S: solo the selected node, or stop. Not in the Graph menu: the
+    /// inspector's Show in Viewport Alone does it, from anywhere, and the
+    /// palette lists that one (with S as its key).
+    @objc public func showSelectionAlone(_ sender: Any?) {
+        if !controller.soloSelection() {
+            NSSound.beep()
+        }
+    }
+
+    /// The canvas keys of the actions above, for the palette to show.
+    public static let keys: [Selector: String] = [
+        #selector(addNode(_:)): "⇥",
+        #selector(frameAll(_:)): "A",
+        #selector(frameSelection(_:)): "F",
+        #selector(goUpOneLevel(_:)): "U",
     ]
 
     /// Keeps the controller's idea of the view size current, for framing.
@@ -370,6 +416,10 @@ extension GraphEventView: NSMenuItemValidation {
     public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if let action = menuItem.action, let command = Self.commands[action] {
             return controller.canPerform(command)
+        }
+        if menuItem.action == #selector(goUpOneLevel(_:)) {
+            // Set only inside a nodegraph (GraphPanel).
+            return controller.onNavigateUp != nil
         }
         if menuItem.action == #selector(delete(_:)) {
             let deletable: GraphDeletion = controller.deletableSelection
