@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer), M2 (editor) and M3 (previews & colour) done as of 2026-10-31; see `docs/spikes/` and `docs/milestones/`. M4 (authoring power) is planned in §8.5.
+Status: M0 (spikes), M1 (viewer), M2 (editor), M3 (previews & colour) and M4 (authoring power) done as of 2026-11-03; see `docs/spikes/` and `docs/milestones/`. Open items from the milestones wait for a UX polish pass once the initial milestones are complete.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -335,7 +335,7 @@ M3 is split into reviewable PRs, like M2. OpenColorIO comes first: the viewport'
 
 Decided 2026-10-30: once the milestones' features are in, add keyboard shortcuts for most actions, as users are expected to rely on them to work quickly (the canvas has A, F, U, S, Tab, Delete and ⌥-drag so far). Review every command then, give the frequent ones single keys on the canvas and menu shortcuts elsewhere, show them in the menus and tooltips, and check for clashes with macOS and with MaterialX's Graph Editor conventions (PLAN.md §4.2).
 
-### 8.5 M4 plan (authoring power)
+### 8.5 M4 plan (authoring power; done, see `docs/milestones/M4-authoring.md`)
 
 Drafted 2026-10-31. M4 turns the editor into a tool for building reusable pieces: nodegraphs made from a selection, their interface, node definitions made from them and shared through libraries, plus backdrops, editable XML and a command palette. Split into PRs like M3; nodegraphs, their interface and definitions come in that order, because each needs the one before. The other three don't depend on them.
 
