@@ -425,6 +425,13 @@ public:
     /// other paths, so swatches use writeForPreview().
     std::string writeForViewport() const;
 
+    /// writeForViewport's text, for USD export (M5b): every node whose
+    /// definition the document makes (or includes) is expanded into the
+    /// definition's nodes, and the definitions are left out, so the USD
+    /// file doesn't depend on the `.mtlx` (spike M5a). Returns "" if not
+    /// loaded.
+    std::string writeForUSD() const;
+
     /// writeForViewport's text, with a material added that shows the element at
     /// `elementPath` on its own (solo preview, M3d): a value through
     /// `convert` nodes into the emission of an otherwise black surface, a BSDF in a `surface`, a

@@ -19,7 +19,8 @@
 // subclass, `NSHostingController` (SwiftUI inside AppKit), `LocalizedError`,
 // `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets, labelled
 // tuples, `Optional.map`; an `@objc` action on the document, a `weak`
-// stored property (M4f).
+// stored property (M4f); a save panel's accessory view, and a small
+// `NSObject` subclass as a control's target (M5b).
 
 import AppKit
 import GraphKit
@@ -27,6 +28,8 @@ import MXKit
 import Observation
 import PreviewKit
 import SwiftUI
+import UniformTypeIdentifiers
+import ViewportKit
 
 /// One open MaterialX document.
 ///
@@ -257,6 +260,57 @@ final class MaterialXDocument: NSDocument {
         window.toolbarStyle = .unified
 
         addWindowController(NSWindowController(window: window))
+    }
+
+    // MARK: Export (M5b)
+
+    /// File > Export as USD…: writes the document's materials as a USD
+    /// file, .usda (text) or .usdc (binary), chosen in the Save panel.
+    ///
+    /// The file holds the materials only, standing alone (no reference to
+    /// the .mtlx, definitions expanded: MXDocument.usdXMLString), under
+    /// one prim, /MaterialX, for referencing into a scene and binding to
+    /// its models. Textures in the file's folder are referred to relative
+    /// to it (MGUSDExporter.h). Not an edit: the document doesn't change.
+    @objc func exportAsUSD(_ sender: Any?) {
+        // The text now, from the document as it is when the command is
+        // chosen, not when the panel closes.
+        let text: String
+        do {
+            text = try content.usdXMLString()
+        } catch {
+            presentError(error)
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Export as USD"
+        panel.message = "The document's materials, for referencing into a USD scene. "
+            + "Textures in the same folder as the file, or inside it, are referred to by relative paths."
+        // Beside the document, named after it.
+        panel.directoryURL = fileURL?.deletingLastPathComponent()
+        let name: String = (displayName as NSString).deletingPathExtension
+        let formats = USDFormatAccessory(panel: panel, name: name)
+        panel.accessoryView = formats.view
+        let export: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            // SWIFT: The closure uses `formats`, so it keeps the accessory
+            // (and its popup's target) alive until the panel has closed.
+            _ = formats
+            guard response == .OK, let url = panel.url else {
+                return
+            }
+            do {
+                // SWIFT: The Objective-C method ends in `error:`, so Swift
+                // sees it as `throws`, returning nothing.
+                try MGUSDExporter.exportMaterials(fromMaterialXString: text, to: url)
+            } catch {
+                self?.presentError(error)
+            }
+        }
+        if let window = windowControllers.first?.window {
+            panel.beginSheetModal(for: window, completionHandler: export)
+        } else {
+            export(panel.runModal())
+        }
     }
 
     // MARK: Command palette (M4f)
@@ -506,5 +560,59 @@ final class MaterialXDocument: NSDocument {
     /// inside it are literal, so the XML's quotes need no escaping.
     private static func emptyDocument() -> MXDocument {
         try! MXDocument(xml: #"<?xml version="1.0"?><materialx version="1.39" />"#)
+    }
+}
+
+/// The Export as USD panel's format menu: USDA (text) or USDC (binary).
+/// Choosing one changes the panel's file type, and the extension of the
+/// name typed so far.
+///
+/// SWIFT: An `NSObject` subclass, because AppKit controls call an
+/// Objective-C method on an object (target/action, as in ObjC), not a
+/// closure. Nothing else keeps it alive (a control holds its target
+/// weakly), so the panel's completion handler holds it.
+final class USDFormatAccessory: NSObject {
+    /// The formats, as the menu lists them: title and extension.
+    static let formats: [(title: String, fileExtension: String)] = [("USDA (text)", "usda"), ("USDC (binary)", "usdc")]
+
+    /// The view the panel shows under its file browser.
+    let view: NSView
+    private let panel: NSSavePanel
+    private let popUp: NSPopUpButton
+
+    init(panel: NSSavePanel, name: String) {
+        self.panel = panel
+        popUp = NSPopUpButton(frame: .zero, pullsDown: false)
+        popUp.addItems(withTitles: Self.formats.map(\.title))
+        let label = NSTextField(labelWithString: "Format:")
+        // SWIFT: An NSStackView lays out its views in a row, as SwiftUI's
+        // HStack does; the edge insets keep it off the panel's edges.
+        let stack = NSStackView(views: [label, popUp])
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        view = stack
+        // SWIFT: `super.init()` before `self` is used (here, as the
+        // popup's target): Swift requires every stored property set first,
+        // then the superclass initialised, before methods can be called.
+        super.init()
+        popUp.target = self
+        popUp.action = #selector(formatChosen(_:))
+        panel.nameFieldStringValue = name + "." + Self.formats[0].fileExtension
+        setType(Self.formats[0].fileExtension)
+    }
+
+    /// The popup's action: the panel takes the chosen format's type, and
+    /// the typed name its extension.
+    @objc private func formatChosen(_ sender: NSPopUpButton) {
+        let fileExtension: String = Self.formats[sender.indexOfSelectedItem].fileExtension
+        let typed: String = (panel.nameFieldStringValue as NSString).deletingPathExtension
+        setType(fileExtension)
+        panel.nameFieldStringValue = typed + "." + fileExtension
+    }
+
+    /// Lets the panel save only files with `fileExtension`.
+    private func setType(_ fileExtension: String) {
+        // SWIFT: `UTType(filenameExtension:)` finds the system's type for an
+        // extension (macOS knows USD's); nil if none, then any data.
+        panel.allowedContentTypes = [UTType(filenameExtension: fileExtension) ?? .data]
     }
 }
