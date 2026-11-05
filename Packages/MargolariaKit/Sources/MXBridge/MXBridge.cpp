@@ -657,7 +657,7 @@ std::string AbsoluteFilename(const mx::ValueElementPtr& value) {
 namespace {
 
 /// Defined with the M4a edits below.
-void UngroupForStorm(const mx::DocumentPtr& preview);
+void UngroupForStorm(const mx::DocumentPtr& preview, bool expandEveryDefinition = false);
 
 } // namespace
 
@@ -782,6 +782,19 @@ std::string Document::writeForViewport() const {
     try {
         mx::DocumentPtr preview = PreviewCopy(_impl->document);
         UngroupForStorm(preview);
+        return WritePreview(preview);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+std::string Document::writeForUSD() const {
+    if (!_impl) {
+        return {};
+    }
+    try {
+        mx::DocumentPtr preview = PreviewCopy(_impl->document);
+        UngroupForStorm(preview, true);
         return WritePreview(preview);
     } catch (const std::exception&) {
         return {};
@@ -2307,22 +2320,40 @@ void ExpandInstance(const mx::NodePtr& node, const mx::NodeGraphPtr& implementat
 /// (see StormMisreads), until none is left. Ungrouping keeps what the
 /// document computes (MXNodeGraphEditTests, CollapseRenderTests), so this
 /// is the same material in a shape Storm reads.
-void UngroupForStorm(const mx::DocumentPtr& preview) {
+///
+/// With `expandEveryDefinition` (USD export, M5b), every node whose
+/// definition the document makes is expanded, not only those Storm needs,
+/// and the definitions are then removed: a USD file has no use for them,
+/// and UsdMtlx would record the `.mtlx` as where the nodes are defined,
+/// a file the exported USD would depend on (spike M5a).
+void UngroupForStorm(const mx::DocumentPtr& preview, bool expandEveryDefinition) {
     // Storm can't draw a node whose nodedef, defined in the document, is
     // implemented by a nodegraph reading a file (M4c1, PLAN.md §8.2): the
     // texture's uniform is left out of the shader, which doesn't compile.
     // Such nodes become the implementation's nodes. (Over a copy of the
     // children: getChildren() is the document's own list, which this changes.)
+    //
+    // One pass is enough when definitions use each other: once a
+    // definition is done, no node of it is left anywhere, implementations
+    // included, so the implementations copied afterwards have none either.
+    std::vector<std::pair<mx::NodeDefPtr, mx::NodeGraphPtr>> expanded;
     const std::vector<mx::ElementPtr> children = preview->getChildren();
     for (const mx::ElementPtr& child : children) {
         mx::NodeGraphPtr implementation = child->asA<mx::NodeGraph>();
         mx::NodeDefPtr nodeDef = implementation && implementation->hasNodeDefString() ? implementation->getNodeDef()
                                                                                        : nullptr;
-        if (!nodeDef || nodeDef->getDocument() != preview || !ReadsFiles(implementation)) {
+        if (!nodeDef || nodeDef->getDocument() != preview || !(expandEveryDefinition || ReadsFiles(implementation))) {
             continue;
         }
         for (const mx::NodePtr& instance : InstancesOf(preview, nodeDef)) {
             ExpandInstance(instance, implementation, nodeDef);
+        }
+        expanded.emplace_back(nodeDef, implementation);
+    }
+    if (expandEveryDefinition) {
+        for (const auto& [nodeDef, implementation] : expanded) {
+            implementation->getParent()->removeChild(implementation->getName());
+            nodeDef->getParent()->removeChild(nodeDef->getName());
         }
     }
     for (bool changed = true; changed;) {

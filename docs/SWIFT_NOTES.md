@@ -206,6 +206,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.task(id:)` | Run work when the view appears and whenever `id` changes | `ViewportView.swift` |
 | `.onReceive(NotificationCenter.default.publisher(for:))` | Runs a closure for each notification posted with that name, while the view is shown | `addObserver:selector:name:object:` | `LibraryPanel.swift` |
 | `NSSavePanel` | The Save dialog: folder, file name and types to start with, as a sheet on the window | The same class in ObjC | `InspectorPanel.swift` (`saveToLibrary`) |
+| A save panel's accessory view | `accessoryView` adds a view of our own under the file browser (a format popup); changing `allowedContentTypes` while the panel is open changes the type it saves | `setAccessoryView:` | `MaterialXDocument.swift` (`USDFormatAccessory`, M5b) |
+| An `NSObject` subclass as a control's target | AppKit controls call an `@objc` method on a target object, not a closure; the control holds the target weakly, so something else must keep it alive (here, the panel's completion handler) | Target/action | `MaterialXDocument.swift` (`USDFormatAccessory`) |
+| `super.init()` in a subclass's `init` | Every stored property set first, then `super.init()`, and only then may `self` be used (as a target): Swift's two-phase initialisation | `self = [super init]` first, in ObjC | `MaterialXDocument.swift` (`USDFormatAccessory`) |
 | Tuples as list rows | `ForEach(rows, id: \.definition.name)`: a key path into a tuple's labelled part gives each row its identity | — | `LibraryPanel.swift` |
 | `WindowGroup`, `.fileImporter` | A plain (non-document) window; the system Open panel | `Spikes/M0bViewport/ViewportSpikeApp.swift` |
 | `LazyVGrid`, `ForEach` | A grid that creates cells as they scroll into view; one view per element of a collection | `Spikes/M0cSwatches/SwatchSpikeApp.swift` |

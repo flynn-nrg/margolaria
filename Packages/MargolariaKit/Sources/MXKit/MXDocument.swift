@@ -225,6 +225,23 @@ public final class MXDocument {
         return xml
     }
 
+    /// The viewport's text (``viewportXMLString()``) for USD export (M5b):
+    /// also every node whose definition the document makes, or includes
+    /// from a library file, becomes the definition's nodes, and the
+    /// definitions are left out. A USD file has no definitions of its own:
+    /// without this, OpenUSD's MaterialX reader would make the USD file
+    /// depend on the `.mtlx` it was read from (spike M5a). The materials
+    /// compute the same.
+    ///
+    /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
+    public func usdXMLString() throws -> String {
+        let xml = handle.writeForUSD().swiftString
+        guard !xml.isEmpty else {
+            throw MXError.writeFailed
+        }
+        return xml
+    }
+
     /// The viewport's text (``viewportXMLString()``) with a material added
     /// that shows the element at `path` on its own, for the viewport's
     /// solo preview (M3d). The document itself isn't changed.

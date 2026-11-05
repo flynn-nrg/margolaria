@@ -40,8 +40,10 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// app).
 @interface MGStormRenderer : NSObject
 
-/// Builds the stage and the Storm engine for the given .mtlx file.
-/// Returns nil and sets `error` if the file contains no material.
+/// Builds the stage and the Storm engine for the given .mtlx file, or a
+/// USD file exported by MGUSDExporter (its materials are under /MaterialX,
+/// as UsdMtlx puts a .mtlx's; M5b's tests render those). Returns nil and
+/// sets `error` if the file contains no material.
 - (nullable instancetype)initWithMaterialXFile:(NSURL *)fileURL
                                          error:(NSError **)error NS_DESIGNATED_INITIALIZER;
 

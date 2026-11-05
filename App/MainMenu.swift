@@ -78,7 +78,8 @@ enum MainMenu {
         NSApp.servicesMenu = servicesMenu
         bar.addItem(submenu: appMenu)
 
-        // File. NSDocumentController and NSDocument implement all of these.
+        // File. NSDocumentController and NSDocument implement all of these,
+        // except Export as USD…, MaterialXDocument's own.
         let fileMenu: NSMenu = menu("File",
                                     Item("New", #selector(NSDocumentController.newDocument(_:)), "n"),
                                     Item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"))
@@ -95,7 +96,10 @@ enum MainMenu {
             Item("Move To…", #selector(NSDocument.move(_:))),
             // AppKit turns this item into the "Revert To" submenu, with
             // "Browse All Versions…".
-            Item("Revert To Saved", #selector(NSDocument.revertToSaved(_:))))
+            Item("Revert To Saved", #selector(NSDocument.revertToSaved(_:))),
+            .separator,
+            // The document's materials as a USD file (M5b).
+            Item("Export as USD…", #selector(MaterialXDocument.exportAsUSD(_:))))
         bar.addItem(submenu: fileMenu)
 
         // Edit. Undo and redo go to the window's undo manager.
