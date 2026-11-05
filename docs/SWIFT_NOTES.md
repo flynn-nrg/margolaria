@@ -170,6 +170,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 
 | Concept | In one line | First appears |
 |---|---|---|
+| `withCheckedThrowingContinuation` | Turns a callback API into an `await`: the closure gets a continuation, and the callback resumes it, exactly once, with a value or an error (like waiting on a semaphore the callback signals, without blocking a thread) | `Spikes/M5aUSDZ/RealityKitRender.swift` |
 | `Sendable` | Safe to share between threads; checked by the compiler | `MXError.swift` |
 | `@unchecked Sendable` | "I checked this by hand." Always explain why. | `MXLibrary.swift` |
 | `Task { @MainActor in }` | Schedule work to run later on the main thread | `dispatch_async(dispatch_get_main_queue(), ^{})` | `ViewportView.swift` |
