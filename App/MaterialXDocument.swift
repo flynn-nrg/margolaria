@@ -20,7 +20,8 @@
 // `UndoManager.registerUndo(withTarget:)`, `NSAlert` sheets, labelled
 // tuples, `Optional.map`; an `@objc` action on the document, a `weak`
 // stored property (M4f); a save panel's accessory view, and a small
-// `NSObject` subclass as a control's target (M5b).
+// `NSObject` subclass as a control's target (M5b); a function taking a
+// throwing closure (M5c).
 
 import AppKit
 import GraphKit
@@ -262,7 +263,12 @@ final class MaterialXDocument: NSDocument {
         addWindowController(NSWindowController(window: window))
     }
 
-    // MARK: Export (M5b)
+    // MARK: Export (M5b, M5c)
+
+    /// The material the viewport shows, by MaterialX name; nil before the
+    /// viewport has picked one. Window state, kept here (not in
+    /// ContentView) so that Export as USDZ… can put it on the sphere.
+    var previewMaterial: String? = nil
 
     /// File > Export as USD…: writes the document's materials as a USD
     /// file, .usda (text) or .usdc (binary), chosen in the Save panel.
@@ -286,30 +292,82 @@ final class MaterialXDocument: NSDocument {
         panel.title = "Export as USD"
         panel.message = "The document's materials, for referencing into a USD scene. "
             + "Textures in the same folder as the file, or inside it, are referred to by relative paths."
-        // Beside the document, named after it.
-        panel.directoryURL = fileURL?.deletingLastPathComponent()
-        let name: String = (displayName as NSString).deletingPathExtension
-        let formats = USDFormatAccessory(panel: panel, name: name)
+        let formats = USDFormatAccessory(panel: panel, name: exportName)
         panel.accessoryView = formats.view
-        let export: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            // SWIFT: The closure uses `formats`, so it keeps the accessory
-            // (and its popup's target) alive until the panel has closed.
+        // SWIFT: The closure uses `formats`, so it keeps the accessory (and
+        // its popup's target) alive until the panel has closed.
+        runExportPanel(panel) { url in
             _ = formats
+            // SWIFT: The Objective-C method ends in `error:`, so Swift sees
+            // it as `throws`, returning nothing.
+            try MGUSDExporter.exportMaterials(fromMaterialXString: text, to: url)
+        }
+    }
+
+    /// File > Export as USDZ…: writes a USDZ package for Quick Look and
+    /// Reality Composer Pro: a sphere with the material the viewport
+    /// shows, the document's other materials for binding there, and every
+    /// texture inside (MGUSDExporter.h). The panel says which materials
+    /// they won't draw from their graphs (MXDocument.quickLookIssues).
+    @objc func exportAsUSDZ(_ sender: Any?) {
+        let text: String
+        do {
+            // Greyscale images read as colours are rewritten for Reality
+            // Composer Pro (MXDocument.usdzXMLString).
+            text = try content.usdzXMLString()
+        } catch {
+            presentError(error)
+            return
+        }
+        let material: String? = previewMaterial
+        let panel = NSSavePanel()
+        panel.title = "Export as USDZ"
+        var message: String = "A sphere with the material the viewport shows"
+            + (material.map { " (\($0))" } ?? "")
+            + ", for Quick Look and Reality Composer Pro. The other materials are included, "
+            + "and every texture is packed inside."
+        let issues: [String] = content.quickLookIssues()
+        if !issues.isEmpty {
+            message += "\n\nNot drawn as designed: plain grey in Quick Look, magenta in Reality Composer Pro.\n"
+                + issues.map { "• " + $0 }.joined(separator: "\n")
+        }
+        panel.message = message
+        panel.nameFieldStringValue = exportName + ".usdz"
+        panel.allowedContentTypes = [.usdz]
+        runExportPanel(panel) { url in
+            try MGUSDExporter.exportPreview(fromMaterialXString: text, to: url, materialName: material)
+        }
+    }
+
+    /// The name exported files start with: the document's, without its
+    /// extension ("Untitled" for a new one).
+    private var exportName: String {
+        (displayName as NSString).deletingPathExtension
+    }
+
+    /// Shows `panel` as a sheet on the window, starting beside the
+    /// document, and calls `export` with the chosen file; shows its error
+    /// if it throws.
+    ///
+    /// SWIFT: `export` is a *throwing closure* (`(URL) throws -> Void`):
+    /// the caller's `try` lines go in it, and this function catches what
+    /// they throw, in one place for both exports.
+    private func runExportPanel(_ panel: NSSavePanel, export: @escaping (URL) throws -> Void) {
+        panel.directoryURL = fileURL?.deletingLastPathComponent()
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .OK, let url = panel.url else {
                 return
             }
             do {
-                // SWIFT: The Objective-C method ends in `error:`, so Swift
-                // sees it as `throws`, returning nothing.
-                try MGUSDExporter.exportMaterials(fromMaterialXString: text, to: url)
+                try export(url)
             } catch {
                 self?.presentError(error)
             }
         }
         if let window = windowControllers.first?.window {
-            panel.beginSheetModal(for: window, completionHandler: export)
+            panel.beginSheetModal(for: window, completionHandler: finish)
         } else {
-            export(panel.runModal())
+            finish(panel.runModal())
         }
     }
 

@@ -242,6 +242,32 @@ public final class MXDocument {
         return xml
     }
 
+    /// The USD export text (``usdXMLString()``) for USDZ export (M5c): also,
+    /// an image node reading a greyscale file as a colour reads it as a
+    /// float, converted to a colour. The same numbers, but Reality Composer
+    /// Pro reads the colour version as red (spike M5a).
+    ///
+    /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
+    public func usdzXMLString() throws -> String {
+        let xml = handle.writeForUSDZ().swiftString
+        guard !xml.isEmpty else {
+            throw MXError.writeFailed
+        }
+        return xml
+    }
+
+    /// One sentence per material that Quick Look and Reality Composer Pro
+    /// won't draw from its graph, because its surface shader is one
+    /// RealityKit doesn't know (anything but standard_surface,
+    /// open_pbr_surface and UsdPreviewSurface): they draw it plain grey,
+    /// or magenta. For Export as USDZ… to warn about.
+    ///
+    /// SWIFT: `map` over a C++ vector: Swift sees `std::vector` as a
+    /// collection, so the usual collection methods work on it.
+    public func quickLookIssues() -> [String] {
+        handle.quickLookIssues().map { $0.swiftString }
+    }
+
     /// The viewport's text (``viewportXMLString()``) with a material added
     /// that shows the element at `path` on its own, for the viewport's
     /// solo preview (M3d). The document itself isn't changed.

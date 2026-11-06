@@ -208,6 +208,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `NSSavePanel` | The Save dialog: folder, file name and types to start with, as a sheet on the window | The same class in ObjC | `InspectorPanel.swift` (`saveToLibrary`) |
 | A save panel's accessory view | `accessoryView` adds a view of our own under the file browser (a format popup); changing `allowedContentTypes` while the panel is open changes the type it saves | `setAccessoryView:` | `MaterialXDocument.swift` (`USDFormatAccessory`, M5b) |
 | An `NSObject` subclass as a control's target | AppKit controls call an `@objc` method on a target object, not a closure; the control holds the target weakly, so something else must keep it alive (here, the panel's completion handler) | Target/action | `MaterialXDocument.swift` (`USDFormatAccessory`) |
+| `Bindable(object).property` | A binding to a property of an `@Observable` object held in a plain `let`, as `$` gives one for `@State` | — | `ContentView.swift` (`previewMaterial`, M5c) |
+| A throwing closure as a parameter | `(URL) throws -> Void`: the caller's `try` lines go in the closure, and the function that calls it catches what it throws | A block with an `NSError **` out-parameter | `MaterialXDocument.swift` (`runExportPanel`, M5c) |
 | `super.init()` in a subclass's `init` | Every stored property set first, then `super.init()`, and only then may `self` be used (as a target): Swift's two-phase initialisation | `self = [super init]` first, in ObjC | `MaterialXDocument.swift` (`USDFormatAccessory`) |
 | Tuples as list rows | `ForEach(rows, id: \.definition.name)`: a key path into a tuple's labelled part gives each row its identity | — | `LibraryPanel.swift` |
 | `WindowGroup`, `.fileImporter` | A plain (non-document) window; the system Open panel | `Spikes/M0bViewport/ViewportSpikeApp.swift` |
@@ -295,4 +297,6 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Traits | `.serialized`, `.enabled(if:)`: change how a test or suite runs | `StormRendererTests.swift`, `MXCorpusTests.swift` |
 | `Issue.record` | Records a failure with a message, without stopping the test | `MXCorpusTests.swift` |
 | `#filePath` | The path of the current source file, like `__FILE__` | `MXCorpusTests.swift` |
+| `@MainActor async` tests | A parameterized test marked `@MainActor` and `async`: it awaits main-thread-only APIs (RealityKit) directly | `USDZExportTests.swift` (M5c) |
+| `Array.max()` / `min()` | Return an optional: an empty array has neither; `!` unwraps when it can't be empty | `USDZExportTests.swift` (`expectGreyTexture`, M5c) |
 | `async` tests, collecting from callbacks | A test can be `async` and `await`; results from a `@Sendable` callback go into a `@MainActor` class instance (a `var` can't be captured) | `SwatchCacheTests.swift` (`Collected`) |

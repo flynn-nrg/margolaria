@@ -81,6 +81,11 @@ let package = Package(
                 // Links the OpenUSD and MaterialX frameworks, and puts their
                 // headers on our include path.
                 .product(name: "OpenUSDCxx", package: "OpenUSD"),
+            ],
+            linkerSettings: [
+                // ImageIO: which textures are greyscale (USDZ export, M5c).
+                .linkedFramework("ImageIO"),
+                .linkedFramework("CoreFoundation"),
             ]
         ),
 

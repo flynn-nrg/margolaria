@@ -84,9 +84,6 @@ struct ContentView: View {
     /// A node for the canvas to select and frame (set from the sidebar).
     @State private var focus: String? = nil
 
-    /// The material shown in the viewport (its MaterialX name).
-    @State private var previewMaterial: String? = nil
-
     /// The element shown alone in the viewport instead (solo preview,
     /// M3d), by path; nil when the viewport shows a material.
     @State private var soloPath: String? = nil
@@ -274,7 +271,11 @@ struct ContentView: View {
                 if showsViewport || showsInspector {
                     VSplitView {
                         if showsViewport {
-                            ViewportPanel(document: document, materialName: $previewMaterial, soloPath: $soloPath)
+                            // SWIFT: `Bindable(document)` makes bindings to an
+                            // @Observable object's properties, as `$` does
+                            // for @State: the picker changes the document's.
+                            ViewportPanel(document: document, materialName: Bindable(document).previewMaterial,
+                                          soloPath: $soloPath)
                                 .frame(minHeight: 160, idealHeight: 320, maxHeight: .infinity)
                         }
                         if showsInspector {
@@ -348,7 +349,7 @@ struct ContentView: View {
             }
             if element.type == "material" {
                 // Materials also go to the preview.
-                previewMaterial = element.name
+                document.previewMaterial = element.name
             }
             if element.category == "nodegraph" {
                 graphPath = element.path

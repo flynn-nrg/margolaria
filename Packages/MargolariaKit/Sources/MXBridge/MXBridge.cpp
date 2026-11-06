@@ -10,6 +10,7 @@
 #include "MXBridge.h"
 
 #include <MaterialXCore/Document.h>
+#include <MaterialXCore/Material.h>
 #include <MaterialXCore/Util.h>
 #include <MaterialXFormat/File.h>
 #include <MaterialXFormat/Util.h>
@@ -19,6 +20,8 @@
 #include <MaterialXGenShader/GenContext.h>
 #include <MaterialXGenShader/Shader.h>
 #include <MaterialXGenShader/ShaderStage.h>
+
+#include <ImageIO/ImageIO.h>
 
 #include <algorithm>
 #include <cmath>
@@ -658,6 +661,8 @@ namespace {
 
 /// Defined with the M4a edits below.
 void UngroupForStorm(const mx::DocumentPtr& preview, bool expandEveryDefinition = false);
+/// Defined with the M4c1 edits below.
+void ExpandInstance(const mx::NodePtr& node, const mx::NodeGraphPtr& implementation, const mx::NodeDefPtr& nodeDef);
 
 } // namespace
 
@@ -788,14 +793,274 @@ std::string Document::writeForViewport() const {
     }
 }
 
+namespace {
+
+/// True if the image file at `path` has one channel of colour (grey, with
+/// or without alpha), as ImageIO reads it. False if it can't be read.
+bool IsGreyscaleImage(const std::string& path) {
+    CFURLRef url = CFURLCreateFromFileSystemRepresentation(nullptr, reinterpret_cast<const UInt8*>(path.c_str()),
+                                                           static_cast<CFIndex>(path.size()), false);
+    if (!url) {
+        return false;
+    }
+    CGImageSourceRef source = CGImageSourceCreateWithURL(url, nullptr);
+    CFRelease(url);
+    if (!source) {
+        return false;
+    }
+    bool greyscale = false;
+    if (CFDictionaryRef properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nullptr)) {
+        const void* model = CFDictionaryGetValue(properties, kCGImagePropertyColorModel);
+        greyscale = model && CFEqual(model, kCGImagePropertyColorModelGray);
+        CFRelease(properties);
+    }
+    CFRelease(source);
+    return greyscale;
+}
+
+/// The value of `input`, or of the nodegraph input it reads through
+/// `interfacename`; "" if neither has one.
+std::string ValueThroughInterface(const mx::InputPtr& input) {
+    if (input->hasInterfaceName()) {
+        mx::NodeGraphPtr graph = input->getParent()->getParent()->asA<mx::NodeGraph>();
+        mx::InputPtr interface = graph ? graph->getInput(input->getInterfaceName()) : nullptr;
+        return interface && !ReadsSiblingPort(interface) ? interface->getValueString() : "";
+    }
+    return ReadsSiblingPort(input) ? "" : input->getValueString();
+}
+
+/// The first number of a vector or colour value ("0.5, 0.2, 0.1": "0.5").
+std::string FirstComponent(const std::string& value) {
+    const std::string first = value.substr(0, value.find(','));
+    const size_t start = first.find_first_not_of(' ');
+    const size_t end = first.find_last_not_of(' ');
+    return start == std::string::npos ? "0" : first.substr(start, end - start + 1);
+}
+
+/// Rewrites, in an export copy, the image nodes that read greyscale files
+/// as colours, to read them as a float and convert that to a colour: the
+/// same numbers (MaterialX copies one channel into all three either way),
+/// which Reality Composer Pro reads right. Read as a colour, it puts the
+/// grey in red alone (spike M5a, finding 7).
+///
+/// MaterialX converts a file's colour space only for colour outputs, so a
+/// float image would skip it: the conversion from the file's space to the
+/// working space (`workingSpace`, lin_rec709 if empty) follows the
+/// `convert` explicitly, as the standard library's transform node
+/// expanded into its implementation, plain maths every reader knows.
+///
+///   before:  image (color3, srgb_texture) ──▶ readers
+///   after:   image (float) ─▶ convert ─▶ srgb_texture_to_lin_rec709's nodes ─▶ readers
+///
+/// The image node keeps its place under a new name; the last node takes
+/// its name, so whatever read it reads the colour. Images in a space with
+/// no transform to the working space are left as they are.
+void ReadGreyscaleImagesAsFloats(const mx::DocumentPtr& preview, std::string workingSpace) {
+    if (workingSpace.empty()) {
+        workingSpace = "lin_rec709";
+    }
+    static const std::set<std::string> imageNodes = {"image", "tiledimage", "hextiledimage", "triplanarprojection"};
+    // Collected first: the rewrite adds nodes to the tree being walked.
+    std::vector<mx::NodePtr> nodes;
+    for (const mx::ElementPtr& element : preview->traverseTree()) {
+        mx::NodePtr node = element->asA<mx::Node>();
+        if (node && node->getType() == "color3" && imageNodes.count(node->getCategory())) {
+            nodes.push_back(node);
+        }
+    }
+    for (const mx::NodePtr& node : nodes) {
+        // Every file it reads (triplanarprojection has three) greyscale,
+        // and in the same colour space.
+        bool greyscale = false;
+        std::vector<mx::InputPtr> files;
+        for (const mx::InputPtr& input : node->getInputs()) {
+            if (input->getType() == mx::FILENAME_TYPE_STRING) {
+                files.push_back(input);
+                greyscale = IsGreyscaleImage(ValueThroughInterface(input)) &&
+                            input->getActiveColorSpace() == files.front()->getActiveColorSpace();
+                if (!greyscale) {
+                    break;
+                }
+            }
+        }
+        if (!greyscale) {
+            continue;
+        }
+        // The transform from the files' space, if there is one to make.
+        const std::string fileSpace = files.front()->getActiveColorSpace();
+        mx::NodeDefPtr transformDef;
+        if (!fileSpace.empty() && fileSpace != workingSpace) {
+            transformDef = preview->getNodeDef("ND_" + fileSpace + "_to_" + workingSpace + "_color3");
+            if (!transformDef) {
+                continue;
+            }
+        }
+        // The same kind of node, giving a float.
+        mx::NodeDefPtr floatDef;
+        for (const mx::NodeDefPtr& nodeDef : preview->getMatchingNodeDefs(node->getCategory())) {
+            if (nodeDef->getType() == "float") {
+                floatDef = nodeDef;
+                break;
+            }
+        }
+        if (!floatDef) {
+            continue;
+        }
+        // Inputs whose type differs in the float version (`default`, a
+        // colour there) take their first number; connected ones can't.
+        bool convertible = true;
+        for (const mx::InputPtr& input : node->getInputs()) {
+            mx::InputPtr wanted = floatDef->getActiveInput(input->getName());
+            if (wanted && wanted->getType() != input->getType() &&
+                (ReadsSiblingPort(input) || input->hasInterfaceName() || wanted->getType() != "float")) {
+                convertible = false;
+            }
+        }
+        if (!convertible) {
+            continue;
+        }
+        for (const mx::InputPtr& input : node->getInputs()) {
+            mx::InputPtr wanted = floatDef->getActiveInput(input->getName());
+            if (wanted && wanted->getType() != input->getType()) {
+                const std::string value = FirstComponent(input->getValueString());
+                input->setType(wanted->getType());
+                input->setValueString(value);
+            }
+        }
+        mx::GraphElementPtr parent = node->getParent()->asA<mx::GraphElement>();
+        const std::string name = node->getName();
+        node->setName(parent->createValidChildName(name + "_float"));
+        node->setType("float");
+        node->removeAttribute(mx::InterfaceElement::NODE_DEF_ATTRIBUTE);
+        // Read as raw numbers: the transform below does what the space did.
+        for (const mx::InputPtr& file : files) {
+            file->removeAttribute(mx::Element::COLOR_SPACE_ATTRIBUTE);
+        }
+        mx::NodePtr convert = parent->addNode("convert", transformDef ? parent->createValidChildName(name + "_color") : name,
+                                              "color3");
+        convert->addInput("in", "float")->setNodeName(node->getName());
+        if (transformDef) {
+            mx::NodePtr transform = parent->addNode(transformDef->getNodeString(), name, "color3");
+            transform->addInput("in", "color3")->setNodeName(convert->getName());
+            mx::InterfaceElementPtr implementation = transformDef->getImplementation();
+            if (mx::NodeGraphPtr graph = implementation ? implementation->asA<mx::NodeGraph>() : nullptr) {
+                ExpandInstance(transform, graph, transformDef);
+            }
+        }
+    }
+}
+
+/// Moves `input` to `node` as its input `name`: value, connection or
+/// interface alike. A node's input leaves it; a definition's (a default)
+/// is copied.
+void MoveInput(const mx::InputPtr& input, const mx::NodePtr& node, const std::string& name) {
+    node->addInput(name, input->getType())->copyContentFrom(input);
+    if (mx::NodePtr owner = input->getParent()->asA<mx::Node>()) {
+        owner->removeInput(input->getName());
+    }
+}
+
+/// Rewrites, in an export copy, every `mix` weighted by a colour or vector
+/// (`ND_mix_color3_color3` and its kind) as the sum it computes:
+///
+///   before:  mix(fg, bg, mix)
+///   after:   add(bg, multiply(subtract(fg, bg), mix))
+///
+/// RealityKit doesn't compile such a mix: Quick Look draws cyan stripes,
+/// Reality Composer Pro white. The standard library's colour-space
+/// transforms use one, so every image whose space export does by hand
+/// (ReadGreyscaleImagesAsFloats) has one. A mix weighted by a float is
+/// left as it is. The `add` keeps the mix's name, so its readers don't
+/// change.
+void SpellOutWeightedMixes(const mx::DocumentPtr& preview) {
+    // Collected first: the rewrite adds nodes to the tree being walked.
+    std::vector<mx::NodePtr> mixes;
+    for (const mx::ElementPtr& element : preview->traverseTree()) {
+        mx::NodePtr node = element->asA<mx::Node>();
+        mx::NodeDefPtr nodeDef = node && node->getCategory() == "mix" ? node->getNodeDef() : nullptr;
+        mx::InputPtr weight = nodeDef ? nodeDef->getActiveInput("mix") : nullptr;
+        if (weight && weight->getType() != "float" && weight->getType() == node->getType()) {
+            mixes.push_back(node);
+        }
+    }
+    for (const mx::NodePtr& node : mixes) {
+        mx::NodeDefPtr nodeDef = node->getNodeDef();
+        mx::GraphElementPtr parent = node->getParent()->asA<mx::GraphElement>();
+        const std::string name = node->getName();
+        const std::string type = node->getType();
+        // The node's own input, or the definition's default for it.
+        auto input = [&](const std::string& port) {
+            mx::InputPtr own = node->getInput(port);
+            return own ? own : nodeDef->getActiveInput(port);
+        };
+        mx::NodePtr difference = parent->addNode("subtract", parent->createValidChildName(name + "_difference"), type);
+        MoveInput(input("fg"), difference, "in1");
+        // bg is read twice: copied here, moved below.
+        difference->addInput("in2", type)->copyContentFrom(input("bg"));
+        mx::NodePtr weighted = parent->addNode("multiply", parent->createValidChildName(name + "_weighted"), type);
+        weighted->addInput("in1", type)->setNodeName(difference->getName());
+        MoveInput(input("mix"), weighted, "in2");
+        MoveInput(input("bg"), node, "in1");
+        node->addInput("in2", type)->setNodeName(weighted->getName());
+        node->setCategory("add");
+        node->removeAttribute(mx::InterfaceElement::NODE_DEF_ATTRIBUTE);
+    }
+}
+
+/// An export copy: the preview copy with every definition expanded (see
+/// writeForUSD).
+mx::DocumentPtr ExportCopy(const mx::DocumentPtr& document) {
+    mx::DocumentPtr preview = PreviewCopy(document);
+    UngroupForStorm(preview, true);
+    return preview;
+}
+
+} // namespace
+
+std::string Document::writeForUSDZ() const {
+    if (!_impl) {
+        return {};
+    }
+    try {
+        mx::DocumentPtr preview = ExportCopy(_impl->document);
+        ReadGreyscaleImagesAsFloats(preview, _impl->document->getColorSpace());
+        SpellOutWeightedMixes(preview);
+        return WritePreview(preview);
+    } catch (const std::exception&) {
+        return {};
+    }
+}
+
+StringVector Document::quickLookIssues() const {
+    StringVector issues;
+    if (!_impl) {
+        return issues;
+    }
+    // What RealityKit draws from its MaterialX graph (spike M5a); for any
+    // other surface it draws a plain grey material (Quick Look) or magenta
+    // (Reality Composer Pro).
+    static const std::set<std::string> drawn = {"standard_surface", "open_pbr_surface", "UsdPreviewSurface"};
+    try {
+        mx::DocumentPtr preview = ExportCopy(_impl->document);
+        for (const mx::NodePtr& material : preview->getMaterialNodes()) {
+            for (const mx::NodePtr& shader : mx::getShaderNodes(material)) {
+                if (!drawn.count(shader->getCategory())) {
+                    issues.push_back(material->getName() + " uses " + shader->getCategory() +
+                                     ", which Quick Look and Reality Composer Pro don't draw");
+                }
+            }
+        }
+    } catch (const std::exception&) {
+    }
+    return issues;
+}
+
 std::string Document::writeForUSD() const {
     if (!_impl) {
         return {};
     }
     try {
-        mx::DocumentPtr preview = PreviewCopy(_impl->document);
-        UngroupForStorm(preview, true);
-        return WritePreview(preview);
+        return WritePreview(ExportCopy(_impl->document));
     } catch (const std::exception&) {
         return {};
     }
