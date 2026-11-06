@@ -79,7 +79,7 @@ enum MainMenu {
         bar.addItem(submenu: appMenu)
 
         // File. NSDocumentController and NSDocument implement all of these,
-        // except Export as USD…, MaterialXDocument's own.
+        // except Export as USD… and USDZ…, MaterialXDocument's own.
         let fileMenu: NSMenu = menu("File",
                                     Item("New", #selector(NSDocumentController.newDocument(_:)), "n"),
                                     Item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"))
@@ -98,8 +98,10 @@ enum MainMenu {
             // "Browse All Versions…".
             Item("Revert To Saved", #selector(NSDocument.revertToSaved(_:))),
             .separator,
-            // The document's materials as a USD file (M5b).
-            Item("Export as USD…", #selector(MaterialXDocument.exportAsUSD(_:))))
+            // The document's materials as a USD file (M5b), and as a
+            // USDZ for Quick Look and Reality Composer Pro (M5c).
+            Item("Export as USD…", #selector(MaterialXDocument.exportAsUSD(_:))),
+            Item("Export as USDZ…", #selector(MaterialXDocument.exportAsUSDZ(_:))))
         bar.addItem(submenu: fileMenu)
 
         // Edit. Undo and redo go to the window's undo manager.

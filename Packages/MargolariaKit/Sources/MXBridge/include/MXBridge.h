@@ -432,6 +432,18 @@ public:
     /// loaded.
     std::string writeForUSD() const;
 
+    /// writeForUSD's text, for USDZ export (M5c): also, image nodes that
+    /// read a greyscale file as a colour read it as a float, converted to a
+    /// colour (the same numbers), which Reality Composer Pro reads right
+    /// (spike M5a). Returns "" if not loaded.
+    std::string writeForUSDZ() const;
+
+    /// One line per material that uses a surface shader Quick Look and
+    /// Reality Composer Pro don't draw from its graph (anything but
+    /// standard_surface, open_pbr_surface and UsdPreviewSurface; spike
+    /// M5a): "M_hair uses surface, which ...". Empty if none.
+    StringVector quickLookIssues() const;
+
     /// writeForViewport's text, with a material added that shows the element at
     /// `elementPath` on its own (solo preview, M3d): a value through
     /// `convert` nodes into the emission of an otherwise black surface, a BSDF in a `surface`, a

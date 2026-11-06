@@ -17,7 +17,7 @@ Date: 2026-11-04. SwiftUsd 8.1.0 (OpenUSD v26.08, MaterialX 1.39.5), macOS 27.0.
   - written as `.usda`/`.usdc`, or packaged as `.usdz` by `UsdUtilsCreateNewUsdzPackage` or `UsdUtilsCreateNewARKitUsdzPackage`.
 
   It also runs OpenUSD's validators (`UsdValidationContext` with every registered validator) and lists a file's asset paths. The preview sphere moved from MGStormRenderer.mm into `MGPreviewSphere.h/.mm`, shared by both.
-- **`USDZSpikeTests`** (ViewportKitTests, only with `M5A_EXPORT_DIR` set):
+- **`USDZSpikeTests`** (ViewportKitTests, only with `M5A_EXPORT_DIR` set; replaced in M5c by `USDZExportTests`, which keeps its files with `M5C_EXPORT_DIR`):
   - **"Every example exports":** each example, from the preview text and from the viewport's text, as `.usda`, `.usdz` and ARKit `.usdz`, with a report of asset paths and validator messages.
   - **"M4's shapes export":** three documents built through M4's calls (below).
 - **`Spikes/M5aUSDZ/RealityKitRender.swift`**, a standalone script. It renders USD files with RealityKit's `RealityRenderer`, offscreen, lit by Storm's default environment, and prints which material type RealityKit made of each.
@@ -65,7 +65,7 @@ Date: 2026-11-04. SwiftUsd 8.1.0 (OpenUSD v26.08, MaterialX 1.39.5), macOS 27.0.
 
 ## Checked by hand
 
-Opened in Quick Look (select in Finder, press Space) and in Reality Composer Pro. They are in the scratchpad's `m5a` folder, or can be made again with `M5A_EXPORT_DIR=<folder> swift test --filter USDZSpikeTests` in `Packages/MargolariaKit`. Each looked like its RealityKit render above, except in Reality Composer Pro as finding 7 says:
+Opened in Quick Look (select in Finder, press Space) and in Reality Composer Pro. They are in the scratchpad's `m5a` folder, or could be made again with `M5A_EXPORT_DIR=<folder> swift test --filter USDZSpikeTests` in `Packages/MargolariaKit` until M5c (now `M5C_EXPORT_DIR=<folder> swift test --filter USDZExportTests`, through the final export). Each looked like its RealityKit render above, except in Reality Composer Pro as finding 7 says:
 
 - `standard_surface_brick_procedural.viewport.arkit.usdz` (textures, procedural mask);
 - `standard_surface_copper.viewport.arkit.usdz` (metal, environment);

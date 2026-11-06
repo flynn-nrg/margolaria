@@ -185,7 +185,7 @@ extension StormRendererTests {
         let textures: URL = folder.appending(path: "textures")
         try FileManager.default.createDirectory(at: textures, withIntermediateDirectories: true)
         let texture: URL = textures.appending(path: "brick_base_gray.jpg")
-        try FileManager.default.copyItem(at: URL(filePath: USDZSpikeTests.brick), to: texture)
+        try FileManager.default.copyItem(at: URL(filePath: USDZExportTests.brick), to: texture)
 
         // A tint (a multiply) made a definition, then the texture and a
         // tint node made a second definition, which the material reads.

@@ -28,6 +28,7 @@
 #include <pxr/usd/sdf/layer.h>
 #include <pxr/usd/usd/primRange.h>
 #include <pxr/usd/usd/stage.h>
+#include <pxr/usd/sdf/zipFile.h>
 #include <pxr/usd/usdGeom/metrics.h>
 #include <pxr/usd/usdGeom/xform.h>
 #include <pxr/usd/usdShade/material.h>
@@ -126,12 +127,12 @@ void MakeAssetPathsRelative(const SdfLayerRefPtr &layer, const std::string &fold
 /// What UsdMtlx makes of the MaterialX text `xml`, flattened into one
 /// layer, with inputs without values removed. Under `/MaterialX` (the
 /// default prim), or, with `previewSphere`, under `/World/MaterialX`
-/// with a sphere bound to the first material (in decimetres, Y up, as
-/// Quick Look wants). `folder` is a folder of the caller's for the
-/// MaterialX file. Null, with `error` set, on failure; OpenUSD's messages
-/// are left in `mark`.
-SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewSphere, TfErrorMark &mark,
-                                  NSError **error) {
+/// with a sphere bound to the material named `materialName` (or the
+/// first), in decimetres, Y up, as Quick Look wants. `folder` is a folder
+/// of the caller's for the MaterialX file. Null, with `error` set, on
+/// failure; OpenUSD's messages are left in `mark`.
+SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewSphere, NSString *materialName,
+                                  TfErrorMark &mark, NSError **error) {
     // UsdMtlx reads files, not text.
     NSString *mtlxPath = [folder stringByAppendingPathComponent:@"material.mtlx"];
     if (![xml writeToFile:mtlxPath atomically:YES encoding:NSUTF8StringEncoding error:error]) {
@@ -169,8 +170,15 @@ SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewS
         return nullptr;
     }
     if (previewSphere) {
+        UsdShadeMaterial bound = materials.front();
+        for (const UsdShadeMaterial &material : materials) {
+            if (materialName && material.GetPrim().GetName().GetString() == materialName.UTF8String) {
+                bound = material;
+                break;
+            }
+        }
         UsdGeomMesh sphere = MGDefineSphereMesh(stage, SdfPath("/World/Sphere"));
-        UsdShadeMaterialBindingAPI::Apply(sphere.GetPrim()).Bind(materials.front());
+        UsdShadeMaterialBindingAPI::Apply(sphere.GetPrim()).Bind(bound);
     }
 
     SdfLayerRefPtr flat = stage->Flatten();
@@ -215,7 +223,7 @@ std::string Describe(const VtValue &value) {
     bool written = false;
     // A C++ exception must never reach Swift.
     try {
-        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, false, mark, error)) {
+        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, false, nil, mark, error)) {
             MakeAssetPathsRelative(flat, url.URLByDeletingLastPathComponent.path.fileSystemRepresentation);
             written = flat->Export(url.path.fileSystemRepresentation);
             if (!written && error) {
@@ -235,44 +243,40 @@ std::string Describe(const VtValue &value) {
     return written;
 }
 
-+ (BOOL)exportMaterialXString:(NSString *)xml
-                        toURL:(NSURL *)url
-                previewSphere:(BOOL)previewSphere
-                    packaging:(MGUSDZPackaging)packaging
-                        error:(NSError **)error {
-    // A folder of our own for the .mtlx (UsdMtlx reads files, and records
-    // the file as the source of nodedefs the document defines) and the
-    // flattened layer a USDZ is packaged from.
++ (BOOL)exportPreviewFromMaterialXString:(NSString *)xml
+                                   toURL:(NSURL *)url
+                            materialName:(nullable NSString *)materialName
+                                   error:(NSError **)error {
+    // A folder of our own for the .mtlx and the flattened layer the USDZ
+    // is packaged from.
     NSString *folder = NewTemporaryFolder();
     TfErrorMark mark;
-    SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, previewSphere, mark, error);
-    if (!flat) {
-        [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
-        mark.Clear();
-        return NO;
-    }
-    const std::string outPath = url.path.fileSystemRepresentation;
     bool written = false;
-    if ([url.pathExtension.lowercaseString isEqualToString:@"usdz"]) {
-        NSString *rootPath = [folder stringByAppendingPathComponent:@"root.usdc"];
-        if (flat->Export(rootPath.fileSystemRepresentation)) {
-            const SdfAssetPath asset(rootPath.fileSystemRepresentation);
-            written = packaging == MGUSDZPackagingARKit ? UsdUtilsCreateNewARKitUsdzPackage(asset, outPath)
-                                                        : UsdUtilsCreateNewUsdzPackage(asset, outPath);
+    // A C++ exception must never reach Swift.
+    try {
+        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, true, materialName, mark, error)) {
+            NSString *rootPath = [folder stringByAppendingPathComponent:@"root.usdc"];
+            if (flat->Export(rootPath.fileSystemRepresentation)) {
+                // The ARKit variant also checks the package against what
+                // ARKit accepts; in the spike it gave the same files.
+                written = UsdUtilsCreateNewARKitUsdzPackage(SdfAssetPath(rootPath.fileSystemRepresentation),
+                                                            url.path.fileSystemRepresentation);
+            }
+            if (!written && error) {
+                const std::string messages = Messages(mark);
+                *error = MakeError(messages.empty() ? "OpenUSD could not write the package" : messages);
+            }
         }
-    } else {
-        written = flat->Export(outPath);
+    } catch (const std::exception &exception) {
+        if (error) {
+            *error = MakeError(exception.what());
+        }
+        written = false;
     }
     [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
     // Warnings (posted as TfWarning, not errors) don't stop the export.
-    const std::string messages = Messages(mark);
-    if (!written) {
-        if (error) {
-            *error = MakeError(messages.empty() ? "OpenUSD could not write the file" : messages);
-        }
-        return NO;
-    }
-    return YES;
+    mark.Clear();
+    return written;
 }
 
 + (NSArray<NSString *> *)validationMessagesForFileAtURL:(NSURL *)url {
@@ -311,6 +315,19 @@ std::string Describe(const VtValue &value) {
     });
     mark.Clear();
     return paths;
+}
+
++ (NSArray<NSString *> *)filesInPackageAtURL:(NSURL *)url {
+    NSMutableArray<NSString *> *files = [NSMutableArray array];
+    TfErrorMark mark;
+    // SdfZipFile iterates the package's entries, by name.
+    if (const SdfZipFile zip = SdfZipFile::Open(url.path.fileSystemRepresentation)) {
+        for (auto entry = zip.begin(); entry != zip.end(); ++entry) {
+            [files addObject:@((*entry).c_str())];
+        }
+    }
+    mark.Clear();
+    return files;
 }
 
 + (NSArray<NSString *> *)layersUsedByFileAtURL:(NSURL *)url {

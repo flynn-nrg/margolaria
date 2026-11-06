@@ -6,9 +6,9 @@
 //
 //  - File > Export as USD… (M5b): the materials only, as .usda or .usdc,
 //    for referencing into a scene.
-//  - Spike M5a (docs/spikes/M5a-usdz.md), which M5c turns into Export as
-//    USDZ…: with a preview sphere bound to the first material, as .usda
-//    or .usdz (packaged with its textures).
+//  - File > Export as USDZ… (M5c, after spike M5a, docs/spikes/M5a-usdz.md):
+//    a preview sphere with the materials, packaged with their textures,
+//    for Quick Look and Reality Composer Pro.
 //
 // Same rules as MGStormRenderer.h: no OpenUSD headers, no exceptions, only
 // Foundation types.
@@ -16,15 +16,6 @@
 #import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
-
-/// How a USDZ is packaged.
-typedef NS_ENUM(NSInteger, MGUSDZPackaging) {
-    /// UsdUtilsCreateNewUsdzPackage: the layer and its dependencies, as they are.
-    MGUSDZPackagingPlain,
-    /// UsdUtilsCreateNewARKitUsdzPackage: flattened into one layer first, and
-    /// checked against what ARKit (Quick Look) accepts.
-    MGUSDZPackagingARKit,
-};
 
 @interface MGUSDExporter : NSObject
 
@@ -46,16 +37,23 @@ typedef NS_ENUM(NSInteger, MGUSDZPackaging) {
                                      toURL:(NSURL *)url
                                      error:(NSError **)error;
 
-/// Writes the MaterialX document `xml` to `url` as USD; the format follows
-/// the extension (.usda, .usdc, .usdz). The text must stand on its own (no
-/// includes, absolute texture paths: MXKit's preview text). With
-/// `previewSphere`, the stage has a sphere bound to the first material.
+/// Writes the MaterialX document `xml` to `url` as a USDZ package (M5c),
+/// for Quick Look and Reality Composer Pro. The text must stand on its
+/// own: MXKit's `usdzXMLString()`.
+///
+/// The scene is a sphere 20 cm across (`/World/Sphere`; decimetres, Y up)
+/// bound to the material named `materialName` (the first if nil or not
+/// found), and every material under `/World/MaterialX/Materials`, for
+/// binding in Reality Composer Pro. Every texture is copied into the
+/// package, by relative path, with UsdUtils' ARKit packaging (one layer,
+/// checked against what ARKit accepts). Inputs without a value are left
+/// out: RealityKit draws nothing for a material that has one.
+///
 /// Returns NO, with OpenUSD's messages in `error`, if anything failed.
-+ (BOOL)exportMaterialXString:(NSString *)xml
-                        toURL:(NSURL *)url
-                previewSphere:(BOOL)previewSphere
-                    packaging:(MGUSDZPackaging)packaging
-                        error:(NSError **)error;
++ (BOOL)exportPreviewFromMaterialXString:(NSString *)xml
+                                   toURL:(NSURL *)url
+                            materialName:(nullable NSString *)materialName
+                                   error:(NSError **)error;
 
 /// Every problem OpenUSD's validators (all of those registered) find in
 /// the file at `url`, one message each, prefixed by the validator's name.
@@ -64,6 +62,10 @@ typedef NS_ENUM(NSInteger, MGUSDZPackaging) {
 /// Every file a USD file depends on, by asset path as written (textures,
 /// sublayers, references), to see what a USDZ will carry.
 + (NSArray<NSString *> *)assetPathsInFileAtURL:(NSURL *)url;
+
+/// The files inside the USDZ package at `url`, by path in the package
+/// (the layer first, then "0/brick.jpg" ...). Empty if it can't be read.
++ (NSArray<NSString *> *)filesInPackageAtURL:(NSURL *)url;
 
 /// The layers OpenUSD reads to compose the file at `url`, by identifier
 /// (its own and any it refers to; no session layer). One, the file
