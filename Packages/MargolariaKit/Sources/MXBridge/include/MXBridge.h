@@ -92,6 +92,35 @@ struct GeneratedShader {
     std::vector<ShaderUniform> uniforms;
 };
 
+/// The languages Document::generateCode() writes (M5d).
+enum class ShaderLanguage {
+    /// Metal Shading Language, as the swatches draw it.
+    msl,
+    /// OpenGL Shading Language (GLSL 4.0).
+    glsl,
+    /// OSL, one shader: the whole graph inlined in one shader.
+    osl,
+    /// OSL, a network: a shader group, one compiled shader (.oso) per node,
+    /// from MaterialX's library compiled for it.
+    oslNetwork,
+};
+
+/// Shader code generated for one element, to read or export (M5d).
+struct ShaderCode {
+    /// The vertex stage (MSL, GLSL); empty for OSL, which has none.
+    std::string vertexSource;
+    /// The fragment stage (MSL, GLSL), the whole shader (OSL), or the
+    /// shader group (OSL network): one `param`, `shader` or `connect`
+    /// statement per line, as OSL's testrender reads a group.
+    std::string pixelSource;
+    /// OSL network only: every compiled shader the group names, as
+    /// absolute paths of .oso files, each once.
+    StringVector osoFiles;
+    /// The colour space the shader computes in: the one asked for, or
+    /// lin_rec709 if there are no transforms to it.
+    std::string colorSpace;
+};
+
 /// One input or output of a node, nodegraph or nodedef, as the graph view
 /// needs it. Connection fields hold the MaterialX attributes as written in
 /// the file; empty means "not set".
@@ -772,6 +801,16 @@ public:
     /// Returns false and sets `errorMessage` if generation fails.
     bool generateMsl(const std::string& elementPath, const Library& library,
                      GeneratedShader& shader, std::string& errorMessage) const;
+
+    /// Generates `language`'s code for the element at `elementPath`, as
+    /// generateMsl() does, to read or export (M5d). Colours are converted
+    /// to `colorSpace`: lin_rec709 (as for the swatches) or acescg, the
+    /// spaces there are transforms to; any other gives lin_rec709
+    /// (ShaderCode::colorSpace says which). Returns false and sets
+    /// `errorMessage` if generation fails, or if `language` is oslNetwork
+    /// and the compiled library wasn't found.
+    bool generateCode(const std::string& elementPath, const Library& library, ShaderLanguage language,
+                      const std::string& colorSpace, ShaderCode& code, std::string& errorMessage) const;
 
 private:
     struct Impl;

@@ -44,6 +44,8 @@ public enum MXError: Error, Sendable {
 
     /// MaterialX could not generate a shader for an element.
     case shaderGenerationFailed(String)
+    /// oslc could not compile an OSL shader (M5d): its messages.
+    case compileFailed(String)
     /// There is no element (of the expected kind) at a path.
     case notFound(String)
     /// An edit was refused: the message says why (an included element, a
@@ -85,6 +87,8 @@ extension MXError: CustomStringConvertible {
 
         case .shaderGenerationFailed(let message):
             return "Could not generate a shader: \(message)"
+        case .compileFailed(let message):
+            return "Could not compile the OSL shader: \(message)"
         case .notFound(let message):
             return message
         case .editRefused(let message):

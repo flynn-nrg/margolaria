@@ -21,7 +21,8 @@
 // tuples, `Optional.map`; an `@objc` action on the document, a `weak`
 // stored property (M4f); a save panel's accessory view, and a small
 // `NSObject` subclass as a control's target (M5b); a function taking a
-// throwing closure (M5c).
+// throwing closure (M5c); `NSPathControl` and its delegate, `UserDefaults`
+// read and written directly (M5d).
 
 import AppKit
 import GraphKit
@@ -263,7 +264,7 @@ final class MaterialXDocument: NSDocument {
         addWindowController(NSWindowController(window: window))
     }
 
-    // MARK: Export (M5b, M5c)
+    // MARK: Export (M5b, M5c, M5d)
 
     /// The material the viewport shows, by MaterialX name; nil before the
     /// viewport has picked one. Window state, kept here (not in
@@ -336,6 +337,58 @@ final class MaterialXDocument: NSDocument {
         panel.allowedContentTypes = [.usdz]
         runExportPanel(panel) { url in
             try MGUSDExporter.exportPreview(fromMaterialXString: text, to: url, materialName: material)
+        }
+    }
+
+    /// The element the Generated Shader tab shows (M5d), given the canvas
+    /// selection: a node, a nodegraph's output or a material, as selected;
+    /// for a nodegraph shown as a node, its first output; otherwise the
+    /// material the viewport shows. Nil if the document has nothing to
+    /// shade.
+    func shaderElementPath(for selected: String?) -> String? {
+        let shadeable: [MXElementSummary] = content.shadeableElements
+        if let selected {
+            if shadeable.contains(where: { $0.path == selected }) {
+                return selected
+            }
+            if let output = shadeable.first(where: { $0.category == "output" && $0.path.hasPrefix(selected + "/") }) {
+                return output.path
+            }
+        }
+        if let previewMaterial, shadeable.contains(where: { $0.path == previewMaterial }) {
+            return previewMaterial
+        }
+        return shadeable.first(where: { $0.type == "material" })?.path
+    }
+
+    /// The Generated Shader tab's Export…: writes `code` into a folder
+    /// chosen in a Save panel, as MXShaderExport lays it out (the files
+    /// named after `name`). For OSL, the panel offers to compile it to
+    /// .oso with an oslc the user picks, remembered for next time.
+    func exportShader(_ code: MXShaderCode, named name: String) {
+        let panel = NSSavePanel()
+        panel.title = "Export Shader"
+        panel.prompt = "Export"
+        panel.nameFieldLabel = "Folder:"
+        panel.nameFieldStringValue = "\(name) \(code.language.displayName)"
+        switch code.language {
+        case .msl, .glsl:
+            panel.message = "A folder with \(name)'s \(code.language.displayName) shader: "
+                + "the vertex and fragment stages, as MaterialX generates them."
+        case .osl:
+            panel.message = "A folder with \(name)'s OSL shader, the whole graph in one .osl, "
+                + "and the .oso compiled from it if oslc is set below."
+        case .oslNetwork:
+            panel.message = "A folder with \(name)'s OSL shader group (.oslgroup) and every compiled "
+                + "shader (.oso) it names. Give the folder to the renderer as its shader search path."
+        }
+        panel.message += " It computes in \(code.colorSpace)."
+        let compiler: OSLCompilerAccessory? = code.language == .osl ? OSLCompilerAccessory() : nil
+        panel.accessoryView = compiler?.view
+        runExportPanel(panel) { url in
+            let oslc: URL? = compiler?.chosenCompiler()
+            _ = try MXShaderExport.write(code, named: name, to: url, oslc: oslc,
+                                         library: try MXLibrary.bundled.get())
         }
     }
 
@@ -672,5 +725,70 @@ final class USDFormatAccessory: NSObject {
         // SWIFT: `UTType(filenameExtension:)` finds the system's type for an
         // extension (macOS knows USD's); nil if none, then any data.
         panel.allowedContentTypes = [UTType(filenameExtension: fileExtension) ?? .data]
+    }
+}
+
+/// The Export Shader panel's accessory for OSL (M5d): whether to compile
+/// the shader to .oso, and with which oslc. Both are remembered in the
+/// user defaults. The first time, oslc is looked for where Homebrew and
+/// other installers put it; the path control's menu picks another
+/// (scripts/build-osl.sh's, for one).
+///
+/// SWIFT: An `NSObject` subclass, as the path control's delegate must be.
+final class OSLCompilerAccessory: NSObject, NSPathControlDelegate {
+    /// The user defaults keys.
+    private static let compilerKey: String = "oslcPath"
+    private static let compilesKey: String = "compilesOSL"
+
+    /// Where oslc is looked for when none has been chosen.
+    private static let usualPlaces: [String] = ["/opt/homebrew/bin/oslc", "/usr/local/bin/oslc"]
+
+    /// The view the panel shows under its file browser.
+    let view: NSView
+    private let checkbox: NSButton
+    private let pathControl: NSPathControl
+
+    override init() {
+        checkbox = NSButton(checkboxWithTitle: "Compile to .oso with:", target: nil, action: nil)
+        pathControl = NSPathControl()
+        pathControl.pathStyle = .popUp
+        // Editable: its menu has "Choose…", which opens a panel.
+        pathControl.isEditable = true
+        pathControl.placeholderString = "Choose oslc"
+        let stack = NSStackView(views: [checkbox, pathControl])
+        stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
+        view = stack
+        super.init()
+        pathControl.delegate = self
+
+        // SWIFT: `UserDefaults.standard` is what `@AppStorage` reads and
+        // writes, here used directly, as AppKit code does. `string(forKey:)`
+        // is nil for a key never set; `object(forKey:)` tells "never set"
+        // from false, which `bool(forKey:)` can't.
+        let defaults = UserDefaults.standard
+        let saved: String? = defaults.string(forKey: Self.compilerKey)
+        let path: String? = saved ?? Self.usualPlaces.first { FileManager.default.isExecutableFile(atPath: $0) }
+        pathControl.url = path.map { URL(filePath: $0) }
+        let compiles: Bool = defaults.object(forKey: Self.compilesKey) as? Bool ?? (path != nil)
+        checkbox.state = compiles ? .on : .off
+    }
+
+    /// The oslc to compile with, or nil not to compile; remembers the
+    /// choice.
+    func chosenCompiler() -> URL? {
+        let defaults = UserDefaults.standard
+        let compiles: Bool = checkbox.state == .on
+        defaults.set(compiles, forKey: Self.compilesKey)
+        if let url = pathControl.url {
+            defaults.set(url.path(percentEncoded: false), forKey: Self.compilerKey)
+        }
+        return compiles ? pathControl.url : nil
+    }
+
+    /// The path control's "Choose…" panel picks a file (oslc), not a folder.
+    func pathControl(_ pathControl: NSPathControl, willDisplay openPanel: NSOpenPanel) {
+        openPanel.canChooseFiles = true
+        openPanel.canChooseDirectories = false
+        openPanel.message = "Choose oslc, OSL's compiler."
     }
 }
