@@ -8,7 +8,7 @@
 //
 // Introduces (SWIFT): importing an Objective-C module, how Objective-C names
 // and nullability appear in Swift, `extension`, `public`, `while` loops,
-// Core Image interop with Metal.
+// Core Image interop with Metal; `Thread.sleep` (M5e).
 
 import ColorKit
 import CoreImage
@@ -31,8 +31,12 @@ import PreviewKit
 // category. Extensions can't add stored properties, only methods and
 // computed properties.
 extension MGStormRenderer {
-    /// Renders a still image, rendering repeatedly until Storm reports that
-    /// background work (shader compilation, texture loading) is done.
+    /// Renders a still image, rendering repeatedly until the renderer
+    /// reports that its background work is done: Storm's shader compilation
+    /// and texture loading, which advance with each render, or a path
+    /// tracer's samples (Embree's, M5e), which accumulate on threads of its
+    /// own between renders. Gives up after `timeout` seconds and returns the
+    /// last frame.
     ///
     /// `viewTransform` converts Storm's light for the screen; the image is
     /// in that display's colour space. The default is the config's (ACES
@@ -44,7 +48,7 @@ extension MGStormRenderer {
     /// SWIFT: `public` makes the method visible outside the ViewportKit
     /// module. The default access level, `internal`, is visible only inside
     /// the module, like a symbol that isn't exported from a C library.
-    public func snapshot(width: Int, height: Int, maxPasses: Int = 20,
+    public func snapshot(width: Int, height: Int, timeout: TimeInterval = 10,
                          viewTransform: ViewTransform? = .standard) -> CGImage? {
         // SWIFT: `flatMap` on an optional runs the closure only when there
         // is a value; `try?` turns each failure into nil.
@@ -60,13 +64,23 @@ extension MGStormRenderer {
         // optional: either a texture or nil. Objective-C's `nullable id<MTLTexture>`
         // arrives in Swift as `(any MTLTexture)?`.
         var texture: (any MTLTexture)? = nil
-        var passes: Int = 0
         let factor: Int = DisplayPass.factor
+        // SWIFT: `Date()` is now; adding a TimeInterval (seconds, a Double)
+        // gives a later Date, and Dates compare with `<`.
+        let deadline: Date = Date() + timeout
         // SWIFT: `repeat { } while` is C's `do { } while`.
         repeat {
             texture = render(withWidth: width * factor, height: height * factor)
-            passes += 1
-        } while !isConverged && passes < maxPasses
+            if isConverged {
+                break
+            }
+            // Let a renderer working on its own threads get on with it,
+            // rather than asking it for frames as fast as possible.
+            // SWIFT: `Thread.sleep` blocks the calling thread, like C's
+            // usleep. Fine for a snapshot, which blocks anyway; in async
+            // code, `Task.sleep` suspends without blocking.
+            Thread.sleep(forTimeInterval: 0.01)
+        } while Date() < deadline
 
         // SWIFT: `guard let` unwraps an optional or leaves the function. After
         // this line, `big` is a plain non-optional texture.
@@ -97,7 +111,10 @@ extension MGStormRenderer {
     /// in a new texture. Nil if Metal can't do it.
     private func finish(_ texture: any MTLTexture, with pass: DisplayPass,
                         width: Int, height: Int) -> (any MTLTexture)? {
-        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: texture.pixelFormat,
+        // The pass's own format, not the frame's: Storm's frames are
+        // RGBA16Float, but other renderers' may be RGBA32Float (Embree's,
+        // M5e), and a pass draws only into the format it was made for.
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float,
                                                                   width: width, height: height, mipmapped: false)
         // Drawn into by the pass, then read by Core Image.
         descriptor.usage = [.renderTarget, .shaderRead]
