@@ -331,19 +331,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
             _engine = std::make_unique<UsdImagingGLEngine>(parameters);
         }
 
-        // Ask Storm for the colour output (AOV = "arbitrary output variable").
-        _engine->SetRendererAov(HdAovTokens->color);
-
-        // By default the engine ends each frame by "presenting" the image to
-        // an OpenGL framebuffer (HgiInterop). There is no OpenGL context here,
-        // and that step crashes inside glGetString. We read the colour texture
-        // ourselves (renderWithWidth:height:), so switch presentation off.
-        _engine->SetEnablePresentation(false);
-
-        // Light the sphere with the dome's environment image, but don't draw
-        // the image behind it: the background stays the neutral clear colour,
-        // which makes the material easier to judge.
-        _engine->SetRendererSetting(HdRenderSettingsTokens->domeLightCameraVisibility, VtValue(false));
+        [self configureEngine];
     } catch (const std::exception &exception) {
         if (error != nullptr) {
             *error = MakeError(@(exception.what()));
@@ -356,6 +344,25 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     _distance = 5.0;
     _keyLightEnabled = YES;
     return YES;
+}
+
+/// The engine's settings, for a new engine or a newly chosen renderer
+/// (a renderer plugin starts with its own defaults).
+- (void)configureEngine {
+    // Ask the renderer for the colour output (AOV = "arbitrary output
+    // variable").
+    _engine->SetRendererAov(HdAovTokens->color);
+
+    // By default the engine ends each frame by "presenting" the image to
+    // an OpenGL framebuffer (HgiInterop). There is no OpenGL context here,
+    // and that step crashes inside glGetString. We read the colour texture
+    // ourselves (renderWithWidth:height:), so switch presentation off.
+    _engine->SetEnablePresentation(false);
+
+    // Light the sphere with the dome's environment image, but don't draw
+    // the image behind it: the background stays the neutral clear colour,
+    // which makes the material easier to judge.
+    _engine->SetRendererSetting(HdRenderSettingsTokens->domeLightCameraVisibility, VtValue(false));
 }
 
 /// Sets materialPaths from `materials`.
@@ -480,6 +487,50 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
 
 - (NSString *)rendererName {
     return @(_engine->GetRendererDisplayName(_engine->GetCurrentRendererId()).c_str());
+}
+
+- (NSString *)rendererID {
+    return @(_engine->GetCurrentRendererId().GetText());
+}
+
++ (NSArray<NSString *> *)availableRendererIDs {
+    NSMutableArray<NSString *> *ids = [NSMutableArray array];
+    // The plugin registry is filled on first use (gEngineCreationMutex).
+    std::lock_guard<std::mutex> lock(gEngineCreationMutex);
+    for (const TfToken &id : UsdImagingGLEngine::GetRendererPlugins()) {
+        [ids addObject:@(id.GetText())];
+    }
+    return [ids copy];
+}
+
++ (NSString *)displayNameForRendererID:(NSString *)rendererID {
+    return @(UsdImagingGLEngine::GetRendererDisplayName(TfToken(rendererID.UTF8String)).c_str());
+}
+
+- (BOOL)setRendererID:(NSString *)rendererID error:(NSError **)error {
+    if ([rendererID isEqualToString:self.rendererID]) {
+        return YES;
+    }
+    try {
+        bool loaded;
+        {
+            std::lock_guard<std::mutex> lock(gEngineCreationMutex);
+            loaded = _engine->SetRendererPlugin(TfToken(rendererID.UTF8String));
+        }
+        if (!loaded) {
+            if (error != nullptr) {
+                *error = MakeError([NSString stringWithFormat:@"The renderer %@ could not be loaded", rendererID]);
+            }
+            return NO;
+        }
+        [self configureEngine];
+        return YES;
+    } catch (const std::exception &exception) {
+        if (error != nullptr) {
+            *error = MakeError(@(exception.what()));
+        }
+        return NO;
+    }
 }
 
 - (BOOL)isConverged {

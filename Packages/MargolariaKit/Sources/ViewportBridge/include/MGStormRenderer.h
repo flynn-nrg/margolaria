@@ -18,7 +18,9 @@
 //     through NSError, which Swift turns into a `throws` initializer.
 //  3. Only Foundation and Metal types in the interface.
 //
-// Spike M0b (docs/spikes/M0b-storm-viewport.md).
+// Spike M0b (docs/spikes/M0b-storm-viewport.md). Since M5e, it can render
+// with another Hydra renderer plugin instead of Storm (setRendererID:error:,
+// Embree in SwiftUsd); the class keeps its name.
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -98,6 +100,23 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 
 /// The name of the Hydra renderer in use ("GL" for Storm, whatever its backend).
 @property (nonatomic, readonly) NSString *rendererName;
+
+/// The identifier of the Hydra renderer plugin in use, such as
+/// "HdStormRendererPlugin". Storm until setRendererID:error: changes it.
+@property (nonatomic, readonly) NSString *rendererID;
+
+/// The identifiers of every Hydra renderer plugin found (M5e), such as
+/// "HdStormRendererPlugin" and "HdEmbreeRendererPlugin", best first.
+@property (class, nonatomic, readonly) NSArray<NSString *> *availableRendererIDs;
+
+/// The name a renderer plugin gives itself, such as "Embree", for a picker.
++ (NSString *)displayNameForRendererID:(NSString *)rendererID;
+
+/// Renders with the Hydra renderer plugin `rendererID` (one of
+/// availableRendererIDs) from the next frame on. The stage, camera and
+/// lights stay; the renderer reads the scene afresh. Returns NO and sets
+/// `error`, keeping the current renderer, if it can't be loaded.
+- (BOOL)setRendererID:(NSString *)rendererID error:(NSError **)error;
 
 /// Orbit camera, looking at the origin. Angles in degrees.
 @property (nonatomic) double azimuth;

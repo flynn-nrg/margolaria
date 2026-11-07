@@ -107,12 +107,15 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `reduce` | Folds a collection into one value: `xs.reduce(0, +)` | `std::accumulate` | `GraphLayout.swift` |
 | `reduce(into:)` | The same, with the value changed in place (`inout`) by the closure: no copy per element | A loop appending to an accumulator | `MXNodeGraphEdit.swift` (`stringVector`) |
 | `@objc` and `#selector` | Expose a method to the Objective-C runtime and name it for target/action, checked at compile time | `@selector(tick:)` | `GraphBenchmark.swift` |
+| An Objective-C class property | `@property (class) NSArray *x` is a `static` property in Swift, read on the type: `MGStormRenderer.availableRendererIDs` | `+ (NSArray *)x` | `RendererPickerTests.swift` (M5e) |
+| A `BOOL ... error:` method in Swift | `- (BOOL)setRendererID:(NSString *)id error:(NSError **)error` imports as `func setRendererID(_:) throws`: NO with an error becomes a thrown error, and the BOOL disappears | Checking the BOOL, then the NSError | `ViewportView.swift` (`useRenderer`, M5e) |
 | A closure in a `let` | `let isSet: (MXPort) -> Bool = { ... }`, then `filter(isSet)`: a closure is a value, passed by name | A function pointer or `std::function` | `GraphBuilder.swift` |
 | `NSMenu.popUp(positioning:at:in:)` | Shows a menu built in code and returns once it closes, after the chosen item's action ran | `-popUpMenuPositioningItem:atLocation:inView:` | `GraphEventView.swift` |
 | `Selector(("name:"))` | A selector from its name, for actions with no Swift declaration | `NSSelectorFromString` | `MainMenu.swift` |
 | Variadic parameters | `_ items: Item...`: any number of arguments, seen as an array | C `...`, but typed | `MainMenu.swift` |
 | `withExtendedLifetime` | Keeps an object alive until a closure returns; Swift may free a local after its last use | — | `MargolariaApp.swift` |
 | `Task.sleep(for:)` | Suspends a task for a while without blocking its thread | `dispatch_after` | `ViewportView.swift` (`cameraMoved`) |
+| `Thread.sleep(forTimeInterval:)` | Blocks the calling thread for a while; only where blocking is the point (a test's wait), never on the main thread | `usleep` | `Snapshot.swift` (M5e) |
 | Default arguments | `func graph(at path: String = "")`: callers may leave the argument out | C++ default arguments | `MXDocument.swift` |
 | `@escaping` closures | A closure parameter that may run after the function returns must be marked; others can't outlive the call | A block copied to the heap | `MaterialXDocument.swift` (`edit`) |
 | Closures with `inout` parameters | `(inout std.string) -> Bool`: the closure can write to the caller's variable | A lambda taking `T&` | `MXEdit.swift` (`perform`) |

@@ -6,7 +6,10 @@
 // edit, M2c), the same renderer shows the new version.
 // Frames are rendered at twice the size and scaled down, which smooths the
 // edges, and converted for the screen by an OCIO view transform (M3b); both
-// in DisplayPass.swift. The sphere is lit by a ViewportEnvironment.
+// in DisplayPass.swift. The sphere is lit by a ViewportEnvironment. Since
+// M5e, another Hydra renderer can draw it instead of Storm
+// (ViewportRenderer); MGStormRenderer keeps its name, but renders with
+// whichever it is told.
 //
 // Structure:
 //
@@ -20,7 +23,8 @@
 // `.task(id:)`, `[weak self]` capture lists, `===` identity comparison,
 // `Task.sleep(for:)`, `Date` arithmetic, bridging a String to NSString, an
 // `init` that calls another (`self.init`), `.overlay(alignment:)`; since
-// M3b, `oldValue` in `didSet`, and observers not running in `init`.
+// M3b, `oldValue` in `didSet`, and observers not running in `init`; since
+// M5e, a `BOOL ... error:` method called as a throwing one.
 
 import AppKit
 import ColorKit
@@ -58,6 +62,9 @@ public struct ViewportView: View {
     /// sRGB itself (also what happens if OCIO is unavailable).
     public let viewTransform: ViewTransform?
 
+    /// The Hydra renderer that draws it (M5e).
+    public let renderer: ViewportRenderer
+
     /// What the viewport currently shows.
     ///
     /// SWIFT: An enum with *associated values* is a tagged union: each case
@@ -83,11 +90,12 @@ public struct ViewportView: View {
     /// free; the automatic one is `internal`. Code in other modules (the app)
     /// needs this explicit `public init`.
     public init(source: ViewportSource, materialName: String? = nil, environment: ViewportEnvironment = .studio,
-                viewTransform: ViewTransform? = .standard) {
+                viewTransform: ViewTransform? = .standard, renderer: ViewportRenderer = .storm) {
         self.source = source
         self.materialName = materialName
         self.environment = environment
         self.viewTransform = viewTransform
+        self.renderer = renderer
     }
 
     /// Shows a .mtlx file (the M0b spike).
@@ -104,7 +112,8 @@ public struct ViewportView: View {
                 ProgressView()
             case .ready(let renderer):
                 StormView(renderer: renderer, text: text, materialName: materialName,
-                          environment: environment, viewTransform: viewTransform) { error in
+                          environment: environment, viewTransform: viewTransform,
+                          rendererID: self.renderer.id) { error in
                     updateError = error
                 }
                 // A short note along the bottom when an edit can't be shown.
@@ -189,11 +198,14 @@ private struct StormView: NSViewRepresentable {
     let materialName: String?
     let environment: ViewportEnvironment
     let viewTransform: ViewTransform?
+    /// The Hydra renderer plugin to draw with (M5e).
+    let rendererID: String
     /// Told whether the latest text could be shown: nil if so, otherwise why not.
     let onUpdate: (String?) -> Void
 
     func makeNSView(context: Context) -> StormMTKView {
         let view = StormMTKView(renderer: renderer, environment: environment, viewTransform: viewTransform)
+        view.rendererID = rendererID
         // The renderer was made from this text already.
         view.shownText = text
         view.bindMaterial(named: materialName)
@@ -220,6 +232,7 @@ private struct StormView: NSViewRepresentable {
         view.bindMaterial(named: materialName)
         view.environment = environment
         view.viewTransform = viewTransform
+        view.rendererID = rendererID
     }
 }
 
@@ -238,9 +251,34 @@ final class StormMTKView: MTKView {
     var renderer: MGStormRenderer {
         didSet {
             device = renderer.device
-            // A new renderer starts with its own lighting.
+            // A new renderer starts with its own lighting, and Storm.
             renderer.use(environment)
+            useRenderer()
             needsDisplay = true
+        }
+    }
+
+    /// The Hydra renderer plugin to draw with (M5e), Storm until set.
+    var rendererID: String = ViewportRenderer.storm.id {
+        didSet {
+            if rendererID != oldValue {
+                useRenderer()
+                needsDisplay = true
+            }
+        }
+    }
+
+    /// Switches the renderer to `rendererID`. One that can't be loaded
+    /// (a plugin gone since the choice was stored) leaves the renderer
+    /// as it was.
+    private func useRenderer() {
+        // SWIFT: The Objective-C method is `-setRendererID:error:`,
+        // returning a BOOL. Swift imports a `BOOL ... error:` method as one
+        // that throws and returns nothing: NO becomes the thrown NSError.
+        do {
+            try renderer.setRendererID(rendererID)
+        } catch {
+            NSLog("Viewport: %@", error.localizedDescription)
         }
     }
 
@@ -297,6 +335,7 @@ final class StormMTKView: MTKView {
 
         // Storm's output is half-float RGBA. The screen uses the same
         // format, so the fallback path can copy frames with a blit.
+        // (Embree's is 32-bit float, M5e: without the pass, it isn't shown.)
         colorPixelFormat = .rgba16Float
         // The fallback blit writes into the drawable, which "framebuffer
         // only" textures don't allow.

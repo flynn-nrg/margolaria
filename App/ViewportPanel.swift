@@ -3,7 +3,8 @@
 // The 3D preview for one document (PLAN.md §4.1, region 4): a bar above
 // the Storm viewport from ViewportKit, which shows the chosen material on a
 // sphere. Drag to orbit, scroll to zoom. The bar picks the material, the
-// light around the sphere, and the OCIO view transform (M3b).
+// light around the sphere, the OCIO view transform (M3b), and the Hydra
+// renderer (M5e; only Storm today, so the bar just names it).
 //
 // The viewport shows the document as it is in memory (M2c), edits included,
 // saved or not: after each edit it gets the new text (`viewportXML`: the
@@ -51,6 +52,16 @@ struct ViewportPanel: View {
     /// one is chosen; the config's default is shown until then.
     @AppStorage("viewportDisplay") private var display: String = ""
     @AppStorage("viewportView") private var view: String = ""
+
+    /// The Hydra renderer chosen, by plugin identifier, kept between
+    /// launches (M5e). A String rather than a ViewportRenderer: the
+    /// renderers are found at run time, so there is no enum to store.
+    @AppStorage("viewportRenderer") private var rendererID: String = ViewportRenderer.storm.id
+
+    /// The renderer to use: the one chosen if it is still found, else Storm.
+    private var renderer: ViewportRenderer {
+        ViewportRenderer.preferred(id: rendererID)
+    }
 
     /// The view transform to use: the one chosen if the config still
     /// offers it, otherwise the config's default (nil without OCIO). The
@@ -140,10 +151,7 @@ struct ViewportPanel: View {
                         .foregroundStyle(.secondary)
                         .help("A \(solo.outputType) is data, not light: its values are shown as they are, without the view transform")
                 }
-                Text("Storm")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .help("Rendered by Hydra Storm on Metal, as in usdview")
+                rendererPicker
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
@@ -152,10 +160,12 @@ struct ViewportPanel: View {
 
             if let solo {
                 ViewportView(source: .text(solo.xml), materialName: solo.materialName,
-                             environment: environment, viewTransform: shownTransform(for: solo))
+                             environment: environment, viewTransform: shownTransform(for: solo),
+                             renderer: renderer)
             } else if !materials.isEmpty, !document.viewportXML.isEmpty {
                 ViewportView(source: .text(document.viewportXML), materialName: materialName,
-                             environment: environment, viewTransform: viewTransform)
+                             environment: environment, viewTransform: viewTransform,
+                             renderer: renderer)
             } else {
                 ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",
                                        description: Text("The preview shows the document's materials on a sphere."))
@@ -176,6 +186,35 @@ struct ViewportPanel: View {
             if materialName == nil || !materials.contains(where: { $0.name == materialName }) {
                 materialName = materials.first?.name
             }
+        }
+    }
+
+    /// A menu of the Hydra renderers found (M5e), or just Storm's name if
+    /// it is the only one.
+    @ViewBuilder
+    private var rendererPicker: some View {
+        let renderers: [ViewportRenderer] = ViewportRenderer.available
+        if renderers.count > 1 {
+            // SWIFT: A Binding made from two closures, as in
+            // viewTransformPicker: the picker reads the renderer in use and
+            // stores the chosen one's identifier.
+            let selection = Binding<ViewportRenderer>(
+                get: { renderer },
+                set: { rendererID = $0.id }
+            )
+            Picker("Renderer", selection: selection) {
+                ForEach(renderers) { renderer in
+                    Text(renderer.title).tag(renderer)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .help(renderer.summary)
+        } else {
+            Text(renderer.title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .help(renderer.summary)
         }
     }
 
