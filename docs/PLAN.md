@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer), M2 (editor), M3 (previews & colour) and M4 (authoring power) done as of 2026-11-03; see `docs/spikes/` and `docs/milestones/`. M5 (pipeline) is planned in §8.6. Open items from the milestones wait for a UX polish pass once the initial milestones are complete.
+Status: M0 (spikes), M1 (viewer), M2 (editor), M3 (previews & colour), M4 (authoring power) and M5 (pipeline) done as of 2026-11-07; see `docs/spikes/` and `docs/milestones/`. Open items from the milestones wait for a UX polish pass once the initial milestones are complete.
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -388,7 +388,7 @@ What exists already: entering nodegraphs and the breadcrumb, multi-selection on 
 
 Left for later: choosing other library folders in Settings; nodedef versions (`version`, `isdefaultversion`) beyond writing one; namespaces; definitions implemented in code (`<implementation>` with source) rather than a nodegraph.
 
-### 8.6 M5 plan (pipeline)
+### 8.6 M5 plan (pipeline; done, see `docs/milestones/M5-pipeline.md`)
 
 Drafted 2026-11-04. M5 gets materials out of Margolaria and into other tools: USD files, USDZ for Apple's viewers, and generated shader code, above all OSL for Izpi (the user's path tracer); and, if it works out, other renderers in the viewport. Split into PRs like M4. A spike comes first, because the exit criterion depends on what Reality Composer Pro and Quick Look accept, which only real files can tell.
 
@@ -417,6 +417,8 @@ What exists already: the viewport builds a USD stage from the document's preview
 | **M5e: Renderer picker** (exploratory) | The toolbar's renderer picker; hdEmbree; the viewport switching delegates | Every example renders in each listed delegate without error, and switching back leaves Storm's image the same; or, if it doesn't work out, notes on why in §8.2. *Done 2026-11-07* (`RendererPickerTests`, in the Storm suite): every material of every example, from the viewport's text, rendered by Storm, then Embree (the sphere is drawn), then Storm again, which gives the same image (within 3 levels of 255 at four points); the renderers listed are Storm first, then Embree; an unknown renderer is refused, keeping Storm. SwiftUsd already shipped and embedded hdEmbree (and Embree 4), registered as a Hydra plugin: nothing to build or sign. `MGStormRenderer` (name kept) gained `availableRendererIDs`, `displayNameForRendererID:` and `setRendererID:error:`, which switches the engine's plugin and applies the engine's settings again (the colour AOV, no presentation, the dome hidden); `ViewportRenderer` in ViewportKit; the viewport bar's Renderer picker, stored as `viewportRenderer` (a plugin no longer found falls back to Storm), shown only when there is more than Storm. Two differences from Storm: Embree's frames are RGBA32Float (Storm's RGBA16Float), which the snapshot's display pass drew as blue tiles until its target took the pass's own format; and Embree accumulates samples on its own threads (about 4 s to converge for 512²), so `snapshot` now waits by time (`timeout`, 10 s) rather than counting passes. Embree shows shape only (ambient occlusion, white, no materials or lights), as expected: no second look at the material. Run from Xcode (by the user), Embree stopped the app at Metal's validation, in OpenUSD's depth copy (§8.2), which `swift test` doesn't enable; at the user's choice, **Embree is left out of the app** (`ViewportRenderer.unusable`): the bar shows "Storm" as before, and the switching stays, tested, for later renderers (third-party delegates) |
 
 Left for later: binding materials to the user's own USD models; MDL and Slang targets; third-party Hydra delegates; baked-texture export beyond what M5a decides; a `margolaria export` command line (with Python, M6).
+
+**Izpi as a Hydra renderer** (noted 2026-11-07, for when Izpi becomes one). A Hydra renderer is a C++ plugin (`HdRendererPlugin`, `HdRenderDelegate`), so Izpi's would be a thin C++ layer over its Go code, built as a C library (`go build -buildmode=c-archive`). It must be built against SwiftUsd's exact OpenUSD (the same version, namespace and build options, linked to the same frameworks), which is why a delegate built for Houdini's USD can't load, and rebuilt with every SwiftUsd update. For releases, embed it in the app (`Contents/Frameworks/hdIzpi.framework` with its `plugInfo.json`, as hdEmbree is): signed and notarized with it, no entitlement. While developing it, load it from a plugins folder registered at launch (`PlugRegistry::RegisterPlugins`): signed with the same Developer ID team, library validation accepts it without `disable-library-validation`. If it renders on the CPU, OpenUSD's depth copy (§8.2, M5e) must be fixed first, in SwiftUsd's patch, or Izpi's outputs kept in Metal textures. In Hydra it receives MaterialX networks, which change with every edit, not `.oso` files: it would generate OSL in the process, through the MaterialXGenOsl framework M5d built.
 
 ## 9. Open questions
 
