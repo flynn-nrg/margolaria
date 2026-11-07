@@ -26,8 +26,10 @@ options:
 # Local Swift packages. MargolariaKit holds all our code that talks to OpenUSD,
 # MaterialX and OpenColorIO: MXKit (MaterialX), ViewportKit (the Storm
 # viewport), ColorKit (OCIO) and more. It depends on the SwiftUsd copy in
-# Vendor/SwiftUsd and the OCIO framework in Vendor/OpenColorIO; run
-# scripts/fetch-swiftusd.sh and scripts/build-ocio.sh before the first build.
+# Vendor/SwiftUsd, the OCIO framework in Vendor/OpenColorIO and MaterialX's
+# OSL generators in Vendor/MaterialXGenOsl; run scripts/fetch-swiftusd.sh,
+# scripts/build-ocio.sh, scripts/build-osl.sh and
+# scripts/build-materialx-genosl.sh before the first build.
 packages:
   MargolariaKit:
     path: Packages/MargolariaKit

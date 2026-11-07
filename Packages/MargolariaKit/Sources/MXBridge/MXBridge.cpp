@@ -15,13 +15,18 @@
 #include <MaterialXFormat/File.h>
 #include <MaterialXFormat/Util.h>
 #include <MaterialXFormat/XmlIo.h>
+#include <MaterialXGenGlsl/GlslShaderGenerator.h>
 #include <MaterialXGenMsl/MslShaderGenerator.h>
+#include <MaterialXGenOsl/Nodes/OsoNode.h>
+#include <MaterialXGenOsl/OslNetworkShaderGenerator.h>
+#include <MaterialXGenOsl/OslShaderGenerator.h>
 #include <MaterialXGenShader/DefaultColorManagementSystem.h>
 #include <MaterialXGenShader/GenContext.h>
 #include <MaterialXGenShader/Shader.h>
 #include <MaterialXGenShader/ShaderStage.h>
 
 #include <ImageIO/ImageIO.h>
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cmath>
@@ -45,6 +50,14 @@ struct Library::Impl {
     // The folder containing `libraries`. Shader generation reads the node
     // implementations (libraries/stdlib/genmsl/*.metal, ...) from here.
     std::string librariesRoot;
+    // The folder containing `genoslnetwork`, the library compiled for OSL
+    // networks (M5d); empty if it wasn't found.
+    std::string networkRoot;
+    // What generated shaders' colour management reads (M5d): `definitions`
+    // with Margolaria's transforms to ACEScg added, which MaterialX lacks
+    // (margolarialib/margolaria_cmlib.mtlx). A copy, so the node library
+    // that documents and the UI see is MaterialX's alone.
+    mx::DocumentPtr colorTransforms;
 };
 
 struct Document::Impl {
@@ -52,6 +65,30 @@ struct Document::Impl {
 };
 
 // --- Library ---------------------------------------------------------------
+
+namespace {
+
+/// The MaterialXGenOsl framework's Resources folder, which holds
+/// `genoslnetwork`: MaterialX's library compiled for OSL networks, and the
+/// implementations pointing at it; and `margolarialib`, Margolaria's colour
+/// transforms (scripts/build-materialx-genosl.sh). Found from where the
+/// framework's code was loaded, so it works in the app and in tests alike.
+/// Empty if not found.
+std::string FrameworkResources() {
+    // dladdr: which loaded binary holds this address. Anything defined in
+    // the framework's own code will do, such as the generator's TARGET
+    // string; not create(), which the header defines inline, so its code
+    // is compiled into MXBridge.
+    Dl_info info;
+    if (!dladdr(static_cast<const void*>(&mx::OslNetworkShaderGenerator::TARGET), &info) || !info.dli_fname) {
+        return {};
+    }
+    // .../MaterialXGenOsl.framework/Versions/A/MaterialXGenOsl
+    const mx::FilePath resources = mx::FilePath(info.dli_fname).getParentPath() / "Resources";
+    return resources.exists() ? resources.asString() : std::string();
+}
+
+} // namespace
 
 Library::Library() = default;
 
@@ -77,6 +114,25 @@ Library Library::loadStandard(const std::string& librariesRoot, std::string& err
 
         impl->fileCount = static_cast<int>(loadedFiles.size());
         impl->librariesRoot = librariesRoot;
+
+        // The implementations for OSL networks (target genoslnetwork),
+        // beside the standard ones. Not counted in fileCount: they
+        // aren't MaterialX's own library files.
+        const mx::FilePath resources(FrameworkResources());
+        const mx::FilePath networkImpls = resources / "genoslnetwork" / "genoslnetwork_impl.mtlx";
+        if (!resources.isEmpty() && networkImpls.exists()) {
+            impl->networkRoot = resources.asString();
+            mx::DocumentPtr network = mx::createDocument();
+            mx::readFromXmlFile(network, networkImpls);
+            impl->definitions->importLibrary(network);
+        }
+        impl->colorTransforms = impl->definitions->copy();
+        const mx::FilePath transforms = resources / "margolarialib" / "margolaria_cmlib.mtlx";
+        if (!resources.isEmpty() && transforms.exists()) {
+            mx::DocumentPtr own = mx::createDocument();
+            mx::readFromXmlFile(own, transforms);
+            impl->colorTransforms->importLibrary(own);
+        }
 
         Library library;
         library._impl = impl;
@@ -663,6 +719,8 @@ namespace {
 void UngroupForStorm(const mx::DocumentPtr& preview, bool expandEveryDefinition = false);
 /// Defined with the M4c1 edits below.
 void ExpandInstance(const mx::NodePtr& node, const mx::NodeGraphPtr& implementation, const mx::NodeDefPtr& nodeDef);
+/// Defined with UngroupForStorm below.
+std::vector<std::pair<mx::NodeDefPtr, mx::NodeGraphPtr>> ExpandDefinitions(const mx::DocumentPtr& preview, bool every);
 
 } // namespace
 
@@ -2581,6 +2639,35 @@ void ExpandInstance(const mx::NodePtr& node, const mx::NodeGraphPtr& implementat
     Ungroup(graph, paths);
 }
 
+/// Expands, in a copy of a document, the nodes of the definitions the
+/// document makes and implements with a nodegraph: every one with
+/// `every`, otherwise those whose implementation reads a file (what Storm
+/// needs, see UngroupForStorm). Returns the definitions expanded, with
+/// their implementations, which are left in place.
+///
+/// One pass is enough when definitions use each other: once a definition
+/// is done, no node of it is left anywhere, implementations included, so
+/// the implementations copied afterwards have none either.
+std::vector<std::pair<mx::NodeDefPtr, mx::NodeGraphPtr>> ExpandDefinitions(const mx::DocumentPtr& preview, bool every) {
+    std::vector<std::pair<mx::NodeDefPtr, mx::NodeGraphPtr>> expanded;
+    // Over a copy of the children: getChildren() is the document's own
+    // list, which this changes.
+    const std::vector<mx::ElementPtr> children = preview->getChildren();
+    for (const mx::ElementPtr& child : children) {
+        mx::NodeGraphPtr implementation = child->asA<mx::NodeGraph>();
+        mx::NodeDefPtr nodeDef = implementation && implementation->hasNodeDefString() ? implementation->getNodeDef()
+                                                                                       : nullptr;
+        if (!nodeDef || nodeDef->getDocument() != preview || !(every || ReadsFiles(implementation))) {
+            continue;
+        }
+        for (const mx::NodePtr& instance : InstancesOf(preview, nodeDef)) {
+            ExpandInstance(instance, implementation, nodeDef);
+        }
+        expanded.emplace_back(nodeDef, implementation);
+    }
+    return expanded;
+}
+
 /// Ungroups, in a preview copy, the nodegraphs Storm would draw wrong
 /// (see StormMisreads), until none is left. Ungrouping keeps what the
 /// document computes (MXNodeGraphEditTests, CollapseRenderTests), so this
@@ -2595,26 +2682,8 @@ void UngroupForStorm(const mx::DocumentPtr& preview, bool expandEveryDefinition)
     // Storm can't draw a node whose nodedef, defined in the document, is
     // implemented by a nodegraph reading a file (M4c1, PLAN.md §8.2): the
     // texture's uniform is left out of the shader, which doesn't compile.
-    // Such nodes become the implementation's nodes. (Over a copy of the
-    // children: getChildren() is the document's own list, which this changes.)
-    //
-    // One pass is enough when definitions use each other: once a
-    // definition is done, no node of it is left anywhere, implementations
-    // included, so the implementations copied afterwards have none either.
-    std::vector<std::pair<mx::NodeDefPtr, mx::NodeGraphPtr>> expanded;
-    const std::vector<mx::ElementPtr> children = preview->getChildren();
-    for (const mx::ElementPtr& child : children) {
-        mx::NodeGraphPtr implementation = child->asA<mx::NodeGraph>();
-        mx::NodeDefPtr nodeDef = implementation && implementation->hasNodeDefString() ? implementation->getNodeDef()
-                                                                                       : nullptr;
-        if (!nodeDef || nodeDef->getDocument() != preview || !(expandEveryDefinition || ReadsFiles(implementation))) {
-            continue;
-        }
-        for (const mx::NodePtr& instance : InstancesOf(preview, nodeDef)) {
-            ExpandInstance(instance, implementation, nodeDef);
-        }
-        expanded.emplace_back(nodeDef, implementation);
-    }
+    // Such nodes become the implementation's nodes.
+    const auto expanded = ExpandDefinitions(preview, expandEveryDefinition);
     if (expandEveryDefinition) {
         for (const auto& [nodeDef, implementation] : expanded) {
             implementation->getParent()->removeChild(implementation->getName());
@@ -3591,6 +3660,202 @@ bool Document::generateMsl(const std::string& elementPath, const Library& librar
         shader.uniforms.clear();
         CollectUniforms(generated->getStage(mx::Stage::VERTEX), shader.uniforms);
         CollectUniforms(generated->getStage(mx::Stage::PIXEL), shader.uniforms);
+        return true;
+    } catch (const std::exception& e) {
+        errorMessage = e.what();
+        return false;
+    }
+}
+
+namespace {
+
+/// The element at `path` in a copy of `document` with the nodes of the
+/// definitions it makes expanded (ExpandDefinitions), for the OSL network
+/// generator: its shaders are MaterialX's library compiled to .oso files,
+/// and a definition made in the document has none (simple_hair's shader,
+/// or one made with M4's Make Definition). The expansion turns each such
+/// node into its implementation's nodes, which are all in the library.
+///
+/// For a node other than a material, a `dot` node reading it is returned
+/// instead (for a closure, which has no dot, a `mix` weighing it fully,
+/// which passes it through), for two reasons. A node of such a definition would vanish in
+/// the expansion; the dot takes its place. And MaterialX 1.39.5's network
+/// generator leaves out the values of the node it starts from: they
+/// become the shader's own parameters, which it doesn't write, so the
+/// group would use the defaults. Read by the dot, the node is upstream,
+/// and its values are written like any other node's. (A material's values
+/// are its shaders' connections, which it writes.)
+///
+/// `copy` receives the copy: MaterialX elements hold their document only
+/// weakly, so the caller must keep it alive while using the element.
+mx::ElementPtr ExpandedForNetwork(const mx::DocumentPtr& document, const std::string& path, mx::DocumentPtr& copy) {
+    copy = document->copy();
+    copy->setSourceUri(document->getSourceUri());
+    if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
+        copy->setDataLibrary(library);
+    }
+    std::string target = path;
+    mx::NodePtr node = copy->getDescendant(path)->asA<mx::Node>();
+    if (node && node->getType() != mx::MATERIAL_TYPE_STRING && !node->isMultiOutputType()) {
+        mx::GraphElementPtr parent = node->getParent()->asA<mx::GraphElement>();
+        const std::string type = node->getType();
+        const std::string name = parent->createValidChildName(node->getName() + "_shown");
+        mx::NodePtr shown;
+        if (copy->getNodeDef("ND_dot_" + type)) {
+            shown = parent->addNode("dot", name, type);
+            shown->addInput("in", type)->setNodeName(node->getName());
+        } else if (copy->getNodeDef("ND_mix_" + mx::createValidName(mx::replaceSubstrings(type, {{"BSDF", "bsdf"},
+                                                                                                 {"EDF", "edf"},
+                                                                                                 {"VDF", "vdf"}})))) {
+            shown = parent->addNode("mix", name, type);
+            shown->addInput("fg", type)->setNodeName(node->getName());
+            shown->addInput("mix", "float")->setValue(1.0f);
+        }
+        if (shown) {
+            target = shown->getNamePath();
+        }
+    }
+    ExpandDefinitions(copy, true);
+    mx::ElementPtr element = copy->getDescendant(target);
+    if (!element) {
+        throw mx::Exception("Can't make an OSL network of " + path + ": it is expanded away");
+    }
+    return element;
+}
+
+/// Quotes the unquoted string values in an OSL shader group
+/// (`param string file /a/b c.png ;` becomes `param string file "/a/b c.png" ;`).
+/// MaterialX 1.39.5's network generator writes filenames bare, so OSL
+/// would read a path with a space as two words; other strings it quotes.
+std::string QuoteStringParams(const std::string& group) {
+    static const std::string prefix = "param string ";
+    static const std::string suffix = " ;";
+    std::stringstream in(group);
+    std::string result;
+    std::string line;
+    while (std::getline(in, line)) {
+        const size_t nameEnd = line.find(' ', prefix.size());
+        if (line.rfind(prefix, 0) == 0 && nameEnd != std::string::npos && line.size() >= nameEnd + 1 + suffix.size() &&
+            line.compare(line.size() - suffix.size(), suffix.size(), suffix) == 0 && line[nameEnd + 1] != '"') {
+            const std::string value = line.substr(nameEnd + 1, line.size() - suffix.size() - nameEnd - 1);
+            std::string quoted = "\"";
+            for (char c : value) {
+                if (c == '"' || c == '\\') {
+                    quoted += '\\';
+                }
+                quoted += c;
+            }
+            line = line.substr(0, nameEnd + 1) + quoted + "\"" + suffix;
+        }
+        result += line + "\n";
+    }
+    return result;
+}
+
+} // namespace
+
+bool Document::generateCode(const std::string& elementPath, const Library& library, ShaderLanguage language,
+                            const std::string& colorSpace, ShaderCode& code, std::string& errorMessage) const {
+    if (!_impl || !library._impl) {
+        errorMessage = "No document or library loaded";
+        return false;
+    }
+    try {
+        mx::ElementPtr element = _impl->document->getDescendant(elementPath);
+        if (!element) {
+            errorMessage = "No element at path " + elementPath;
+            return false;
+        }
+        // The shader is named after the element, whatever is generated.
+        const std::string shaderName = element->getName();
+        mx::DocumentPtr expanded;
+        if (language == ShaderLanguage::oslNetwork) {
+            element = ExpandedForNetwork(_impl->document, elementPath, expanded);
+        }
+
+        mx::ShaderGeneratorPtr generator;
+        switch (language) {
+        case ShaderLanguage::msl:
+            generator = mx::MslShaderGenerator::create();
+            break;
+        case ShaderLanguage::glsl:
+            generator = mx::GlslShaderGenerator::create();
+            break;
+        case ShaderLanguage::osl:
+            generator = mx::OslShaderGenerator::create();
+            break;
+        case ShaderLanguage::oslNetwork:
+            if (library._impl->networkRoot.empty()) {
+                errorMessage = "MaterialX's library compiled for OSL networks wasn't found "
+                               "(scripts/build-materialx-genosl.sh makes it)";
+                return false;
+            }
+            generator = mx::OslNetworkShaderGenerator::create();
+            break;
+        }
+
+        // Colour management, as in generateMsl(), into `colorSpace` if
+        // there are transforms to it (MaterialX's to lin_rec709, ours to
+        // acescg), otherwise lin_rec709.
+        mx::DocumentPtr transforms = library._impl->colorTransforms;
+        const std::string target =
+            transforms->getNodeDef("ND_lin_rec709_to_" + colorSpace + "_color3") ? colorSpace : "lin_rec709";
+        mx::DefaultColorManagementSystemPtr colorManagement =
+            mx::DefaultColorManagementSystem::create(generator->getTarget());
+        colorManagement->loadLibrary(transforms);
+        generator->setColorManagementSystem(colorManagement);
+
+        mx::GenContext context(generator);
+        context.registerSourceCodeSearchPath(mx::FilePath(library._impl->librariesRoot));
+        context.getOptions().targetColorSpaceOverride = target;
+        mx::TypedElementPtr typed = element->asA<mx::TypedElement>();
+        if ((language == ShaderLanguage::osl || language == ShaderLanguage::oslNetwork) &&
+            !(typed && typed->isMultiOutputType())) {
+            // The shader (or the group) ends by assigning its result to Ci,
+            // the closure a renderer reads, as MaterialX's own OSL render
+            // tests do. Without it, a material's result is only an output
+            // parameter, which renderers don't look at. Not for a node with
+            // several outputs, which has no one result: MaterialX 1.39.5
+            // crashes trying (gltf_colorimage, for one).
+            context.getOptions().oslConnectCiWrapper = true;
+        }
+        if (language == ShaderLanguage::oslNetwork) {
+            // Where the network's implementations (`file="genoslnetwork"`)
+            // are found.
+            context.registerSourceCodeSearchPath(mx::FilePath(library._impl->networkRoot));
+        }
+
+        mx::ShaderPtr generated = generator->generate(shaderName, element, context);
+        if (!generated) {
+            errorMessage = "Shader generation produced nothing for " + elementPath;
+            return false;
+        }
+
+        code = ShaderCode();
+        code.colorSpace = target;
+        if (language == ShaderLanguage::msl || language == ShaderLanguage::glsl) {
+            code.vertexSource = generated->getSourceCode(mx::Stage::VERTEX);
+        }
+        // OSL has only the pixel stage.
+        code.pixelSource = generated->getSourceCode(mx::Stage::PIXEL);
+
+        if (language == ShaderLanguage::oslNetwork) {
+            code.pixelSource = QuoteStringParams(code.pixelSource);
+            // The .oso files the group's `shader` lines name: every node's
+            // implementation is an OsoNode, which knows its file.
+            std::set<std::string> seen;
+            for (const mx::ShaderNode* node : generated->getGraph().getNodes()) {
+                const auto* oso = dynamic_cast<const mx::OsoNode*>(&node->getImplementation());
+                if (!oso) {
+                    continue;
+                }
+                const mx::FilePath folder = context.resolveSourceFile(oso->getOsoPath(), mx::FilePath());
+                const std::string file = (folder / (oso->getOsoName() + ".oso")).asString();
+                if (seen.insert(file).second) {
+                    code.osoFiles.push_back(file);
+                }
+            }
+        }
         return true;
     } catch (const std::exception& e) {
         errorMessage = e.what();

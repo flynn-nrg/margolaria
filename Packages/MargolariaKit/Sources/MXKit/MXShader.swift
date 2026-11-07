@@ -4,8 +4,11 @@
 // (spike M0c, docs/spikes/M0c-msl-swatch.md). The MSL source is compiled and
 // drawn by PreviewKit; MXKit only produces it.
 //
+// Since M5d, also shader code in any of the languages MaterialX writes
+// (MXShaderLanguage), to read in the Generated Shader tab or export.
+//
 // Introduces (SWIFT): nested types, `Array(...)` from a C++ vector,
-// `first(where:)`.
+// `first(where:)`, a C++ `enum class` used from Swift.
 
 import MXBridge
 
@@ -65,5 +68,74 @@ public struct MXGeneratedShader: Sendable {
             ))
         }
         self.uniforms = uniforms
+    }
+}
+
+/// The languages MaterialX generates shader code in (M5d).
+///
+/// SWIFT: `CaseIterable` gives `allCases`, which the target picker lists.
+/// `String` raw values name each case in saved settings.
+public enum MXShaderLanguage: String, CaseIterable, Sendable {
+    /// Metal Shading Language: what the swatches draw.
+    case msl
+    /// OpenGL Shading Language (GLSL 4.0).
+    case glsl
+    /// OSL, one shader per material: the whole graph inlined, compiled to
+    /// one .oso.
+    case osl
+    /// OSL, a network: a shader group naming one compiled shader (.oso) per
+    /// node, from MaterialX's library, connected as OSL's testrender loads
+    /// them.
+    case oslNetwork
+
+    /// The name the UI shows.
+    public var displayName: String {
+        switch self {
+        case .msl: "MSL"
+        case .glsl: "GLSL"
+        case .osl: "OSL"
+        case .oslNetwork: "OSL Network"
+        }
+    }
+
+    /// The bridge's value for this language.
+    ///
+    /// SWIFT: A C++ `enum class` imports as a Swift type whose cases are
+    /// static members: `mxbridge.ShaderLanguage.msl`. It is not a Swift enum
+    /// (C++ could hold values with no case), so MXKit keeps its own and
+    /// converts here.
+    var bridgeValue: mxbridge.ShaderLanguage {
+        switch self {
+        case .msl: .msl
+        case .glsl: .glsl
+        case .osl: .osl
+        case .oslNetwork: .oslNetwork
+        }
+    }
+}
+
+/// Shader code MaterialX generated for one element, in one language (M5d).
+public struct MXShaderCode: Sendable {
+    /// The language it is in.
+    public let language: MXShaderLanguage
+    /// The vertex stage (MSL, GLSL); empty for OSL, which has none.
+    public let vertexSource: String
+    /// The fragment stage (MSL, GLSL), the whole shader (OSL), or the
+    /// shader group (OSL network): one `param`, `shader` or `connect`
+    /// statement per line.
+    public let pixelSource: String
+    /// OSL network only: every compiled shader the group names, as absolute
+    /// paths of .oso files in MaterialX's compiled library.
+    public let osoFiles: [String]
+    /// The colour space the shader computes in, such as "acescg".
+    public let colorSpace: String
+
+    /// Converts the bridge's C++ struct.
+    init(_ code: mxbridge.ShaderCode, language: MXShaderLanguage) {
+        self.language = language
+        vertexSource = code.vertexSource.swiftString
+        pixelSource = code.pixelSource.swiftString
+        osoFiles = code.osoFiles.map { $0.swiftString }
+        colorSpace = code.colorSpace.swiftString
     }
 }

@@ -1,0 +1,387 @@
+<?xml version="1.0"?>
+<!--
+  margolaria_cmlib.mtlx: colour transforms to ACEScg (M5d).
+
+  MaterialX's cmlib converts every colour space it names to lin_rec709 only,
+  so a shader generated to compute in ACEScg (an exported shader, when the
+  document's working space is acescg) found no transform for its sRGB
+  textures and Rec.709 values. These are the missing ones, built as cmlib's
+  own are: <space>_to_lin_rec709, then lin_rec709 to ACEScg by the exact
+  inverse of cmlib's acescg_to_lin_rec709 matrix (transposed, as MaterialX
+  multiplies row vectors), so a round trip changes nothing.
+
+  Loaded only for shader generation's colour management, not into the
+  node library (MXBridge.cpp, Library::loadStandard). Compiled to .oso for
+  OSL networks with MaterialX's library by scripts/build-materialx-genosl.sh,
+  which also copies this file into the framework, where it is read from.
+-->
+<materialx version="1.39">
+  <nodedef name="ND_lin_rec709_to_acescg_color3" node="lin_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_lin_rec709_to_acescg_color4" node="lin_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_adobergb_to_acescg_color3" node="adobergb_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_adobergb_to_acescg_color4" node="adobergb_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_g18_rec709_to_acescg_color3" node="g18_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_g18_rec709_to_acescg_color4" node="g18_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_g22_ap1_to_acescg_color3" node="g22_ap1_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_g22_ap1_to_acescg_color4" node="g22_ap1_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_g22_rec709_to_acescg_color3" node="g22_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_g22_rec709_to_acescg_color4" node="g22_rec709_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_lin_adobergb_to_acescg_color3" node="lin_adobergb_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_lin_adobergb_to_acescg_color4" node="lin_adobergb_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_lin_displayp3_to_acescg_color3" node="lin_displayp3_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_lin_displayp3_to_acescg_color4" node="lin_displayp3_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_rec709_display_to_acescg_color3" node="rec709_display_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_rec709_display_to_acescg_color4" node="rec709_display_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_srgb_displayp3_to_acescg_color3" node="srgb_displayp3_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_srgb_displayp3_to_acescg_color4" node="srgb_displayp3_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+  <nodedef name="ND_srgb_texture_to_acescg_color3" node="srgb_texture_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color3" value="0, 0, 0" />
+    <output name="out" type="color3" />
+  </nodedef>
+  <nodedef name="ND_srgb_texture_to_acescg_color4" node="srgb_texture_to_acescg" nodegroup="colortransform">
+    <input name="in" type="color4" value="0, 0, 0, 0" />
+    <output name="out" type="color4" />
+  </nodedef>
+
+  <nodegraph name="NG_lin_rec709_to_acescg_color3" nodedef="ND_lin_rec709_to_acescg_color3">
+    <constant name="mat" type="matrix33">
+      <input name="value" type="matrix33" value="0.613097402401, 0.070193722470, 0.020615592882, 0.339523146184, 0.916353879058, 0.109569772938, 0.047379451415, 0.013452398473, 0.869814634179" />
+    </constant>
+    <convert name="asVec" type="vector3">
+      <input name="in" type="color3" interfacename="in" />
+    </convert>
+    <transformmatrix name="transform" type="vector3">
+      <input name="in" type="vector3" nodename="asVec" />
+      <input name="mat" type="matrix33" nodename="mat" />
+    </transformmatrix>
+    <convert name="asColor" type="color3">
+      <input name="in" type="vector3" nodename="transform" />
+    </convert>
+    <output name="out" type="color3" nodename="asColor" />
+  </nodegraph>
+
+  <nodegraph name="NG_lin_rec709_to_acescg_color4" nodedef="ND_lin_rec709_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <lin_rec709_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </lin_rec709_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_adobergb_to_acescg_color3" nodedef="ND_adobergb_to_acescg_color3">
+    <adobergb_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </adobergb_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_adobergb_to_acescg_color4" nodedef="ND_adobergb_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <adobergb_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </adobergb_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_g18_rec709_to_acescg_color3" nodedef="ND_g18_rec709_to_acescg_color3">
+    <g18_rec709_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </g18_rec709_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_g18_rec709_to_acescg_color4" nodedef="ND_g18_rec709_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <g18_rec709_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </g18_rec709_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_g22_ap1_to_acescg_color3" nodedef="ND_g22_ap1_to_acescg_color3">
+    <g22_ap1_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </g22_ap1_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_g22_ap1_to_acescg_color4" nodedef="ND_g22_ap1_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <g22_ap1_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </g22_ap1_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_g22_rec709_to_acescg_color3" nodedef="ND_g22_rec709_to_acescg_color3">
+    <g22_rec709_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </g22_rec709_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_g22_rec709_to_acescg_color4" nodedef="ND_g22_rec709_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <g22_rec709_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </g22_rec709_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_lin_adobergb_to_acescg_color3" nodedef="ND_lin_adobergb_to_acescg_color3">
+    <lin_adobergb_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </lin_adobergb_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_lin_adobergb_to_acescg_color4" nodedef="ND_lin_adobergb_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <lin_adobergb_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </lin_adobergb_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_lin_displayp3_to_acescg_color3" nodedef="ND_lin_displayp3_to_acescg_color3">
+    <lin_displayp3_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </lin_displayp3_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_lin_displayp3_to_acescg_color4" nodedef="ND_lin_displayp3_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <lin_displayp3_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </lin_displayp3_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_rec709_display_to_acescg_color3" nodedef="ND_rec709_display_to_acescg_color3">
+    <rec709_display_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </rec709_display_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_rec709_display_to_acescg_color4" nodedef="ND_rec709_display_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <rec709_display_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </rec709_display_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_srgb_displayp3_to_acescg_color3" nodedef="ND_srgb_displayp3_to_acescg_color3">
+    <srgb_displayp3_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </srgb_displayp3_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_srgb_displayp3_to_acescg_color4" nodedef="ND_srgb_displayp3_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <srgb_displayp3_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </srgb_displayp3_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+  <nodegraph name="NG_srgb_texture_to_acescg_color3" nodedef="ND_srgb_texture_to_acescg_color3">
+    <srgb_texture_to_lin_rec709 name="rec709" type="color3">
+      <input name="in" type="color3" interfacename="in" />
+    </srgb_texture_to_lin_rec709>
+    <lin_rec709_to_acescg name="ap1" type="color3">
+      <input name="in" type="color3" nodename="rec709" />
+    </lin_rec709_to_acescg>
+    <output name="out" type="color3" nodename="ap1" />
+  </nodegraph>
+
+  <nodegraph name="NG_srgb_texture_to_acescg_color4" nodedef="ND_srgb_texture_to_acescg_color4">
+    <convert name="asColor3" type="color3">
+      <input name="in" type="color4" interfacename="in" />
+    </convert>
+    <srgb_texture_to_acescg name="transform" type="color3">
+      <input name="in" type="color3" nodename="asColor3" />
+    </srgb_texture_to_acescg>
+    <extract name="alpha" type="float">
+      <input name="in" type="color4" interfacename="in" />
+      <input name="index" type="integer" value="3" />
+    </extract>
+    <combine2 name="asColor4" type="color4">
+      <input name="in1" type="color3" nodename="transform" />
+      <input name="in2" type="float" nodename="alpha" />
+    </combine2>
+    <output name="out" type="color4" nodename="asColor4" />
+  </nodegraph>
+
+</materialx>

@@ -422,6 +422,29 @@ public final class MXDocument {
         return MXGeneratedShader(shader)
     }
 
+    /// Generates `language`'s code for the element at `path`, as
+    /// ``generateMSL(for:library:)`` does, to read or export (M5d).
+    /// `library` must be the one set with ``setDataLibrary(_:)``.
+    ///
+    /// The shader computes in `colorSpace`: lin_rec709 (the default, as
+    /// the swatches) or acescg; for any other space, lin_rec709. Colours
+    /// and images in other spaces are converted to it, and the result is
+    /// in it. ``MXShaderCode/colorSpace`` says which it is.
+    ///
+    /// - Throws: ``MXError/shaderGenerationFailed(_:)`` with MaterialX's
+    ///   message, or, for ``MXShaderLanguage/oslNetwork``, if MaterialX's
+    ///   library compiled for networks wasn't found.
+    public func generateCode(for path: String, in language: MXShaderLanguage, library: MXLibrary,
+                             colorSpace: String = MXWorkingSpace.documentDefault) throws -> MXShaderCode {
+        var code = mxbridge.ShaderCode()
+        var errorMessage = std.string()
+        guard handle.generateCode(std.string(path), library.handle, language.bridgeValue, std.string(colorSpace),
+                                  &code, &errorMessage) else {
+            throw MXError.shaderGenerationFailed(errorMessage.swiftString)
+        }
+        return MXShaderCode(code, language: language)
+    }
+
     /// The version of the MaterialX library Margolaria is linked against, such as "1.39.5".
     public static var libraryVersion: String {
         mxbridge.materialXVersion().swiftString

@@ -88,6 +88,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `String.utf8`, `UInt8(ascii:)`, `elementsEqual` | A string's UTF-8 bytes (`Array(s.utf8)` to scan them by offset); the byte of an ASCII character; comparing two sequences element by element. A native string's `utf8` index moves by an offset in constant time | `const char *`, `'<'`, `memcmp` | `MXXMLText.swift` |
 | `Array(string)` to index characters | A `String` can't be indexed by `Int` (characters vary in length in memory); an array of its `Character`s can, at the cost of a copy | `std::u32string` | `CommandPalette.swift` (`FuzzyMatch`) |
 | `stride(from:to:by:)` | Counts from a start up to (not including) an end in steps | `for (i = 0; i < n; i += 7)` | `MXXMLEditTests.swift` |
+| `Process` and `Pipe` | Runs another program with its arguments, no shell between, and collects what it prints; read the pipe before `waitUntilExit()`, or a chatty program blocks on a full pipe | `posix_spawn` with a pipe; Go's `exec.Command` | `MXShaderExport.swift` (`compileOSL`) |
+| `UserDefaults.standard` directly | What `@AppStorage` wraps, for AppKit code; `object(forKey:)` is nil for a key never set, which `bool(forKey:)` (false) can't tell apart | `NSUserDefaults` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
+| `NSPathControl` and its delegate | A file path as a control; `.popUp` style with `isEditable` adds a "Choose…" menu item, whose open panel the delegate sets up | `NSPathControl` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
 ## Functions and closures
 
 | Concept | In one line | Closest thing you know | First appears |
@@ -124,6 +127,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Generic functions `func f<Item>(...)` | Work for any type; the body is checked once against what every type allows, not per use | C++ function templates, Go generics | `CommandPalette.swift` (`FuzzyMatch.rank`) |
 | A closure stored in a struct | `let run: @MainActor () -> Void`: code as data, carrying what it captured; such structs can't be `Equatable` | A block property in ObjC | `CommandPalette.swift` (`PaletteCommand`) |
 | `Set.insert(_:).inserted` | `insert` returns whether the element was new: filtering repeats in one line | `std::set::insert(...).second` | `ContentView.swift` (`unique`) |
+| A nested function | A `func` inside a function: it can use and change the enclosing function's locals, like a closure with a name | A lambda capturing by reference | `MXShaderExport.swift` (`save`) |
 
 ## Protocols and extensions
 
@@ -187,6 +191,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@MainActor @Sendable` closures | A closure that may be passed to another actor and always runs on the main thread: how background work hands results to the UI | A block dispatched to the main queue | `SwatchService.swift` (`deliver`) |
 | Completion handlers as `async` | An Objective-C method with a completion block is also callable as `try await` (`makeLibrary(source:options:)`) | Wrapping a callback API in a future | `SwatchRenderer.swift` (`SwatchPipeline.compile`) |
 | `nonisolated` on a member | One method of a `@MainActor` type that any thread may call, because it touches no state | A free function | `LayerGraphView.swift` (`cgColor`) |
+| `Task.detached` from `.task(id:)` | The view's task awaits work run off the main actor; only `Sendable` values (strings, a `Result`) cross over, and `Task.isCancelled` drops a result the newer request replaced | `GeneratedShaderTab` in `BottomPanel.swift` |
 
 ## SwiftUI
 
@@ -267,6 +272,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.onExitCommand` | Runs on Escape (AppKit's `cancelOperation:`) in the focused view | `NodeSearchPopup.swift` (`CommandPalette`) |
 | `LazyVStack` | Makes its rows only as they scroll into view, for long lists | `NodeSearchPopup.swift` (`CommandPalette`) |
 | `@objc` action on an `NSDocument` | The document is in its window's responder chain, after the views, window and controller: a menu item's action reaches it from wherever the focus is | `MaterialXDocument.swift` (`showCommandPalette`) |
+| `@AppStorage` of an enum | An enum with `String` raw values is stored as its raw value and read back with `init(rawValue:)` | `BottomPanel.swift` (`GeneratedShaderTab`) |
 ## Swift ↔ C++
 
 | Concept | In one line | First appears |
@@ -285,6 +291,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Array(cxxVector)` | Copies an imported C++ vector into a Swift array, so it outlives the C++ object | `GPUShader.swift` |
 | Option dictionaries | Objective-C APIs taking `NSDictionary` options take `[Key: Any]` in Swift; enum values go in as their `rawValue` | `MTKTextureLoader` in `SwatchRenderer.swift` (`image(at:)`) |
 | Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` (since M3c `ViewTransform.swift`) |
+| C++ `enum class` | Imported as a type whose cases are static members (`mxbridge.ShaderLanguage.msl`), not a Swift enum (C++ may hold values with no case), so a Swift enum mirrors it and converts | `MXShader.swift` (`MXShaderLanguage.bridgeValue`) |
 
 ## Testing
 

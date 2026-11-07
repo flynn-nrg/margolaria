@@ -81,6 +81,8 @@ let package = Package(
                 // Links the OpenUSD and MaterialX frameworks, and puts their
                 // headers on our include path.
                 .product(name: "OpenUSDCxx", package: "OpenUSD"),
+                // MaterialX's OSL generators (M5d), which SwiftUsd lacks.
+                "MaterialXGenOsl",
             ],
             linkerSettings: [
                 // ImageIO: which textures are greyscale (USDZ export, M5c).
@@ -148,6 +150,16 @@ let package = Package(
         .binaryTarget(
             name: "OpenColorIO",
             path: "../../Vendor/OpenColorIO/OpenColorIO.xcframework"
+        ),
+
+        // MaterialX's OSL shader generators, built from MaterialX 1.39.5's
+        // sources against SwiftUsd's MaterialX by
+        // scripts/build-materialx-genosl.sh, with MaterialX's library
+        // compiled for the network form as resources (M5d). Embedded and
+        // signed in the app like OpenColorIO.
+        .binaryTarget(
+            name: "MaterialXGenOsl",
+            path: "../../Vendor/MaterialXGenOsl/MaterialXGenOsl.xcframework"
         ),
 
         // C++ shim around OpenColorIO, like MXBridge around MaterialX.

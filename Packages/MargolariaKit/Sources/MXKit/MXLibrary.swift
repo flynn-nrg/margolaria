@@ -58,6 +58,17 @@ public final class MXLibrary: @unchecked Sendable {
     /// How many node definitions the libraries contain (807 for MaterialX 1.39.5).
     public let nodeDefinitionCount: Int
 
+    /// The folder that contains the `libraries` folder, as given to
+    /// ``init(librariesRoot:)``.
+    public let librariesRoot: URL
+
+    /// MaterialX's OSL headers (`mx_funcs.h`, ...), which every generated
+    /// OSL shader includes: oslc needs this folder on its include path
+    /// (`-I`) to compile one (M5d).
+    public var oslIncludeFolder: URL {
+        librariesRoot.appending(path: "libraries/stdlib/genosl/include")
+    }
+
     /// Loads the libraries found under `librariesRoot`, the folder that
     /// contains the `libraries` folder.
     ///
@@ -100,6 +111,7 @@ public final class MXLibrary: @unchecked Sendable {
         // C++ `int` is imported as Swift `Int32`. Swift never converts
         // between number types implicitly, so `Int(...)` converts explicitly.
         self.handle = library
+        self.librariesRoot = librariesRoot
         self.fileCount = Int(library.fileCount())
         self.nodeDefinitionCount = Int(library.nodeDefinitionCount())
     }
