@@ -22,6 +22,10 @@ DerivedData/
 /Vendor/OSL/
 # MaterialX's OSL generators, built as an xcframework by scripts/build-materialx-genosl.sh.
 /Vendor/MaterialXGenOsl/
+# Python 3.13 as an xcframework, fetched by scripts/fetch-python.sh.
+/Vendor/Python/
+# MaterialX's Python bindings, built by scripts/build-pymaterialx.sh.
+/Vendor/PyMaterialX/
 
 # --- Local, per-developer settings ---------------------------------------
 # Holds DEVELOPMENT_TEAM and CODE_SIGN_IDENTITY (see Config/Signing.local.xcconfig.example).

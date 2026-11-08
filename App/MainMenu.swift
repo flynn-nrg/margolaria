@@ -79,7 +79,8 @@ enum MainMenu {
         bar.addItem(submenu: appMenu)
 
         // File. NSDocumentController and NSDocument implement all of these,
-        // except Export as USD… and USDZ…, MaterialXDocument's own.
+        // except Export as USD… and USDZ…, and Run Script…,
+        // MaterialXDocument's own.
         let fileMenu: NSMenu = menu("File",
                                     Item("New", #selector(NSDocumentController.newDocument(_:)), "n"),
                                     Item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"))
@@ -101,7 +102,10 @@ enum MainMenu {
             // The document's materials as a USD file (M5b), and as a
             // USDZ for Quick Look and Reality Composer Pro (M5c).
             Item("Export as USD…", #selector(MaterialXDocument.exportAsUSD(_:))),
-            Item("Export as USDZ…", #selector(MaterialXDocument.exportAsUSDZ(_:))))
+            Item("Export as USDZ…", #selector(MaterialXDocument.exportAsUSDZ(_:))),
+            .separator,
+            // A Python script run on the document, as one undo step (M6).
+            Item("Run Script…", #selector(MaterialXDocument.runScript(_:))))
         bar.addItem(submenu: fileMenu)
 
         // Edit. Undo and redo go to the window's undo manager.

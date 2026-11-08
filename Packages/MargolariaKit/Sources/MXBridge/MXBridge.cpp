@@ -236,6 +236,15 @@ bool Document::isLoaded() const {
     return _impl != nullptr;
 }
 
+std::shared_ptr<void> Document::materialXDocument() const {
+    if (!_impl) {
+        return nullptr;
+    }
+    // Shares ownership with the mx::DocumentPtr: the document lives as long
+    // as either does.
+    return _impl->document;
+}
+
 std::string Document::writeToXmlString() const {
     if (!_impl) {
         return {};

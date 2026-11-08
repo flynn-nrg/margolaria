@@ -22,6 +22,9 @@
 //   GraphKit        Swift. The node graph canvas, and building it from MXKit's graphs.
 //   ColorBridge     C++. The only code that includes OpenColorIO headers.
 //   ColorKit        Swift. Colour management: OCIO configs and conversions.
+//   PythonBridge    C++. The only code that talks to Python: embeds the
+//                   interpreter and hands it documents (M6).
+//   ScriptKit       Swift. Runs Python scripts on documents.
 //
 // Why bridges: Swift can call C++ directly, but not every C++ construct
 // imports cleanly (heavy templates, exceptions, shared_ptr-based APIs).
@@ -60,6 +63,7 @@ let package = Package(
         .library(name: "PreviewKit", targets: ["PreviewKit"]),
         .library(name: "GraphKit", targets: ["GraphKit"]),
         .library(name: "ColorKit", targets: ["ColorKit"]),
+        .library(name: "ScriptKit", targets: ["ScriptKit"]),
     ],
 
     // Packages this package depends on.
@@ -190,6 +194,56 @@ let package = Package(
             ]
         ),
 
+        // Python 3.13, fetched by scripts/fetch-python.sh (M6): the
+        // interpreter and its standard library, as one framework. Embedded
+        // and signed in the app like OpenColorIO; its compiled modules are
+        // signed by scripts/embed-python.sh.
+        .binaryTarget(
+            name: "Python",
+            path: "../../Vendor/Python/Python.xcframework"
+        ),
+
+        // C++ shim around Python, like MXBridge around MaterialX (M6). It
+        // includes MaterialX's headers too, only to hand MXBridge's
+        // documents to PyMaterialX.
+        .target(
+            name: "PythonBridge",
+            dependencies: [
+                "MXBridge",
+                "Python",
+                .product(name: "OpenUSDCxx", package: "OpenUSD"),
+            ],
+            cxxSettings: [
+                // The pybind11 headers PyMaterialX was built with
+                // (scripts/build-pymaterialx.sh), which must be the same;
+                // and Python's headers, which pybind11 includes as
+                // <Python.h>, not as a framework's <Python/Python.h>.
+                // `unsafeFlags` because the folders are outside the
+                // package, which `headerSearchPath` doesn't allow. SwiftPM
+                // refuses unsafe flags only in packages fetched from
+                // elsewhere.
+                //
+                // SWIFT: `Context.packageDirectory` is this package's
+                // folder, given to the manifest by SwiftPM, so the paths
+                // don't depend on where the compiler runs.
+                .unsafeFlags([
+                    "-I", Context.packageDirectory + "/../../Vendor/PyMaterialX/include",
+                    "-I", Context.packageDirectory
+                        + "/../../Vendor/Python/Python.xcframework/macos-arm64/Python.framework/Headers",
+                ]),
+            ]
+        ),
+
+        // Running Python scripts on documents (M6).
+        .target(
+            name: "ScriptKit",
+            dependencies: ["MXKit", "PythonBridge"],
+            swiftSettings: [
+                // Needed because it imports MXKit and PythonBridge.
+                .interoperabilityMode(.Cxx),
+            ]
+        ),
+
         // Unit tests, run with `swift test` from this directory, or with
         // `xcodebuild test -scheme Margolaria` (shares the app's build).
         .testTarget(
@@ -225,6 +279,13 @@ let package = Package(
             name: "PreviewKitTests",
             dependencies: ["PreviewKit", "MXKit", "ColorKit"],
             resources: [.copy("Fixtures")],
+            swiftSettings: [.interoperabilityMode(.Cxx)]
+        ),
+
+        // Scripts run on documents through PyMaterialX (M6).
+        .testTarget(
+            name: "ScriptKitTests",
+            dependencies: ["ScriptKit", "MXKit"],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
 

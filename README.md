@@ -12,6 +12,8 @@ scripts/fetch-swiftusd.sh     # once: clones apple/SwiftUsd into Vendor/ (about 
 scripts/build-ocio.sh         # once: builds OpenColorIO as an xcframework in Vendor/ (about a minute)
 scripts/build-osl.sh          # once: builds OSL's oslc, testshade and testrender in Vendor/ (several minutes)
 scripts/build-materialx-genosl.sh  # once, after the two above: MaterialX's OSL generators as an xcframework (a minute or two)
+scripts/fetch-python.sh       # once: Python 3.13 as an xcframework in Vendor/ (a 29 MB download)
+scripts/build-pymaterialx.sh  # once, after the one above: MaterialX's Python bindings (about 15 seconds)
 scripts/fetch-materialx-examples.sh  # once: MaterialX's example materials (52 MB), for tests and trying the app
 xcodegen                      # generates Margolaria.xcodeproj from project.yml
 open Margolaria.xcodeproj
@@ -35,6 +37,7 @@ All our code that uses OpenUSD and MaterialX is in one Swift package, `Packages/
 - SwiftUsd comes from `Vendor/SwiftUsd`, patched (`Vendor/swiftusd-openusdcxx-product.patch`) to add a product without SwiftUsd's Swift overlay. We don't use the overlay, and compiling it took about 12 of the 13 minutes of a clean build. To upgrade SwiftUsd, change `SWIFTUSD_TAG` in `scripts/fetch-swiftusd.sh` and run it again.
 - OpenColorIO isn't in SwiftUsd, so `scripts/build-ocio.sh` builds it from source, with its own dependencies linked in statically. To upgrade it, change `OCIO_TAG` in the script and run it again.
 - Nor are MaterialX's OSL generators: `scripts/build-materialx-genosl.sh` compiles them from MaterialX's sources (the same release as SwiftUsd's, `MATERIALX_TAG`) against SwiftUsd's MaterialX, and compiles MaterialX's library to `.oso` files for OSL networks with the `oslc` that `scripts/build-osl.sh` builds. OSL's tools are for development and tests only; they link Homebrew's libraries and aren't part of the app.
+- Python (M6) is BeeWare's Python-Apple-support build of python.org's Python 3.13, fetched by `scripts/fetch-python.sh` (pinned by build and checksum, thinned to arm64). MaterialX's Python bindings are compiled by `scripts/build-pymaterialx.sh` from MaterialX's sources against SwiftUsd's MaterialX, as the OSL generators are. The app's last build phase, `scripts/embed-python.sh`, copies the bindings in and signs every compiled Python module with the app's identity, which Xcode doesn't do by itself.
 - **Your editor's indexer builds too.** SourceKit-LSP, the language server behind Swift support in editors other than Xcode, keeps its own full build in `Packages/MargolariaKit/.build/index-build`. While it runs, a clean build can take several times longer (6 minutes instead of 1.5 here).
 
 Measured on 2026-10-18:

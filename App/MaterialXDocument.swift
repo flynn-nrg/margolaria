@@ -29,6 +29,7 @@ import GraphKit
 import MXKit
 import Observation
 import PreviewKit
+import ScriptKit
 import SwiftUI
 import UniformTypeIdentifiers
 import ViewportKit
@@ -421,6 +422,84 @@ final class MaterialXDocument: NSDocument {
             panel.beginSheetModal(for: window, completionHandler: finish)
         } else {
             finish(panel.runModal())
+        }
+    }
+
+    // MARK: Scripts (M6)
+
+    /// A script that raised: its output, ending with the traceback.
+    struct ScriptFailed: LocalizedError {
+        let name: String
+        let output: String
+
+        var errorDescription: String? {
+            "\(name) stopped with an error."
+        }
+
+        var recoverySuggestion: String? {
+            output
+        }
+    }
+
+    /// File > Run Script…: runs a Python script on this document, as one
+    /// undo step named after it. `margolaria.document()` in the script is
+    /// this document (ScriptKit). A script that raises changes nothing:
+    /// its traceback is shown. What a script prints is shown when it ends.
+    ///
+    /// Spike M6a: enough to check Python in the signed app. M6b makes
+    /// scripting the `margolaria` module, with a Console for the output.
+    @objc func runScript(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.title = "Run Script"
+        panel.message = "A Python script to run on this document, as one step you can undo."
+        panel.allowedContentTypes = [.pythonScript]
+        panel.directoryURL = fileURL?.deletingLastPathComponent()
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK, let url = panel.url else {
+                return
+            }
+            self?.run(scriptAt: url)
+        }
+        if let window = windowControllers.first?.window {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
+        }
+    }
+
+    /// Runs the script at `url` on this document; see `runScript`.
+    private func run(scriptAt url: URL) {
+        let code: String
+        do {
+            try Python.start(from: .inApp())
+            code = try String(contentsOf: url, encoding: .utf8)
+        } catch {
+            presentError(error)
+            return
+        }
+        let name: String = url.lastPathComponent
+        edit("Run \(name)") { [weak self] content in
+            let result: ScriptResult = Python.run(code, named: url.path(percentEncoded: false), on: content)
+            // SWIFT: `throw` inside the closure ends it with an error:
+            // `edit` catches it, puts the document back and shows it.
+            guard result.succeeded else {
+                throw ScriptFailed(name: name, output: result.output)
+            }
+            if !result.output.isEmpty {
+                self?.showOutput(result.output, of: name)
+            }
+        }
+    }
+
+    /// Shows what a script printed, in a sheet on the window.
+    private func showOutput(_ output: String, of name: String) {
+        let alert = NSAlert()
+        alert.messageText = "\(name) printed:"
+        alert.informativeText = output
+        if let window = windowControllers.first?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 

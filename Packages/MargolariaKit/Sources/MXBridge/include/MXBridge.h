@@ -812,6 +812,13 @@ public:
     bool generateCode(const std::string& elementPath, const Library& library, ShaderLanguage language,
                       const std::string& colorSpace, ShaderCode& code, std::string& errorMessage) const;
 
+    /// The MaterialX document itself, for PythonBridge (M6), which hands it
+    /// to Python scripts as a PyMaterialX `Document`: the same object, so
+    /// what a script changes is this document. It points at an
+    /// `mx::Document`, typed `void` so that this header needs no MaterialX
+    /// headers (rule 1). Null if not loaded.
+    std::shared_ptr<void> materialXDocument() const;
+
 private:
     struct Impl;
     std::shared_ptr<Impl> _impl;
