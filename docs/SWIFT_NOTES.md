@@ -172,6 +172,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Public memberwise init | A `public` struct still only gets an `internal` automatic init; write `public init` | — | `ViewportView.swift` |
 | `private(set)` | Readable at the property's access level, writable only inside the type | A public getter with a private setter | `GraphCanvasController.swift` (`marquee`) |
 | `open` vs `public` | `open` classes can be subclassed outside the module; `public` ones only inside | — | `GraphEventView.swift` |
+| `package` access | Between `internal` and `public`: every module of the same Swift package sees it, other packages and the app don't | A header shared by a library's own components but not installed | `MXDocument.swift` (`handle`), `CxxString.swift`, used by `ScriptKit/Python.swift` (M6a) |
+| `Context.packageDirectory` | In `Package.swift`: the package's folder, for paths outside it (with `unsafeFlags`) | CMake's `CMAKE_CURRENT_SOURCE_DIR` | `Packages/MargolariaKit/Package.swift` (PythonBridge, M6a) |
 
 ## Concurrency (Swift 6)
 

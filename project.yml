@@ -27,9 +27,11 @@ options:
 # MaterialX and OpenColorIO: MXKit (MaterialX), ViewportKit (the Storm
 # viewport), ColorKit (OCIO) and more. It depends on the SwiftUsd copy in
 # Vendor/SwiftUsd, the OCIO framework in Vendor/OpenColorIO and MaterialX's
-# OSL generators in Vendor/MaterialXGenOsl; run scripts/fetch-swiftusd.sh,
-# scripts/build-ocio.sh, scripts/build-osl.sh and
-# scripts/build-materialx-genosl.sh before the first build.
+# OSL generators in Vendor/MaterialXGenOsl, Python in Vendor/Python and
+# MaterialX's Python bindings in Vendor/PyMaterialX; run
+# scripts/fetch-swiftusd.sh, scripts/build-ocio.sh, scripts/build-osl.sh,
+# scripts/build-materialx-genosl.sh, scripts/fetch-python.sh and
+# scripts/build-pymaterialx.sh before the first build.
 packages:
   MargolariaKit:
     path: Packages/MargolariaKit
@@ -55,6 +57,22 @@ targets:
         product: ColorKit
       - package: MargolariaKit
         product: PreviewKit
+      - package: MargolariaKit
+        product: ScriptKit
+    # After everything is built and embedded, before Xcode signs the app:
+    # the MaterialX package copied in, and Python's compiled modules signed
+    # with our identity (M6; the script says why).
+    postBuildScripts:
+      - name: Embed Python
+        script: '"$SRCROOT/scripts/embed-python.sh"'
+        # The embedded Python.framework, so Xcode runs this after copying
+        # (and signing) it. Without an input, Xcode may run the script
+        # while it is still copying the framework (it did, in M6a).
+        inputFiles:
+          - $(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Python.framework
+        # Run on every build: its inputs are folders, which Xcode's
+        # dependency analysis doesn't follow for changes inside them.
+        basedOnDependencyAnalysis: false
     # Generate a shared scheme, so `xcodebuild -scheme Margolaria` works.
     # Its Test action runs the package's tests in the same build folder as
     # the app, so `xcodebuild test -scheme Margolaria` reuses the app's build
@@ -66,6 +84,7 @@ targets:
         - package: MargolariaKit/PreviewKitTests
         - package: MargolariaKit/GraphKitTests
         - package: MargolariaKit/ColorKitTests
+        - package: MargolariaKit/ScriptKitTests
 
   # Spike M0b: a one-window demo of the Storm viewport (docs/spikes/M0b-storm-viewport.md).
   # The .mtlx next to the source is copied into the app's resources.

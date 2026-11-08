@@ -106,10 +106,15 @@ public final class MXDocument {
     /// value"), so the handle must be a variable. This is how C++ `const`
     /// correctness shows up in Swift.
     ///
-    /// `internal` (no keyword) rather than `private`, so the edits in
-    /// MXEdit.swift, another file of this module, can use it. The app still
-    /// can't: it only sees `public` members.
-    var handle: mxbridge.Document
+    /// `package` rather than `private`, so the edits in MXEdit.swift,
+    /// another file of this module, can use it, and so can ScriptKit, which
+    /// hands the document to Python (M6). The app still can't: it only sees
+    /// `public` members.
+    ///
+    /// SWIFT: `package` is the access level between `internal` (this module
+    /// only) and `public` (anyone who imports it): every module of the same
+    /// Swift package (MargolariaKit) sees it, nothing outside does.
+    package var handle: mxbridge.Document
 
     /// The file the document was read from, or nil if it came from a string.
     /// Relative texture paths and xi:includes are resolved against its folder.
