@@ -178,6 +178,10 @@ final class MaterialXDocument: NSDocument {
     override func read(from url: URL, ofType typeName: String) throws {
         let document: MXDocument = try MXDocument.read(from: url)
         MainActor.assumeIsolated {
+            // Undo steps put their copies back into `content` (MXUndo), and
+            // `content` is replaced here. NSDocument clears the steps when
+            // it reads the file again (Revert To) anyway; this makes sure.
+            undoManager?.removeAllActions(withTarget: content)
             load(document)
             upgradeConfirmed = false
             isChoosingTemplate = false
@@ -271,6 +275,16 @@ final class MaterialXDocument: NSDocument {
     /// viewport has picked one. Window state, kept here (not in
     /// ContentView) so that Export as USDZ… can put it on the sphere.
     var previewMaterial: String? = nil
+
+    /// The node selected on the canvas (one only), by path: window state,
+    /// here so that scripts can read it (`margolaria.selection()`, M6b).
+    /// The canvas writes it (ContentView).
+    var selectedPath: String? = nil
+
+    /// An element a script asked the canvas to select
+    /// (`margolaria.select()`); ContentView shows its graph, selects it,
+    /// and clears this.
+    var selectionRequest: String? = nil
 
     /// File > Export as USD…: writes the document's materials as a USD
     /// file, .usda (text) or .usdc (binary), chosen in the Save panel.
@@ -442,12 +456,11 @@ final class MaterialXDocument: NSDocument {
     }
 
     /// File > Run Script…: runs a Python script on this document, as one
-    /// undo step named after it. `margolaria.document()` in the script is
-    /// this document (ScriptKit). A script that raises changes nothing:
-    /// its traceback is shown. What a script prints is shown when it ends.
-    ///
-    /// Spike M6a: enough to check Python in the signed app. M6b makes
-    /// scripting the `margolaria` module, with a Console for the output.
+    /// undo step named after it, or several (`with margolaria.edit(...)`),
+    /// or none if it changes nothing. `margolaria.document()` in the
+    /// script is this document (ScriptKit). A script that raises changes
+    /// nothing: its traceback is shown. What a script prints is shown when
+    /// it ends (in a sheet until the Console, M6c).
     @objc func runScript(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.title = "Run Script"
@@ -478,15 +491,23 @@ final class MaterialXDocument: NSDocument {
             return
         }
         let name: String = url.lastPathComponent
-        edit("Run \(name)") { [weak self] content in
-            let result: ScriptResult = Python.run(code, named: url.path(percentEncoded: false), on: content)
-            // SWIFT: `throw` inside the closure ends it with an error:
-            // `edit` catches it, puts the document back and shows it.
-            guard result.succeeded else {
-                throw ScriptFailed(name: name, output: result.output)
+        // Not `edit`: the script registers its own steps, as many as it
+        // makes, and puts the document back itself if it raises.
+        whenEditable { [weak self] in
+            guard let self else {
+                return
             }
-            if !result.output.isEmpty {
-                self?.showOutput(result.output, of: name)
+            continuation = nil
+            let result: ScriptResult = Python.run(code, named: url.path(percentEncoded: false), on: content,
+                                                  host: self, undoManager: undoManager,
+                                                  changed: { [weak self] _ in self?.undoneOrRedone() })
+            if !result.steps.isEmpty || !result.succeeded {
+                contentChanged()
+            }
+            if !result.succeeded {
+                presentError(ScriptFailed(name: name, output: result.output))
+            } else if !result.output.isEmpty {
+                showOutput(result.output, of: name)
             }
         }
     }
@@ -583,16 +604,26 @@ final class MaterialXDocument: NSDocument {
     /// keep it alive. Closures passed as parameters are non-escaping by
     /// default, which lets the compiler avoid that cost.
     func edit(_ name: String, continuing key: String? = nil, change: @escaping (MXDocument) throws -> Void) {
+        whenEditable { [weak self] in
+            self?.makeEdit(name, continuing: key, change: change)
+        }
+    }
+
+    /// Calls `proceed` now if the document can be changed, or once the user
+    /// agrees to upgrading it (see `edit`); not while the question is up.
+    private func whenEditable(_ proceed: @escaping () -> Void) {
         guard !askingToUpgrade else {
             return
         }
         guard upgradeConfirmed || !needsUpgrade else {
-            confirmUpgrade { [weak self] in
-                self?.edit(name, continuing: key, change: change)
-            }
+            confirmUpgrade(then: proceed)
             return
         }
+        proceed()
+    }
 
+    /// The edit itself, once the document can be changed (see `edit`).
+    private func makeEdit(_ name: String, continuing key: String?, change: (MXDocument) throws -> Void) {
         let now = Date()
         // SWIFT: `if let key, let continuation, ...` unwraps both optionals
         // and checks the rest in one condition. The commas work like `&&`:
@@ -642,26 +673,21 @@ final class MaterialXDocument: NSDocument {
         continuation = nil
     }
 
-    /// Registers an undo step that puts `snapshot` back.
-    ///
-    /// SWIFT: `registerUndo(withTarget:handler:)` stores a closure that the
-    /// undo manager calls on Undo, passing the target (`self`) back in. The
-    /// target is held weakly by the undo manager, so the closure uses the
-    /// parameter, not `self`. Registering during an undo is how redo works:
-    /// the undo manager records that registration as the redo step.
+    /// Registers an undo step that puts `snapshot` back (MXUndo, which
+    /// scripts' steps use too).
     private func registerUndo(restoring snapshot: MXDocument, name: String) {
         guard let undoManager else {
             return
         }
-        undoManager.registerUndo(withTarget: self) { document in
-            // Whatever was being dragged, the next change is a new step.
-            document.continuation = nil
-            let current: MXDocument = document.content.copy()
-            document.content.restore(from: snapshot)
-            document.registerUndo(restoring: current, name: name)
-            document.contentChanged()
-        }
-        undoManager.setActionName(name)
+        MXUndo.register(on: undoManager, restoring: snapshot, in: content, named: name,
+                        changed: { [weak self] _ in self?.undoneOrRedone() })
+    }
+
+    /// After an Undo or Redo has put a copy back into `content`.
+    private func undoneOrRedone() {
+        // Whatever was being dragged, the next change is a new step.
+        continuation = nil
+        contentChanged()
     }
 
     /// True if the file's MaterialX version is older than the document's:
@@ -750,6 +776,28 @@ final class MaterialXDocument: NSDocument {
     /// inside it are literal, so the XML's quotes need no escaping.
     private static func emptyDocument() -> MXDocument {
         try! MXDocument(xml: #"<?xml version="1.0"?><materialx version="1.39" />"#)
+    }
+}
+
+// MARK: - Scripts' window (M6b)
+
+/// What a script asks of the window (ScriptKit's `margolaria.selection()`
+/// and the like).
+///
+/// SWIFT: Adopting a protocol in an extension keeps its members together,
+/// apart from the class's own.
+extension MaterialXDocument: ScriptHost {
+    var selection: [String] {
+        selectedPath.map { [$0] } ?? []
+    }
+
+    func select(_ path: String) {
+        selectedPath = path
+        selectionRequest = path
+    }
+
+    var documentFolder: URL? {
+        fileURL?.deletingLastPathComponent()
     }
 }
 

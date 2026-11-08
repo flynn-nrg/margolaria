@@ -1,8 +1,10 @@
 // Python.swift
 //
 // Running Python scripts on documents (M6): the embedded interpreter,
-// started once, and scripts run on an MXDocument. The C++ underneath is
-// PythonBridge; this file only turns its results into Swift's.
+// started once, and scripts run on an MXDocument as undo steps. The C++
+// underneath is PythonBridge, with the `margolaria` module; this file
+// turns its results into Swift's, and ScriptHost.swift answers the
+// module's calls to Swift.
 //
 // Where Python lives: in the app, Python.framework is embedded in
 // Contents/Frameworks and the MaterialX package in
@@ -21,10 +23,15 @@ import PythonBridge
 /// What a script printed, and whether it ran to the end.
 public struct ScriptResult: Sendable {
     /// False if the script raised an exception, a SyntaxError included.
+    /// The document is then as it was before.
     public let succeeded: Bool
     /// What it printed, standard output and error together; for a script
     /// that raised, ending with its traceback.
     public let output: String
+    /// The names of the undo steps it made, in order: "Run brick.py", and
+    /// one for each `with margolaria.edit(...)` block that changed
+    /// something. Empty if it changed nothing, or failed.
+    public let steps: [String]
 }
 
 /// Why Python couldn't run a script.
@@ -56,20 +63,28 @@ public enum PythonError: Error, LocalizedError {
 @MainActor
 public enum Python {
     /// Where Python's files are: `home` holds `lib/python3.13`,
-    /// `sitePackages` the MaterialX package.
+    /// `sitePackages` the MaterialX package. `cache`, if not nil, is where
+    /// Python keeps the modules it compiles, so later launches don't
+    /// compile them again.
     public struct Location: Sendable {
         public let home: URL
         public let sitePackages: URL
+        public let cache: URL?
 
-        public init(home: URL, sitePackages: URL) {
+        public init(home: URL, sitePackages: URL, cache: URL? = nil) {
             self.home = home
             self.sitePackages = sitePackages
+            self.cache = cache
         }
 
-        /// Where the app's bundle has them (project.yml).
+        /// Where the app's bundle has them (project.yml), with the cache in
+        /// the user's Caches folder (`~/Library/Caches/<bundle id>/Python`),
+        /// as the app itself is signed and can't be written to.
         public static func inApp(_ bundle: Bundle = .main) -> Location {
-            Location(home: bundle.privateFrameworksURL!.appending(path: "Python.framework/Versions/3.13"),
-                     sitePackages: bundle.resourceURL!.appending(path: "Python/site-packages"))
+            let caches: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            return Location(home: bundle.privateFrameworksURL!.appending(path: "Python.framework/Versions/3.13"),
+                            sitePackages: bundle.resourceURL!.appending(path: "Python/site-packages"),
+                            cache: caches?.appending(path: "\(bundle.bundleIdentifier ?? "Margolaria")/Python"))
         }
 
         /// Where the scripts in Vendor put them, for tests.
@@ -104,6 +119,7 @@ public enum Python {
         var errorMessage = std.string()
         guard pybridge.Interpreter.start(std.string(location.home.path(percentEncoded: false)),
                                          std.string(location.sitePackages.path(percentEncoded: false)),
+                                         std.string(location.cache?.path(percentEncoded: false) ?? ""),
                                          &errorMessage) else {
             throw PythonError.startFailed(errorMessage.swiftString)
         }
@@ -121,12 +137,40 @@ public enum Python {
     }
 
     /// Runs `code` on `document`: `margolaria.document()` in the script is
-    /// this document, as a MaterialX.Document. Changes the document in
-    /// place; making them undoable is the caller's (the app runs scripts
-    /// inside an edit). `filename` names the script in tracebacks.
-    /// Python must have been started.
-    public static func run(_ code: String, named filename: String, on document: MXDocument) -> ScriptResult {
-        let result = pybridge.Interpreter.run(std.string(code), std.string(filename), document.handle)
-        return ScriptResult(succeeded: result.succeeded, output: result.output.swiftString)
+    /// this document, as a MaterialX.Document, and the module's edits
+    /// change it in place. `filename` names the script in tracebacks, and
+    /// its last part names its undo steps ("Run brick.py").
+    ///
+    /// If the script succeeds, its undo steps are registered on
+    /// `undoManager` (none if it changed nothing), and `changed` is called
+    /// after each Undo and Redo of them, to show the document again. If it
+    /// raises, the document is put back as it was, and nothing is
+    /// registered. `host` answers `margolaria.selection()` and the like;
+    /// without one, they raise. Python must have been started.
+    public static func run(_ code: String, named filename: String, on document: MXDocument,
+                           host: ScriptHost? = nil, undoManager: UndoManager? = nil,
+                           changed: @escaping (MXDocument) -> Void = { _ in }) -> ScriptResult {
+        let before: MXDocument = document.copy()
+        let stepName: String = "Run \(URL(filePath: filename).lastPathComponent)"
+        let calls = HostCalls(document: document, host: host)
+        // SWIFT: `toOpaque()` is a raw pointer to `calls`, which doesn't
+        // keep it alive; `withExtendedLifetime` does, until the closure
+        // returns, so the pointer is good for the whole run.
+        let result: pybridge.RunResult = withExtendedLifetime(calls) {
+            pybridge.Interpreter.run(std.string(code), std.string(filename), std.string(stepName), document.handle,
+                                     HostCalls.function, Unmanaged.passUnretained(calls).toOpaque())
+        }
+        guard result.succeeded else {
+            document.restore(from: before)
+            return ScriptResult(succeeded: false, output: result.output.swiftString, steps: [])
+        }
+        let steps: [MXUndoStep] = result.steps.map { step in
+            MXUndoStep(name: step.name.swiftString,
+                       after: MXDocument(handle: step.after, fileURL: document.fileURL, fileVersion: document.fileVersion))
+        }
+        if let undoManager {
+            MXUndo.register(steps, on: undoManager, startingFrom: before, in: document, changed: changed)
+        }
+        return ScriptResult(succeeded: true, output: result.output.swiftString, steps: steps.map(\.name))
     }
 }

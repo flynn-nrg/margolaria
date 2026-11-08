@@ -1445,6 +1445,18 @@ Document Document::copy() const {
     return result;
 }
 
+void Document::restoreContents(const Document& snapshot) {
+    if (!_impl || !snapshot._impl || _impl->document == snapshot._impl->document) {
+        return;
+    }
+    // As mx::Document::copy() does, into this document rather than a new
+    // one. copyContentFrom adds to what is there, so it is cleared first.
+    const mx::DocumentPtr& document = _impl->document;
+    document->clearContent();
+    document->copyContentFrom(snapshot._impl->document);
+    document->setSourceUri(snapshot._impl->document->getSourceUri());
+}
+
 Document Document::readText(const std::string& xml, std::string& errorMessage) const {
     if (!_impl) {
         errorMessage = "No document loaded";
@@ -1519,9 +1531,16 @@ mx::ElementPtr EditableElement(const mx::DocumentPtr& document, const std::strin
     return element;
 }
 
+/// The inputs Port() added during the edit Perform() is running, so that
+/// a refusal after it can take them away again; null outside an edit.
+/// `thread_local`: one per thread, as two documents may be edited at once
+/// on two threads (the tests do).
+thread_local std::vector<mx::InputPtr>* inputsAdded = nullptr;
+
 /// The input `inputName` of the node or nodegraph `element`, or `element`
 /// itself if it is an <output>. With `create`, an input the node doesn't set
-/// yet is added from its nodedef.
+/// yet is added from its nodedef (and removed by Perform() if the edit is
+/// then refused).
 mx::PortElementPtr Port(const mx::ElementPtr& element, const std::string& inputName, bool create) {
     if (mx::OutputPtr output = element->asA<mx::Output>()) {
         return output;
@@ -1534,6 +1553,9 @@ mx::PortElementPtr Port(const mx::ElementPtr& element, const std::string& inputN
     if (!input && create) {
         if (mx::NodePtr node = element->asA<mx::Node>()) {
             input = node->addInputFromNodeDef(inputName);
+            if (input && inputsAdded) {
+                inputsAdded->push_back(input);
+            }
         } else if (mx::NodeGraphPtr graph = element->asA<mx::NodeGraph>()) {
             // A nodegraph that implements a nodedef takes its inputs and
             // their defaults from the nodedef. One in this document is
@@ -1832,17 +1854,32 @@ void AddToBackdrops(const std::vector<mx::BackdropPtr>& backdrops, const std::ve
 /// Runs an edit on `document`, turning any exception into `false` and a
 /// message. Every edit function below is one call to this, with the edit
 /// as a lambda.
+///
+/// A refused edit leaves the document as it was: the edits check before
+/// they change anything, except for the inputs Port() adds to look at
+/// their type, which are removed here. (In the app, `edit` puts the whole
+/// document back anyway; a Python script that catches the refusal, M6b,
+/// goes on with this one.)
 template <typename Edit>
 bool Perform(const mx::DocumentPtr& document, std::string& errorMessage, Edit edit) {
     if (!document) {
         errorMessage = "No document loaded";
         return false;
     }
+    std::vector<mx::InputPtr> added;
+    inputsAdded = &added;
     try {
         edit(document);
         KeepBackdropsCurrent(document);
+        inputsAdded = nullptr;
         return true;
     } catch (const std::exception& e) {
+        inputsAdded = nullptr;
+        for (const mx::InputPtr& input : added) {
+            if (mx::ElementPtr parent = input->getParent()) {
+                parent->removeChild(input->getName());
+            }
+        }
         errorMessage = e.what();
         return false;
     }

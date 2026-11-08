@@ -70,6 +70,11 @@ targets:
         # while it is still copying the framework (it did, in M6a).
         inputFiles:
           - $(TARGET_BUILD_DIR)/$(FRAMEWORKS_FOLDER_PATH)/Python.framework
+        # What it writes into the app, so Xcode signs the app again after
+        # it ran: when it re-copies the package on a build where nothing
+        # else changed, the app's seal would no longer match (M6b).
+        outputFiles:
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/Python/site-packages
         # Run on every build: its inputs are folders, which Xcode's
         # dependency analysis doesn't follow for changes inside them.
         basedOnDependencyAnalysis: false

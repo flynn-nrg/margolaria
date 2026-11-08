@@ -424,6 +424,13 @@ public:
     /// locations, sharing nothing with this one. Undo keeps these.
     Document copy() const;
 
+    /// Replaces this document's contents with a copy of `snapshot`'s:
+    /// elements, attributes and file locations. Unlike assigning a copy(),
+    /// the MaterialX document stays the same object, so whatever holds it
+    /// (a Python script, M6b) holds the restored contents. Elements taken
+    /// from it before are no longer in it. Undo and redo use this.
+    void restoreContents(const Document& snapshot);
+
     /// Parses `xml` as this document's own text (the XML tab, M4e): its
     /// `xi:include`s found next to this document's file, that file recorded
     /// as its source (so included elements and relative texture paths

@@ -2,8 +2,7 @@
 #
 # Run with File > Run Script… on any document: prints Python's and
 # MaterialX's versions and the document's materials, with their shaders.
-# Changes nothing, so it adds an undo step that does nothing (M6b will
-# register none).
+# Changes nothing, so it adds no undo step (since M6b).
 
 import sys
 

@@ -50,10 +50,11 @@ extension MXDocument {
     }
 
     /// Replaces this document's contents with a copy of `snapshot`'s,
-    /// keeping this object. Views that hold on to the MXDocument keep
-    /// working; undo and redo use this.
+    /// keeping this object, and the MaterialX document inside it. Views
+    /// that hold on to the MXDocument keep working, and so does a Python
+    /// script's `margolaria.document()` (M6b); undo and redo use this.
     public func restore(from snapshot: MXDocument) {
-        handle = snapshot.handle.copy()
+        handle.restoreContents(snapshot.handle)
     }
 
     /// Compares with `other` element by element, ignoring formatting.
