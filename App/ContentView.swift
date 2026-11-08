@@ -74,9 +74,6 @@ struct ContentView: View {
     /// so they stay when the tab or the panel is hidden.
     @State private var xmlDraft = XMLDraft()
 
-    /// The node selected on the canvas (one only), for the XML panel.
-    @State private var canvasSelection: String? = nil
-
     /// The graph level the canvas shows: "" for the document's top level,
     /// or a nodegraph's path. GraphPanel changes it too (double-click, U).
     @State private var graphPath: String = ""
@@ -256,11 +253,11 @@ struct ContentView: View {
                 VSplitView {
                     if viewMode != .text {
                         GraphPanel(document: document, levelPath: $graphPath, focus: $focus,
-                                   selectedPath: $canvasSelection, nodeToAdd: $nodeToAdd, soloPath: $soloPath)
+                                   selectedPath: Bindable(document).selectedPath, nodeToAdd: $nodeToAdd, soloPath: $soloPath)
                             .frame(minHeight: 200, maxHeight: .infinity)
                     }
                     if viewMode != .graph {
-                        BottomPanel(document: document, tab: $bottomTab, xmlDraft: xmlDraft, selectedPath: canvasSelection,
+                        BottomPanel(document: document, tab: $bottomTab, xmlDraft: xmlDraft, selectedPath: document.selectedPath,
                                     onSelectIssue: show)
                             .frame(minHeight: 120, idealHeight: 260, maxHeight: .infinity)
                     }
@@ -281,7 +278,7 @@ struct ContentView: View {
                         if showsInspector {
                             // Clicking a connection, or renaming, shows that
                             // node on the canvas, selected.
-                            InspectorPanel(document: document, selectedPath: canvasSelection, soloPath: $soloPath,
+                            InspectorPanel(document: document, selectedPath: document.selectedPath, soloPath: $soloPath,
                                            onShow: { path in focus = path }, levelPath: graphPath,
                                            onOpen: { path in
                                                if viewMode == .text {
@@ -336,6 +333,19 @@ struct ContentView: View {
                 .toggleStyle(.button)
                 .help("Show or hide the inspector")
             }
+        }
+        // A script's `margolaria.select()` (M6b): the element's graph, and
+        // the element selected in it.
+        .onChange(of: document.selectionRequest) {
+            guard let path = document.selectionRequest else {
+                return
+            }
+            document.selectionRequest = nil
+            if viewMode == .text {
+                viewMode = .split
+            }
+            graphPath = path.split(separator: "/").dropLast().joined(separator: "/")
+            focus = path
         }
         // Clicking in the sidebar opens a nodegraph, or selects a top-level
         // node in the document's graph.

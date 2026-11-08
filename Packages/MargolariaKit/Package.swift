@@ -237,7 +237,9 @@ let package = Package(
         // Running Python scripts on documents (M6).
         .target(
             name: "ScriptKit",
-            dependencies: ["MXKit", "PythonBridge"],
+            // ColorKit and ViewportKit for what the `margolaria` module
+            // asks of Swift (M6b): converting colours, exporting USD.
+            dependencies: ["MXKit", "PythonBridge", "ColorKit", "ViewportKit"],
             swiftSettings: [
                 // Needed because it imports MXKit and PythonBridge.
                 .interoperabilityMode(.Cxx),

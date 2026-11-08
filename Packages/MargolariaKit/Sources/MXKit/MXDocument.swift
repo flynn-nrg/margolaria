@@ -148,10 +148,11 @@ public final class MXDocument {
     /// Wraps a handle that was loaded some other way (`read(from:)`,
     /// `copy()`).
     ///
-    /// SWIFT: An `internal init` (no keyword): code in this module can call
-    /// it, the app can't. Swift lets a class have several initializers,
-    /// distinguished by their labels.
-    init(handle: mxbridge.Document, fileURL: URL?, fileVersion: String?) {
+    /// SWIFT: A `package init`: code in this package can call it (ScriptKit
+    /// wraps the copies a script's undo steps keep, M6b), the app can't.
+    /// Swift lets a class have several initializers, distinguished by their
+    /// labels.
+    package init(handle: mxbridge.Document, fileURL: URL?, fileVersion: String?) {
         self.handle = handle
         self.fileURL = fileURL
         self.fileVersion = fileVersion

@@ -137,6 +137,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Concept | In one line | Closest thing you know | First appears |
 |---|---|---|---|
 | Protocols | A set of requirements a type promises to meet | Go interfaces, ObjC protocols | `MXError.swift` (`Error`) |
+| Declaring a protocol | `protocol P: AnyObject { var x: [String] { get }; func f(_ s: String) }`: requirements only; `{ get }` is met by a stored `var` or a computed property; `AnyObject` allows only classes | Go interface, ObjC `@protocol` | `ScriptHost.swift` (`ScriptHost`, M6b) |
 | Extending a generic type | `extension Array { ... }` adds members to arrays of every element type; `Element` names that type inside | A member template on `std::vector` (not possible in C++) | `MXValue.swift` |
 | Extensions | Add members or conformances to any type, including Apple's and C++ ones | ObjC categories | `MXError.swift`, `CxxString.swift` |
 | `Identifiable`, `Hashable`, `Equatable` | Standard protocols; the compiler writes `==` and `hash` for simple structs | `operator==` defaulted | `MXDocument.swift` |
@@ -297,6 +298,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Option dictionaries | Objective-C APIs taking `NSDictionary` options take `[Key: Any]` in Swift; enum values go in as their `rawValue` | `MTKTextureLoader` in `SwatchRenderer.swift` (`image(at:)`) |
 | Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` (since M3c `ViewTransform.swift`) |
 | C++ `enum class` | Imported as a type whose cases are static members (`mxbridge.ShaderLanguage.msl`), not a Swift enum (C++ may hold values with no case), so a Swift enum mirrors it and converts | `MXShader.swift` (`MXShaderLanguage.bridgeValue`) |
+| `@convention(c)` closures | A C function pointer type, as Swift sees `void (*)(void*, T*)`; a closure becomes one only if it captures nothing, so state comes in through a `void *` context | `ScriptHost.swift` (`HostCalls.function`, M6b) |
+| `Unmanaged` | Turns an object into a raw pointer and back without retaining it (`passUnretained(x).toOpaque()`, `fromOpaque(p).takeUnretainedValue()`): the C side's `void *context` | `ScriptHost.swift`, `Python.swift` (M6b) |
+| `pointer.pointee` | The value an `UnsafeMutablePointer` points at, read and changed in place: `call.pointee.results.push_back(...)` is C++'s `call->results.push_back(...)` | `ScriptHost.swift` (M6b) |
 
 ## Testing
 
