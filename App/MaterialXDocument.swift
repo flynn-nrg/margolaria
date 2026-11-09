@@ -441,26 +441,32 @@ final class MaterialXDocument: NSDocument {
 
     // MARK: Scripts (M6)
 
-    /// A script that raised: its output, ending with the traceback.
-    struct ScriptFailed: LocalizedError {
-        let name: String
-        let output: String
+    /// The Console tab's Python REPL (M6c): window state, kept here as the
+    /// command palette's is.
+    @ObservationIgnored let console = PythonConsole()
 
-        var errorDescription: String? {
-            "\(name) stopped with an error."
-        }
+    /// The script running on its worker thread for longer than a moment,
+    /// while ContentView shows its "Running… Stop" sheet; nil otherwise.
+    private(set) var scriptRun: ScriptRun? = nil
 
-        var recoverySuggestion: String? {
-            output
-        }
-    }
+    /// Counts the times a script run from File > Run Script… had something
+    /// to show in the Console: ContentView shows the tab when it changes.
+    private(set) var consoleRequests: Int = 0
+
+    /// What the running script selected (`margolaria.select`), selected
+    /// on the canvas once it has ended.
+    @ObservationIgnored private var scriptSelection: String? = nil
+
+    /// How long a script runs before the window shows the Running sheet.
+    /// Most end sooner, and the window doesn't notice them.
+    private static let scriptPatience: TimeInterval = 0.25
 
     /// File > Run Script…: runs a Python script on this document, as one
     /// undo step named after it, or several (`with margolaria.edit(...)`),
     /// or none if it changes nothing. `margolaria.document()` in the
     /// script is this document (ScriptKit). A script that raises changes
-    /// nothing: its traceback is shown. What a script prints is shown when
-    /// it ends (in a sheet until the Console, M6c).
+    /// nothing. What it prints, or its traceback, is shown in the Console
+    /// tab.
     @objc func runScript(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.title = "Run Script"
@@ -490,38 +496,88 @@ final class MaterialXDocument: NSDocument {
             presentError(error)
             return
         }
-        let name: String = url.lastPathComponent
-        // Not `edit`: the script registers its own steps, as many as it
-        // makes, and puts the document back itself if it raises.
+        let script: Script = .file(code, path: url.path(percentEncoded: false))
+        run(script) { [weak self] result in
+            guard let self, !result.succeeded || !result.output.isEmpty else {
+                return
+            }
+            console.show(result, title: script.stepName)
+            consoleRequests += 1
+        }
+    }
+
+    /// The Console tab is shown: Python starts, if it hasn't, and the
+    /// Console greets.
+    func openConsole() {
+        do {
+            try Python.start(from: .inApp())
+            console.begin()
+        } catch {
+            console.show(error)
+        }
+    }
+
+    /// A line typed in the Console tab. Once the lines typed make a
+    /// statement, it runs on this document, as one undo step called
+    /// "Console" if it changes it (or a step of its own for each
+    /// `with margolaria.edit(...)` block).
+    func enterInConsole(_ line: String) {
+        guard let script = console.enter(line) else {
+            return
+        }
+        run(script) { [weak self] result in
+            self?.console.show(result)
+        }
+    }
+
+    /// Runs `script` on this document; `finished` is called when it has
+    /// ended, and the window shows it.
+    ///
+    /// Not `edit`: the script registers its own undo steps, as many as it
+    /// makes, and puts the document back itself if it raises. It runs on
+    /// a worker thread (ScriptKit's ScriptRun). If it takes longer than
+    /// `scriptPatience`, the window gets the main thread back, to show the
+    /// Running sheet; meanwhile `content` is a copy of the document as it
+    /// was, which the views read, as the script changes the document
+    /// itself on its thread. It comes back when the script ends.
+    private func run(_ script: Script, finished: @escaping (ScriptResult) -> Void) {
         whenEditable { [weak self] in
             guard let self else {
                 return
             }
             continuation = nil
-            let result: ScriptResult = Python.run(code, named: url.path(percentEncoded: false), on: content,
-                                                  host: self, undoManager: undoManager,
-                                                  changed: { [weak self] _ in self?.undoneOrRedone() })
-            if !result.steps.isEmpty || !result.succeeded {
-                contentChanged()
-            }
-            if !result.succeeded {
-                presentError(ScriptFailed(name: name, output: result.output))
-            } else if !result.output.isEmpty {
-                showOutput(result.output, of: name)
+            let document: MXDocument = content
+            do {
+                let run: ScriptRun = try Python.start(script, on: document, host: self, undoManager: undoManager,
+                                                      changed: { [weak self] _ in self?.undoneOrRedone() },
+                                                      waitingUpTo: Self.scriptPatience) { [weak self] result in
+                    self?.scriptEnded(result, on: document)
+                    finished(result)
+                }
+                if run.isRunning {
+                    content = document.copy()
+                    scriptRun = run
+                }
+            } catch {
+                // Another script is running, in another window.
+                presentError(error)
             }
         }
     }
 
-    /// Shows what a script printed, in a sheet on the window.
-    private func showOutput(_ output: String, of name: String) {
-        let alert = NSAlert()
-        alert.messageText = "\(name) printed:"
-        alert.informativeText = output
-        if let window = windowControllers.first?.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
+    /// After a script has ended: the window shows `document` again, as the
+    /// script left it (or as it was, if it failed), and what it selected.
+    private func scriptEnded(_ result: ScriptResult, on document: MXDocument) {
+        let showedCopy: Bool = scriptRun != nil
+        scriptRun = nil
+        if showedCopy || !result.steps.isEmpty || !result.succeeded {
+            load(document)
         }
+        if result.succeeded, let path = scriptSelection {
+            selectedPath = path
+            selectionRequest = path
+        }
+        scriptSelection = nil
     }
 
     // MARK: Command palette (M4f)
@@ -610,9 +666,10 @@ final class MaterialXDocument: NSDocument {
     }
 
     /// Calls `proceed` now if the document can be changed, or once the user
-    /// agrees to upgrading it (see `edit`); not while the question is up.
+    /// agrees to upgrading it (see `edit`); not while the question is up,
+    /// nor while a script runs (behind its sheet, the window shows a copy).
     private func whenEditable(_ proceed: @escaping () -> Void) {
-        guard !askingToUpgrade else {
+        guard !askingToUpgrade, scriptRun == nil else {
             return
         }
         guard upgradeConfirmed || !needsUpgrade else {
@@ -788,12 +845,13 @@ final class MaterialXDocument: NSDocument {
 /// apart from the class's own.
 extension MaterialXDocument: ScriptHost {
     var selection: [String] {
-        selectedPath.map { [$0] } ?? []
+        (scriptSelection ?? selectedPath).map { [$0] } ?? []
     }
 
+    /// Selected once the script has ended (`scriptEnded`): the canvas may
+    /// be showing a copy of the document until then, without the element.
     func select(_ path: String) {
-        selectedPath = path
-        selectionRequest = path
+        scriptSelection = path
     }
 
     var documentFolder: URL? {

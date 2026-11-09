@@ -3,13 +3,13 @@
 // The `margolaria` module's calls that only Swift can answer (M6b): the
 // selection, which is the window's; validation, export and the working
 // space, which MXKit, ColorKit and ViewportKit do as the app does. The
-// module is C++ (PythonBridge.cpp); it calls back here through one C
-// function pointer, with a HostCall naming the function and its arguments.
+// module is C++ (PythonBridge.cpp); it calls back through one C function
+// pointer, with a HostCall naming the function and its arguments, on the
+// script's thread. ScriptRun.swift hands the call to the main thread
+// (M6c), where HostCalls answers it.
 //
 // Introduces (SWIFT): declaring a protocol of our own, with `{ get }`
-// requirements; `@convention(c)` closures (C function pointers made in
-// Swift); `Unmanaged` (passing an object through a `void *`); changing a
-// C++ struct through a pointer's `pointee`.
+// requirements; changing a C++ struct through a pointer's `pointee`.
 
 import ColorKit
 import Foundation
@@ -39,8 +39,7 @@ public protocol ScriptHost: AnyObject {
 }
 
 /// One run's answers to the module's calls: the document it runs on, and
-/// the host. Made by `Python.run`, which passes it to the C++ side as a
-/// pointer, and gets it back in `function`.
+/// the host. Made by `Python.start`, for its ScriptRun.
 @MainActor
 final class HostCalls {
     let document: MXDocument
@@ -51,38 +50,12 @@ final class HostCalls {
         self.host = host
     }
 
-    /// The C function pointer PythonBridge calls: finds the HostCalls
-    /// object in `context` and answers.
-    ///
-    /// SWIFT: `pybridge.HostFunction` is the C++ `void (*)(void*,
-    /// HostCall*)`, which Swift sees as a `@convention(c)` function type.
-    /// A closure can become one only if it captures nothing (a C function
-    /// pointer has nowhere to keep captured values), so the object comes
-    /// in through `context`. `Unmanaged` converts between an object and a
-    /// raw pointer without changing its reference count, like an ObjC
-    /// `(__bridge void *)` cast: the caller keeps the object alive.
-    ///
-    /// The bridge calls it on the main thread, from inside `Python.run`;
-    /// `MainActor.assumeIsolated` says so to the compiler (and checks it).
-    /// Raw pointers aren't `Sendable`, so the compiler can't tell that
-    /// using `call` in that closure is safe: `nonisolated(unsafe)` says it
-    /// is, as it never leaves this thread.
-    static let function: pybridge.HostFunction = { context, call in
-        guard let context, let pointer = call else {
-            return
-        }
-        nonisolated(unsafe) let call: UnsafeMutablePointer<pybridge.HostCall> = pointer
-        let calls: HostCalls = Unmanaged<HostCalls>.fromOpaque(context).takeUnretainedValue()
-        MainActor.assumeIsolated {
-            calls.answer(call)
-        }
-    }
-
-    /// Answers `call`, filling in its results or its error.
+    /// Answers `call`, filling in its results or its error. On the main
+    /// thread, while the script's thread waits (ScriptRun.swift).
     ///
     /// SWIFT: `call.pointee` is the C++ struct the pointer points at, read
     /// and changed in place, as `call->results` would be in C++.
-    private func answer(_ call: UnsafeMutablePointer<pybridge.HostCall>) {
+    func answer(_ call: UnsafeMutablePointer<pybridge.HostCall>) {
         let function: String = call.pointee.function.swiftString
         let arguments: [String] = call.pointee.arguments.map(\.swiftString)
         do {
