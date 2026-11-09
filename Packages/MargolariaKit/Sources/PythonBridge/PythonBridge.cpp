@@ -26,7 +26,11 @@
 
 #include <MaterialXCore/Document.h>
 
+#include <atomic>
+#include <map>
+#include <optional>
 #include <stdexcept>
+#include <thread>
 
 namespace py = pybind11;
 namespace mx = MaterialX;
@@ -50,10 +54,19 @@ struct Session {
     /// For each `margolaria.edit` block entered and not left yet, outermost
     /// first: the document as it was when it was entered.
     std::vector<mxbridge::Document> blockStarts;
+    /// The run's number, for interrupt().
+    int64_t id = 0;
+    /// The thread running the script, for interrupt().
+    unsigned long threadId = 0;
+    /// True while the script's own code runs: interrupt() raises
+    /// KeyboardInterrupt in it then, and not while run() starts or ends it.
+    bool interruptible = false;
 };
 
 /// The run in progress, set by run() for the duration of a script; null
-/// otherwise, when the module's functions raise.
+/// otherwise, when the module's functions raise. Read and changed only by
+/// a thread holding Python's global lock (the GIL), which is what keeps
+/// run() and interrupt() from seeing it half-changed.
 Session* session = nullptr;
 
 /// Set once Python is running.
@@ -62,9 +75,17 @@ bool running = false;
 /// Set if Python failed to start: it can't be started twice.
 bool failed = false;
 
-/// The thread state saved when start() releases Python's global lock
-/// (the GIL), so run() can take it again from the same thread.
-PyThreadState* mainThreadState = nullptr;
+/// The Consoles' namespaces (M6c), by number: dictionaries of their
+/// variables. Changed with the GIL held. Never freed, not even when the
+/// app quits: freeing Python objects then, after Python's own state, would
+/// crash.
+std::map<int, py::object>* consoles = new std::map<int, py::object>();
+int nextConsole = 1;
+
+/// The number of the last run interrupt() was called for. Atomic, as it
+/// is set without the GIL: a run that hasn't started its code yet finds it
+/// as it does, however soon interrupt()'s thread gets the GIL.
+std::atomic<int64_t> stopRequested{0};
 
 /// An edit refused, as MXBridge refuses them: `margolaria.EditRefused` in
 /// Python (registered in the module below).
@@ -80,6 +101,22 @@ Session& Current() {
     }
     return *session;
 }
+
+/// Holds Python's global lock (the GIL) for this thread while it exists,
+/// on any thread: Python makes a state for a thread it hasn't seen, and
+/// drops it after. Python's own API (PyGILState), not pybind11's
+/// gil_scoped_acquire: that makes the state from pybind11's record of the
+/// interpreter, which isn't set in ours, and crashed on a worker thread.
+class Gil {
+public:
+    Gil() : _state(PyGILState_Ensure()) {}
+    ~Gil() { PyGILState_Release(_state); }
+    Gil(const Gil&) = delete;
+    Gil& operator=(const Gil&) = delete;
+
+private:
+    PyGILState_STATE _state;
+};
 
 /// Raises EditRefused with MXBridge's message if the edit wasn't made.
 void Check(bool made, const std::string& errorMessage) {
@@ -467,9 +504,9 @@ bool Interpreter::start(const std::string& home, const std::string& sitePackages
     }
 
     running = true;
-    // Python starts with this thread holding the GIL. Release it until
-    // run() needs it, so the lock isn't held while the app does other work.
-    mainThreadState = PyEval_SaveThread();
+    // Python starts with this thread holding the GIL. Release it: run()
+    // takes it on whichever thread runs a script (Gil).
+    PyEval_SaveThread();
     return true;
 }
 
@@ -481,12 +518,13 @@ std::string Interpreter::version() {
     if (!running) {
         return "";
     }
-    py::gil_scoped_acquire gil;
+    Gil gil;
     return py::module_::import("sys").attr("version").cast<std::string>();
 }
 
 RunResult Interpreter::run(const std::string& code, const std::string& filename, const std::string& stepName,
-                           const mxbridge::Document& document, HostFunction host, void* hostContext) {
+                           int console, int64_t runID, const mxbridge::Document& document, HostFunction host,
+                           void* hostContext) {
     RunResult result;
     if (!running) {
         result.output = "Python isn't running.";
@@ -500,61 +538,165 @@ RunResult Interpreter::run(const std::string& code, const std::string& filename,
     run.hostContext = hostContext;
     run.checkpoint = document.copy();
 
-    // Take the GIL back for this thread: start() released it.
-    PyEval_RestoreThread(mainThreadState);
-    {
-        py::module_ sys = py::module_::import("sys");
-        // What the script prints goes into a string, not the app's stdout.
-        py::object buffer = py::module_::import("io").attr("StringIO")();
-        py::object savedOut = sys.attr("stdout");
-        py::object savedErr = sys.attr("stderr");
-        sys.attr("stdout") = buffer;
-        sys.attr("stderr") = buffer;
-
-        session = &run;
-        try {
-            // PyMaterialX first: it registers the Document class, which
-            // margolaria.document() needs to return one.
-            py::module_::import("MaterialX");
-
-            py::dict globals;
-            globals["__name__"] = "__main__";
-            globals["__file__"] = filename;
-            globals["__builtins__"] = py::module_::import("builtins");
-            // compile() then exec(), rather than py::exec, so tracebacks
-            // name the script's file and lines.
-            py::object compiled = py::module_::import("builtins").attr("compile")(code, filename, "exec");
-            py::module_::import("builtins").attr("exec")(compiled, globals);
-            result.succeeded = true;
-        } catch (py::error_already_set& error) {
-            // sys.exit() ends the script, not the app; exit(0) and exit()
-            // count as success.
-            if (error.matches(PyExc_SystemExit)) {
-                py::object exitCode = error.value().attr("code");
-                result.succeeded = exitCode.is_none()
-                    || (py::isinstance<py::int_>(exitCode) && exitCode.cast<int>() == 0);
-            } else {
-                py::module_::import("traceback").attr("print_exception")(error.value());
-            }
-        } catch (const std::exception& error) {
-            // A C++ exception outside Python's (pybind11 converts those
-            // raised inside a call): reported like a Python error.
-            buffer.attr("write")(std::string("Error: ") + error.what() + "\n");
-        }
-        if (result.succeeded) {
-            // What changed since the last step is the last one.
-            Checkpoint(run, stepName);
-            result.steps = run.steps;
-        }
-        session = nullptr;
-
-        sys.attr("stdout") = savedOut;
-        sys.attr("stderr") = savedErr;
-        result.output = buffer.attr("getvalue")().cast<std::string>();
+    // Take the GIL for this thread: start() released it.
+    Gil gil;
+    if (session) {
+        result.output = "Another script is running.";
+        return result;
     }
-    // Every Python object above is released (the block's end) before the GIL.
-    mainThreadState = PyEval_SaveThread();
+    if (console != 0 && consoles->count(console) == 0) {
+        result.output = "This Console was closed.";
+        return result;
+    }
+
+    py::module_ sys = py::module_::import("sys");
+    py::module_ builtins = py::module_::import("builtins");
+    // What the script prints goes into a string, not the app's stdout;
+    // input() finds nothing to read, and raises EOFError, rather than
+    // waiting for the app's stdin.
+    py::object buffer = py::module_::import("io").attr("StringIO")();
+    py::object savedOut = sys.attr("stdout");
+    py::object savedErr = sys.attr("stderr");
+    py::object savedIn = sys.attr("stdin");
+    sys.attr("stdout") = buffer;
+    sys.attr("stderr") = buffer;
+    sys.attr("stdin") = py::module_::import("io").attr("StringIO")();
+
+    run.id = runID;
+    run.threadId = PyThread_get_thread_ident();
+    session = &run;
+    // The exception the script raised, if any.
+    std::optional<py::error_already_set> raised;
+    try {
+        // PyMaterialX first: it registers the Document class, which
+        // margolaria.document() needs to return one.
+        py::module_::import("MaterialX");
+
+        py::object globals;
+        if (console != 0) {
+            globals = consoles->at(console);
+        } else {
+            py::dict fresh;
+            fresh["__name__"] = "__main__";
+            fresh["__file__"] = filename;
+            fresh["__builtins__"] = builtins;
+            globals = fresh;
+        }
+        // compile() then exec(), rather than py::exec, so tracebacks
+        // name the script's file and lines. A Console's entry is compiled
+        // as Python's console compiles one ("single"): the value of an
+        // expression is printed (sys.displayhook), and kept as `_`.
+        run.interruptible = true;
+        if (stopRequested == runID) {
+            // Stopped before it started: raised as its first line runs.
+            PyThreadState_SetAsyncExc(run.threadId, PyExc_KeyboardInterrupt);
+        }
+        py::object compiled = builtins.attr("compile")(code, filename, console != 0 ? "single" : "exec");
+        builtins.attr("exec")(compiled, globals);
+        result.succeeded = true;
+    } catch (py::error_already_set& error) {
+        raised.emplace(std::move(error));
+    } catch (const std::exception& error) {
+        // A C++ exception outside Python's (pybind11 converts those
+        // raised inside a call): reported like a Python error.
+        buffer.attr("write")(std::string("Error: ") + error.what() + "\n");
+    }
+    // The script has ended: interrupt() mustn't raise in what follows, and
+    // a KeyboardInterrupt it raised too late to land is dropped.
+    run.interruptible = false;
+    PyThreadState_SetAsyncExc(run.threadId, nullptr);
+
+    if (raised) {
+        // sys.exit() ends the script, not the app; exit(0) and exit()
+        // count as success.
+        if (raised->matches(PyExc_SystemExit)) {
+            py::object exitCode = raised->value().attr("code");
+            result.succeeded = exitCode.is_none()
+                || (py::isinstance<py::int_>(exitCode) && exitCode.cast<int>() == 0);
+        } else {
+            result.interrupted = raised->matches(PyExc_KeyboardInterrupt);
+            py::module_::import("traceback").attr("print_exception")(raised->value());
+        }
+        raised.reset();
+    }
+    if (result.succeeded) {
+        // What changed since the last step is the last one.
+        Checkpoint(run, stepName);
+        result.steps = run.steps;
+    }
+    session = nullptr;
+
+    sys.attr("stdout") = savedOut;
+    sys.attr("stderr") = savedErr;
+    sys.attr("stdin") = savedIn;
+    result.output = buffer.attr("getvalue")().cast<std::string>();
     return result;
+}
+
+void Interpreter::interrupt(int64_t runID) {
+    if (!running) {
+        return;
+    }
+    // For a run that hasn't started its code yet.
+    stopRequested = runID;
+    // For one that has: on a thread of its own, as taking the GIL waits
+    // until the script's thread lets go of it, which Python does every few
+    // milliseconds, but not during a long call into C++. The caller (the
+    // main thread) mustn't wait for that.
+    std::thread([runID] {
+        Gil gil;
+        // Still running its code? (Or it hasn't started, or has ended.)
+        if (session && session->id == runID && session->interruptible) {
+            // Raised when that thread next runs a line of Python.
+            PyThreadState_SetAsyncExc(session->threadId, PyExc_KeyboardInterrupt);
+        }
+    }).detach();
+}
+
+int Interpreter::openConsole() {
+    if (!running) {
+        return 0;
+    }
+    Gil gil;
+    py::dict globals;
+    globals["__name__"] = "__main__";
+    globals["__builtins__"] = py::module_::import("builtins");
+    try {
+        // As a Console in Houdini or Maya starts with `hou` or `cmds`.
+        py::module_::import("builtins").attr("exec")("import MaterialX as mx\nimport margolaria\n", globals);
+    } catch (py::error_already_set&) {
+        // The entries' own imports will show what's wrong.
+    }
+    int console = nextConsole++;
+    (*consoles)[console] = globals;
+    return console;
+}
+
+void Interpreter::closeConsole(int console) {
+    if (!running) {
+        return;
+    }
+    Gil gil;
+    consoles->erase(console);
+}
+
+EntryState Interpreter::checkEntry(const std::string& source, const std::string& filename, std::string& errorMessage) {
+    if (!running) {
+        errorMessage = "Python isn't running.";
+        return EntryState::invalid;
+    }
+    Gil gil;
+    try {
+        // None for the start of a statement; the compiled code otherwise.
+        py::object compiled = py::module_::import("codeop").attr("compile_command")(source, filename, "single");
+        return compiled.is_none() ? EntryState::incomplete : EntryState::complete;
+    } catch (py::error_already_set& error) {
+        // SyntaxError, or ValueError and OverflowError for a bad literal:
+        // the lines it names, with a caret, and the message.
+        py::object lines = py::module_::import("traceback").attr("format_exception_only")(error.value());
+        errorMessage = py::str("").attr("join")(lines).cast<std::string>();
+        return EntryState::invalid;
+    }
 }
 
 } // namespace pybridge

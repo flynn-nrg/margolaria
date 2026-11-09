@@ -1,13 +1,43 @@
 # Scripting Margolaria
 
-Margolaria runs Python 3.13 scripts on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window. A script uses two modules:
+Margolaria runs Python 3.13 on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window, and the bottom panel's **Console** tab runs what you type, line by line. Both use two modules:
 
 - **`MaterialX`**: MaterialX's own Python API (PyMaterialX 1.39.5), the same as in Houdini or MaterialX's Graph Editor.
 - **`margolaria`**: the open document, the editor's edits on it, undo steps, the selection, validation and export.
 
 `margolaria.document()` is the app's own document, not a copy, so anything a script does with MaterialX's API, the window shows when the script ends. Examples: [`scripting/brick.py`](scripting/brick.py) builds a material, and [`scripting/report.py`](scripting/report.py) only reads.
 
-What a script prints is shown when it ends. If it raises, its traceback is shown, and the document is put back as it was.
+What a script prints is shown in the Console tab when it ends. If it raises, its traceback is shown there, and the document is put back as it was.
+
+## The Console
+
+The Console tab is a Python prompt on the window's document, as `python3` is in a terminal: type a line after `>>>` and press Return. `margolaria` and `MaterialX` (as `mx`) are imported already.
+
+```
+>>> doc = margolaria.document()
+>>> [node.getName() for node in doc.getNodes()]
+['brick_shader', 'brick', 'brick_color']
+>>> for name in ["a", "b"]:
+...     margolaria.add_node("ND_constant_float", name=name)
+...
+'a'
+'b'
+```
+
+- **Each entry is an undo step**, "Undo Console", if it changes the document: a line, or a block such as the `for` above. Entries that only read add none. `with margolaria.edit("Name"):` works as in a script. Undo takes back what an entry changed in the document; the Console still shows the entry, as a terminal keeps what was typed, and its variables keep their values.
+- **Variables stay** from one entry to the next, until the window closes. Each window has its own.
+- **Blocks:** a line ending in `:` asks for more (the prompt becomes `...`, indented); an empty line ends the block. Tab inserts four spaces.
+- **Values:** an expression's value is printed, as in Python's own console, and kept as `_`. That includes each expression in a block: the `for` above prints the names `add_node` returns.
+- **History:** Up and Down go through the lines typed. Clear empties the tab; the variables and history stay.
+- A syntax error is shown before anything runs; an exception shows its traceback (`File "<console>"`), and takes back what the entry changed.
+
+## Long scripts and Stop
+
+A script, or a Console entry, that runs for more than a moment shows a **Running… Stop** sheet. Until it ends, the window shows the document as it was before it; the script works on the document itself.
+
+**Stop** (or Escape, or ⌘.) raises `KeyboardInterrupt` in the script at its next line of Python, as Ctrl-C does in a terminal, and its changes are taken back. A script stops only between lines of Python: a long call into MaterialX, or a `time.sleep()`, finishes first. A script that catches `KeyboardInterrupt` (a bare `except:`) keeps running.
+
+One script runs at a time, in the whole app: starting another meanwhile, from another window, says which is running instead. `input()` has nothing to read, and raises `EOFError`.
 
 ## Undo
 
@@ -56,7 +86,7 @@ MaterialX's API can make any change, and doesn't check: these are the way to cha
 | Function | What it does |
 |---|---|
 | `selection()` | The paths of what is selected on the canvas, as a list. |
-| `select(path)` | Selects the node or backdrop at `path`, showing its graph, once the script has ended. |
+| `select(path)` | Selects the node or backdrop at `path`, showing its graph, once the script has ended (if it succeeds). `selection()` returns it from then on. |
 
 ## Validation
 
@@ -74,6 +104,7 @@ Relative paths are relative to the document's folder; a document that was never 
 
 ## Limits for now
 
-- A script runs on the main thread: the window waits until it ends, and it can't be interrupted yet (M6c).
+- What a script prints shows when it ends, not as it prints.
+- The Console takes a line at a time: text pasted with several lines is entered as if typed one by one, and a block needs its empty line to end.
 - Python packages you install yourself must be pure Python (PLAN.md §7.1); a folder for them comes in M6d.
 - `pxr` (OpenUSD's Python API) isn't included (PLAN.md §8.7).

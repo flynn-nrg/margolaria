@@ -91,6 +91,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Process` and `Pipe` | Runs another program with its arguments, no shell between, and collects what it prints; read the pipe before `waitUntilExit()`, or a chatty program blocks on a full pipe | `posix_spawn` with a pipe; Go's `exec.Command` | `MXShaderExport.swift` (`compileOSL`) |
 | `UserDefaults.standard` directly | What `@AppStorage` wraps, for AppKit code; `object(forKey:)` is nil for a key never set, which `bool(forKey:)` (false) can't tell apart | `NSUserDefaults` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
 | `NSPathControl` and its delegate | A file path as a control; `.popUp` style with `isEditable` adds a "Choose…" menu item, whose open panel the delegate sets up | `NSPathControl` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
+| `deinit` | Runs when the last reference to a class instance goes, like a C++ destructor or ObjC's `dealloc`: frees what a C API holds for it. Runs on whichever thread drops the reference, so it can't use `@MainActor` state | `~T()`, `-dealloc` | `PythonConsole.swift` (`ConsoleNamespace`, M6c) |
 ## Functions and closures
 
 | Concept | In one line | Closest thing you know | First appears |
@@ -131,6 +132,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | A closure stored in a struct | `let run: @MainActor () -> Void`: code as data, carrying what it captured; such structs can't be `Equatable` | A block property in ObjC | `CommandPalette.swift` (`PaletteCommand`) |
 | `Set.insert(_:).inserted` | `insert` returns whether the element was new: filtering repeats in one line | `std::set::insert(...).second` | `ContentView.swift` (`unique`) |
 | A nested function | A `func` inside a function: it can use and change the enclosing function's locals, like a closure with a name | A lambda capturing by reference | `MXShaderExport.swift` (`save`) |
+| Closures capture variables | A closure that assigns to a local `var` changes the variable itself, not a copy: seen by the function once the closure has run (not for a `@Sendable` closure, which may run on another thread) | A C++ lambda's `[&]` | `Python.swift` (`run`, M6c) |
 
 ## Protocols and extensions
 
@@ -198,6 +200,9 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Completion handlers as `async` | An Objective-C method with a completion block is also callable as `try await` (`makeLibrary(source:options:)`) | Wrapping a callback API in a future | `SwatchRenderer.swift` (`SwatchPipeline.compile`) |
 | `nonisolated` on a member | One method of a `@MainActor` type that any thread may call, because it touches no state | A free function | `LayerGraphView.swift` (`cgColor`) |
 | `Task.detached` from `.task(id:)` | The view's task awaits work run off the main actor; only `Sendable` values (strings, a `Result`) cross over, and `Task.isCancelled` drops a result the newer request replaced | `GeneratedShaderTab` in `BottomPanel.swift` |
+| `Thread` | A thread of its own (NSThread), for blocking work such as an interpreter, rather than a task on Swift's shared pool; `stackSize` before `start()` (other threads get 512 KB); like `pthread_create` with `pthread_attr_setstacksize` | `ScriptRun.swift` (M6c) |
+| `NSCondition` | A lock with a condition variable: `lock()`, `wait()` (unlocks, sleeps until `broadcast()`, locks again), `wait(until:)` with a deadline; a `pthread_mutex_t` with a `pthread_cond_t` | `ScriptRun.swift` (`Channel`, M6c) |
+| `DispatchQueue.main.async { }` | Runs a block on the main thread, soon; with `MainActor.assumeIsolated` inside, it may use main-actor state; ObjC's `dispatch_async(dispatch_get_main_queue(), ^{})` | `ScriptRun.swift` (`Channel`, M6c) |
 
 ## SwiftUI
 
@@ -279,6 +284,10 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `LazyVStack` | Makes its rows only as they scroll into view, for long lists | `NodeSearchPopup.swift` (`CommandPalette`) |
 | `@objc` action on an `NSDocument` | The document is in its window's responder chain, after the views, window and controller: a menu item's action reaches it from wherever the focus is | `MaterialXDocument.swift` (`showCommandPalette`) |
 | `@AppStorage` of an enum | An enum with `String` raw values is stored as its raw value and read back with `init(rawValue:)` | `BottomPanel.swift` (`GeneratedShaderTab`) |
+| `.interactiveDismissDisabled()` | A sheet the user can't close (Escape, a click outside); it closes when the binding that shows it turns false | `ContentView.swift` (`ScriptRunningSheet`, M6c) |
+| `control(_:textView:doCommandBy:)` | An `NSTextField` delegate's chance to handle a key's command (`insertNewline:` for Return, `moveUp:` for Up) before the field does; `true` means handled (ObjC's `-control:textView:doCommandBySelector:`) | `BottomPanel.swift` (`ConsoleInputField`, M6c) |
+| `NSAttributedString` and `textStorage` | Text with attributes (font, colour) on ranges; a text view's `textStorage` is its mutable one, so `append` adds to what it shows | `BottomPanel.swift` (`ConsoleTranscript`, M6c) |
+| A cell's own field editor | `NSTextFieldCell.fieldEditor(for:)` overridden: the field is edited in that NSTextView, not the window's shared one (here, one without typing undo) | `BottomPanel.swift` (`ConsoleFieldCell`, M6c) |
 ## Swift ↔ C++
 
 | Concept | In one line | First appears |
@@ -298,8 +307,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | Option dictionaries | Objective-C APIs taking `NSDictionary` options take `[Key: Any]` in Swift; enum values go in as their `rawValue` | `MTKTextureLoader` in `SwatchRenderer.swift` (`image(at:)`) |
 | Toll-free bridging `as CFString` | Swift `String` ↔ `CFString` (and `URL` ↔ `CFURL`) convert for free; useful to keep a `Sendable` String and convert at the call, like ObjC's `(__bridge CFStringRef)` | `ViewportSettings.swift` (since M3c `ViewTransform.swift`) |
 | C++ `enum class` | Imported as a type whose cases are static members (`mxbridge.ShaderLanguage.msl`), not a Swift enum (C++ may hold values with no case), so a Swift enum mirrors it and converts | `MXShader.swift` (`MXShaderLanguage.bridgeValue`) |
-| `@convention(c)` closures | A C function pointer type, as Swift sees `void (*)(void*, T*)`; a closure becomes one only if it captures nothing, so state comes in through a `void *` context | `ScriptHost.swift` (`HostCalls.function`, M6b) |
-| `Unmanaged` | Turns an object into a raw pointer and back without retaining it (`passUnretained(x).toOpaque()`, `fromOpaque(p).takeUnretainedValue()`): the C side's `void *context` | `ScriptHost.swift`, `Python.swift` (M6b) |
+| `@convention(c)` closures | A C function pointer type, as Swift sees `void (*)(void*, T*)`; a closure becomes one only if it captures nothing, so state comes in through a `void *` context | `ScriptRun.swift` (`Channel.function`; M6b, moved in M6c) |
+| `Unmanaged` | Turns an object into a raw pointer and back without retaining it (`passUnretained(x).toOpaque()`, `fromOpaque(p).takeUnretainedValue()`): the C side's `void *context` | `ScriptRun.swift` (`Channel.context`; M6b, moved in M6c) |
 | `pointer.pointee` | The value an `UnsafeMutablePointer` points at, read and changed in place: `call.pointee.results.push_back(...)` is C++'s `call->results.push_back(...)` | `ScriptHost.swift` (M6b) |
 
 ## Testing
@@ -316,3 +325,4 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@MainActor async` tests | A parameterized test marked `@MainActor` and `async`: it awaits main-thread-only APIs (RealityKit) directly | `USDZExportTests.swift` (M5c) |
 | `Array.max()` / `min()` | Return an optional: an empty array has neither; `!` unwraps when it can't be empty | `USDZExportTests.swift` (`expectGreyTexture`, M5c) |
 | `async` tests, collecting from callbacks | A test can be `async` and `await`; results from a `@Sendable` callback go into a `@MainActor` class instance (a `var` can't be captured) | `SwatchCacheTests.swift` (`Collected`) |
+| `#expect(throws:)` | `#expect(throws: SomeError.self) { try f() }` checks that the closure throws an error of that type, as `XCTAssertThrowsError` does | `ConsoleTests.swift` (M6c) |

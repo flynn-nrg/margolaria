@@ -8,16 +8,19 @@
 // Issues) under it, and on the right the viewport above the inspector
 // (M2b). The toolbar shows or hides each of the right-hand panels. A new
 // document first asks what to start from (TemplateSheet, M2e). ⌘K opens
-// the command palette over the window (M4f, NodeSearchPopup.swift).
+// the command palette over the window (M4f, NodeSearchPopup.swift). A
+// Python script running for longer than a moment shows a sheet with Stop
+// (M6c, ScriptRunningSheet).
 //
 // Introduces (SWIFT): the `View` protocol, observing an `@Observable` class, `@State`,
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
 // `ForEach`, `ViewBuilder` helpers, private sub-views, enums for view
 // modes, `Picker` in a toolbar; `.overlayPreferenceValue` and
-// `Set.insert(_:).inserted` (M4f).
+// `Set.insert(_:).inserted` (M4f); `.interactiveDismissDisabled()` (M6c).
 
 import GraphKit
 import MXKit
+import ScriptKit
 import SwiftUI
 
 /// What the main area shows (PLAN.md §4.1): the canvas, the canvas with
@@ -380,6 +383,20 @@ struct ContentView: View {
                 document.openExistingInstead()
             }
         }
+        // A script running for longer than a moment (M6c), with Stop. It
+        // closes by itself when the script ends.
+        //
+        // SWIFT: A second `.sheet` on the same view: SwiftUI shows one at
+        // a time, and these never come together (a new document's
+        // template question comes before any script).
+        .sheet(isPresented: Binding(get: { document.scriptRun != nil }, set: { _ in })) {
+            ScriptRunningSheet(run: document.scriptRun)
+        }
+        // A script run from File > Run Script… printed something, or
+        // failed: the Console shows it.
+        .onChange(of: document.consoleRequests) {
+            showBottomTab(.console)
+        }
     }
 
     /// Shows an issue's element: opens its graph level and selects its node.
@@ -511,5 +528,42 @@ private struct LibraryStatusBar: View {
         case .failure:
             return "\(versions) · data libraries not loaded"
         }
+    }
+}
+
+/// Shown while a script runs for longer than a moment (M6c): its name, and
+/// Stop, which raises KeyboardInterrupt in it. Behind it, the window shows
+/// the document as it was before the script.
+private struct ScriptRunningSheet: View {
+    let run: ScriptRun?
+
+    @State private var stopping: Bool = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+            Text("Running \(run?.name ?? "Script")…")
+                .font(.headline)
+            Text(stopping
+                ? "Stopping at the script's next line of Python. Its changes will be taken back."
+                : "The window shows the document as it was before the script, until it ends.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Stop") {
+                stopping = true
+                run?.stop()
+            }
+            // Escape, and ⌘. as AppKit's Cancel buttons.
+            .keyboardShortcut(.cancelAction)
+            .disabled(stopping)
+        }
+        .padding(20)
+        .frame(width: 320)
+        // SWIFT: `.interactiveDismissDisabled()`: the sheet can't be closed
+        // by the user (Escape is Stop's); it closes when the script ends.
+        .interactiveDismissDisabled()
     }
 }

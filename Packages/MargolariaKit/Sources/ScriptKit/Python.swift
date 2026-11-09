@@ -3,8 +3,9 @@
 // Running Python scripts on documents (M6): the embedded interpreter,
 // started once, and scripts run on an MXDocument as undo steps. The C++
 // underneath is PythonBridge, with the `margolaria` module; this file
-// turns its results into Swift's, and ScriptHost.swift answers the
-// module's calls to Swift.
+// turns its results into Swift's, ScriptHost.swift answers the module's
+// calls to Swift, and ScriptRun.swift runs scripts on a worker thread
+// (M6c), so they can be stopped.
 //
 // Where Python lives: in the app, Python.framework is embedded in
 // Contents/Frameworks and the MaterialX package in
@@ -13,7 +14,8 @@
 // scripts/build-pymaterialx.sh put them.
 //
 // Introduces (SWIFT): the `package` access level (declared in
-// MXDocument.swift and CxxString.swift, used here).
+// MXDocument.swift and CxxString.swift, used here); a closure assigning to
+// a variable it captured (M6c).
 
 import Foundation
 import MXBridge
@@ -32,6 +34,31 @@ public struct ScriptResult: Sendable {
     /// one for each `with margolaria.edit(...)` block that changed
     /// something. Empty if it changed nothing, or failed.
     public let steps: [String]
+    /// True if it was stopped (`ScriptRun.stop()`): it failed with
+    /// KeyboardInterrupt.
+    public let interrupted: Bool
+}
+
+/// Python code to run, and where: a script from a file, or an entry typed
+/// in a Console (PythonConsole.swift).
+public struct Script: Sendable {
+    public let code: String
+    /// Names it in tracebacks: the file's path, or "<console>".
+    public let filename: String
+    /// What the window calls it while it runs: "brick.py", "Console".
+    public let name: String
+    /// The name of the undo steps it makes outside `margolaria.edit`
+    /// blocks: "Run brick.py", "Console".
+    public let stepName: String
+    /// The Console's namespace it runs in; nil for a script, which runs in
+    /// a fresh one.
+    public let console: ConsoleNamespace?
+
+    /// A script from the file at `path`.
+    public static func file(_ code: String, path: String) -> Script {
+        let name: String = URL(filePath: path).lastPathComponent
+        return Script(code: code, filename: path, name: name, stepName: "Run \(name)", console: nil)
+    }
 }
 
 /// Why Python couldn't run a script.
@@ -40,6 +67,8 @@ public enum PythonError: Error, LocalizedError {
     case notFound(String)
     /// Python failed to start, with its message.
     case startFailed(String)
+    /// Another script is running (named), in this window or another.
+    case busy(String)
 
     public var errorDescription: String? {
         switch self {
@@ -47,6 +76,8 @@ public enum PythonError: Error, LocalizedError {
             return "Python wasn't found: \(what)."
         case .startFailed(let message):
             return "Python failed to start: \(message)"
+        case .busy(let name):
+            return "\(name) is still running. Wait for it to end, or stop it."
         }
     }
 }
@@ -136,33 +167,76 @@ public enum Python {
         pybridge.Interpreter.version().swiftString
     }
 
-    /// Runs `code` on `document`: `margolaria.document()` in the script is
-    /// this document, as a MaterialX.Document, and the module's edits
-    /// change it in place. `filename` names the script in tracebacks, and
-    /// its last part names its undo steps ("Run brick.py").
-    ///
-    /// If the script succeeds, its undo steps are registered on
-    /// `undoManager` (none if it changed nothing), and `changed` is called
-    /// after each Undo and Redo of them, to show the document again. If it
-    /// raises, the document is put back as it was, and nothing is
-    /// registered. `host` answers `margolaria.selection()` and the like;
-    /// without one, they raise. Python must have been started.
+    /// Runs `code`, read from the file at `filename`, on `document`, and
+    /// waits until it ends: see `start`.
     public static func run(_ code: String, named filename: String, on document: MXDocument,
                            host: ScriptHost? = nil, undoManager: UndoManager? = nil,
                            changed: @escaping (MXDocument) -> Void = { _ in }) -> ScriptResult {
-        let before: MXDocument = document.copy()
-        let stepName: String = "Run \(URL(filePath: filename).lastPathComponent)"
-        let calls = HostCalls(document: document, host: host)
-        // SWIFT: `toOpaque()` is a raw pointer to `calls`, which doesn't
-        // keep it alive; `withExtendedLifetime` does, until the closure
-        // returns, so the pointer is good for the whole run.
-        let result: pybridge.RunResult = withExtendedLifetime(calls) {
-            pybridge.Interpreter.run(std.string(code), std.string(filename), std.string(stepName), document.handle,
-                                     HostCalls.function, Unmanaged.passUnretained(calls).toOpaque())
+        run(.file(code, path: filename), on: document, host: host, undoManager: undoManager, changed: changed)
+    }
+
+    /// Runs `script` on `document`, and waits until it ends: see `start`.
+    /// If another script is running, fails with that as its output.
+    public static func run(_ script: Script, on document: MXDocument, host: ScriptHost? = nil,
+                           undoManager: UndoManager? = nil,
+                           changed: @escaping (MXDocument) -> Void = { _ in }) -> ScriptResult {
+        // SWIFT: The closure below assigns to this local `var`: a closure
+        // captures variables by reference, as a C++ lambda's `[&]` would,
+        // so the assignment is seen here once `start` returns.
+        var ended: ScriptResult? = nil
+        do {
+            _ = try start(script, on: document, host: host, undoManager: undoManager, changed: changed,
+                          waitingUpTo: .infinity) { result in
+                ended = result
+            }
+        } catch {
+            return ScriptResult(succeeded: false, output: error.localizedDescription, steps: [], interrupted: false)
         }
+        return ended ?? ScriptResult(succeeded: false, output: "", steps: [], interrupted: false)
+    }
+
+    /// Starts `script` on `document`, on a worker thread (ScriptRun.swift),
+    /// and waits up to `timeout` seconds for it to end. Returns the run:
+    /// still running if it took longer, when it can be stopped
+    /// (`ScriptRun.stop()`). The caller doesn't touch `document` until it
+    /// ends; then `finished` is called, on the main thread: within this
+    /// call for a script that ended in time.
+    ///
+    /// `margolaria.document()` in the script is this document, as a
+    /// MaterialX.Document, and the module's edits change it in place. If
+    /// the script succeeds, its undo steps are registered on `undoManager`
+    /// (none if it changed nothing), and `changed` is called after each
+    /// Undo and Redo of them, to show the document again. If it raises, or
+    /// is stopped, the document is put back as it was, and nothing is
+    /// registered. `host` answers `margolaria.selection()` and the like;
+    /// without one, they raise. Python must have been started.
+    ///
+    /// Throws `PythonError.busy` if another script is running: one at a
+    /// time, in the whole app.
+    public static func start(_ script: Script, on document: MXDocument, host: ScriptHost? = nil,
+                             undoManager: UndoManager? = nil, changed: @escaping (MXDocument) -> Void = { _ in },
+                             waitingUpTo timeout: TimeInterval,
+                             finished: @escaping (ScriptResult) -> Void) throws -> ScriptRun {
+        if let current = ScriptRun.current {
+            throw PythonError.busy(current.name)
+        }
+        let before: MXDocument = document.copy()
+        let calls = HostCalls(document: document, host: host)
+        let run = ScriptRun(script: script, document: document, calls: calls) { result in
+            finished(ended(result, on: document, before: before, undoManager: undoManager, changed: changed))
+        }
+        _ = run.wait(upTo: timeout)
+        return run
+    }
+
+    /// After a run: the document put back if it failed, or its undo steps
+    /// registered, and the result in Swift's types.
+    private static func ended(_ result: pybridge.RunResult, on document: MXDocument, before: MXDocument,
+                              undoManager: UndoManager?, changed: @escaping (MXDocument) -> Void) -> ScriptResult {
         guard result.succeeded else {
             document.restore(from: before)
-            return ScriptResult(succeeded: false, output: result.output.swiftString, steps: [])
+            return ScriptResult(succeeded: false, output: result.output.swiftString, steps: [],
+                                interrupted: result.interrupted)
         }
         let steps: [MXUndoStep] = result.steps.map { step in
             MXUndoStep(name: step.name.swiftString,
@@ -171,6 +245,7 @@ public enum Python {
         if let undoManager {
             MXUndo.register(steps, on: undoManager, startingFrom: before, in: document, changed: changed)
         }
-        return ScriptResult(succeeded: true, output: result.output.swiftString, steps: steps.map(\.name))
+        return ScriptResult(succeeded: true, output: result.output.swiftString, steps: steps.map(\.name),
+                            interrupted: false)
     }
 }

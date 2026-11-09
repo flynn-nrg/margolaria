@@ -9,15 +9,20 @@
 //            the selected element's shader, in the language picked
 //            there: MSL, GLSL, or OSL as one shader or a network; with
 //            Copy and Export… (M5d)
-// "Console" comes in a later milestone.
+//   Console  a Python REPL on the document (M6c, ScriptKit's
+//            PythonConsole): what was typed and printed, and a line to
+//            type in; also what File > Run Script… printed
 //
 // Introduces (SWIFT): `List` with a selection of a non-`Identifiable` type
 // via `id:`, `.contextMenu`, `@ViewBuilder` computed properties,
 // `NSPasteboard`; `.task(id:)` with `Task.detached`, `@AppStorage` of an
-// enum (M5d).
+// enum (M5d); an NSTextField delegate's `control(_:textView:doCommandBy:)`,
+// `NSAttributedString` appended to a text view's `textStorage`, a cell's
+// own field editor (M6c).
 
 import AppKit
 import MXKit
+import ScriptKit
 import SwiftUI
 
 /// The bottom panel's tabs.
@@ -25,6 +30,7 @@ enum BottomTab: String, CaseIterable, Identifiable {
     case xml = "XML"
     case issues = "Issues"
     case shader = "Generated Shader"
+    case console = "Console"
 
     var id: String { rawValue }
 }
@@ -81,6 +87,8 @@ struct BottomPanel: View {
             IssuesList(issues: document.issues, libraryLoaded: document.libraryLoaded, onSelect: onSelectIssue)
         case .shader:
             GeneratedShaderTab(document: document, path: document.shaderElementPath(for: selectedPath))
+        case .console:
+            ConsoleTab(document: document)
         }
     }
 
@@ -369,5 +377,255 @@ struct CodeTextView: NSViewRepresentable {
         }
         textView.string = text
         textView.scroll(.zero)
+    }
+}
+
+/// The Console tab (M6c): the document's Python REPL. What was typed and
+/// printed above, and the line being typed below, after its prompt (">>>",
+/// or "..." in the middle of a block). Return enters the line, Up and Down
+/// go through the lines typed before, Tab indents.
+struct ConsoleTab: View {
+    let document: MaterialXDocument
+
+    /// The line being typed.
+    @State private var line: String = ""
+
+    /// SWIFT: `document.console` is a plain `let` of an `@Observable`
+    /// object, so reading its `lines` or `prompt` in `body` redraws the
+    /// tab when they change, as for the document itself.
+    private var console: PythonConsole {
+        document.console
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("margolaria.document() is this window's document")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Clear") {
+                    console.clear()
+                }
+                .help("Clear what the Console shows; its variables and history stay")
+            }
+            .controlSize(.small)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            Divider()
+            ConsoleTranscript(lines: console.lines)
+            Divider()
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(console.prompt)
+                    .font(Font(XMLTextView.font))
+                    .foregroundStyle(.secondary)
+                ConsoleInputField(text: $line, isEnabled: document.scriptRun == nil, onSubmit: submit,
+                                  onHistory: recall)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+        }
+        .onAppear {
+            document.openConsole()
+        }
+    }
+
+    /// Return: enters the line (or each, if several were pasted), and
+    /// starts the next with the indentation the block needs.
+    private func submit() {
+        let lines: [String] = line.components(separatedBy: .newlines)
+        line = ""
+        for typed in lines {
+            document.enterInConsole(typed)
+        }
+        line = console.indentation(after: lines.last ?? "")
+    }
+
+    /// Up (`older`) or Down: the line typed before or after the one shown.
+    private func recall(older: Bool) {
+        if let recalled = older ? console.older(than: line) : console.newer() {
+            line = recalled
+        }
+    }
+}
+
+/// What the Console has shown: typed lines, output, tracebacks in red,
+/// selectable, scrolled to the end as lines are added.
+private struct ConsoleTranscript: NSViewRepresentable {
+    let lines: [PythonConsole.Line]
+
+    /// What the text view shows now, so updates only add the new lines.
+    final class Coordinator {
+        var shown: [PythonConsole.Line.ID] = []
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        // As CodeTextView's, but wrapping long lines, as a terminal does.
+        let scrollView: NSScrollView = NSTextView.scrollableTextView()
+        scrollView.borderType = .noBorder
+        if let textView = scrollView.documentView as? NSTextView {
+            textView.isEditable = false
+            textView.isSelectable = true
+            textView.isRichText = false
+            textView.textContainerInset = NSSize(width: 8, height: 6)
+            textView.usesFindBar = true
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView, let storage = textView.textStorage else {
+            return
+        }
+        let coordinator: Coordinator = context.coordinator
+        let ids: [PythonConsole.Line.ID] = lines.map(\.id)
+        guard ids != coordinator.shown else {
+            return
+        }
+        // New lines after those shown: add them. Otherwise (cleared), all
+        // again.
+        var added: ArraySlice<PythonConsole.Line> = lines[...]
+        if ids.starts(with: coordinator.shown) {
+            added = lines.dropFirst(coordinator.shown.count)
+        } else {
+            storage.setAttributedString(NSAttributedString())
+        }
+        // SWIFT: `NSAttributedString` is text with attributes (font,
+        // colour) on ranges of it, as AppKit draws it. A text view's
+        // `textStorage` is its mutable one: appending to it adds to what
+        // the view shows, without setting all the text again.
+        for line in added {
+            storage.append(NSAttributedString(string: line.text + "\n", attributes: Self.attributes(for: line.style)))
+        }
+        coordinator.shown = ids
+        textView.scrollToEndOfDocument(nil)
+    }
+
+    /// Typed lines in bold, tracebacks in red, the Console's own notes dim.
+    private static func attributes(for style: PythonConsole.Style) -> [NSAttributedString.Key: Any] {
+        switch style {
+        case .input:
+            return [.font: NSFont.monospacedSystemFont(ofSize: XMLTextView.font.pointSize, weight: .semibold),
+                    .foregroundColor: NSColor.labelColor]
+        case .output:
+            return [.font: XMLTextView.font, .foregroundColor: NSColor.labelColor]
+        case .error:
+            return [.font: XMLTextView.font, .foregroundColor: NSColor.systemRed]
+        case .note:
+            return [.font: XMLTextView.font, .foregroundColor: NSColor.secondaryLabelColor]
+        }
+    }
+}
+
+/// The Console's line to type in: an AppKit text field, as it lets Return,
+/// Up, Down and Tab be handled before the field does its own thing with
+/// them (ending editing, moving the caret, moving to the next field).
+private struct ConsoleInputField: NSViewRepresentable {
+    @Binding var text: String
+    /// False while a script runs.
+    let isEnabled: Bool
+    let onSubmit: () -> Void
+    /// Up (true) or Down (false).
+    let onHistory: (_ older: Bool) -> Void
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: ConsoleInputField
+
+        init(parent: ConsoleInputField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            if let field = notification.object as? NSTextField {
+                parent.text = field.stringValue
+            }
+        }
+
+        /// SWIFT: AppKit turns keys into commands, named by selectors
+        /// (Return is `insertNewline:`, Up is `moveUp:`), and asks the
+        /// field's delegate first: returning true means "handled", and the
+        /// field doesn't do its own.
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)):
+                parent.onSubmit()
+            case #selector(NSResponder.moveUp(_:)):
+                parent.onHistory(true)
+            case #selector(NSResponder.moveDown(_:)):
+                parent.onHistory(false)
+            case #selector(NSResponder.insertTab(_:)):
+                textView.insertText("    ", replacementRange: textView.selectedRange())
+            default:
+                return false
+            }
+            return true
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField()
+        field.cell = ConsoleFieldCell(textCell: "")
+        field.isEditable = true
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = XMLTextView.font
+        field.placeholderString = "Python"
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.delegate = context.coordinator
+        // Typing goes here as soon as the tab shows.
+        DispatchQueue.main.async {
+            field.window?.makeFirstResponder(field)
+        }
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        context.coordinator.parent = self
+        if field.stringValue != text {
+            field.stringValue = text
+            // The caret after the text, not selecting all of it.
+            field.currentEditor()?.selectedRange = NSRange(location: (text as NSString).length, length: 0)
+        }
+        if field.isEnabled != isEnabled {
+            field.isEnabled = isEnabled
+            // Disabling it took the focus; a script has ended: back to typing.
+            if isEnabled {
+                field.window?.makeFirstResponder(field)
+            }
+        }
+    }
+}
+
+/// The Console field's cell, with a field editor of its own that keeps no
+/// typing undo.
+///
+/// A text field is edited in its window's *field editor*: one NSTextView
+/// shared by the window's fields, whose typing undo goes to the window's
+/// undo manager, the document's. Each keystroke in the Console would be
+/// an undo step between its entries. With none, ⌘Z here undoes the last
+/// entry, as the Edit menu does.
+///
+/// SWIFT: An `NSCell` subclass's `fieldEditor(for:)` override gives its
+/// field the editor it returns instead of the window's.
+private final class ConsoleFieldCell: NSTextFieldCell {
+    private let editor: NSTextView = {
+        let editor = NSTextView()
+        editor.isFieldEditor = true
+        editor.allowsUndo = false
+        return editor
+    }()
+
+    override func fieldEditor(for controlView: NSView) -> NSTextView? {
+        editor
     }
 }
