@@ -28,6 +28,7 @@
 
 #include <atomic>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -87,6 +88,23 @@ int nextConsole = 1;
 /// as it does, however soon interrupt()'s thread gets the GIL.
 std::atomic<int64_t> stopRequested{0};
 
+/// A command a script registered (`@margolaria.command`, M6d): its title,
+/// and the function run when it is chosen.
+struct Command {
+    std::string title;
+    py::object function;
+};
+
+/// The commands registered, in the order they were first registered.
+/// Changed with the GIL held, and never freed, as `consoles`.
+std::vector<Command>* registered = new std::vector<Command>();
+
+/// Their titles, also kept apart under a lock of their own, so the app can
+/// read them without waiting for the GIL, which a script running a long
+/// call into MaterialX may hold for a while.
+std::mutex titlesLock;
+mxbridge::StringVector titles;
+
 /// An edit refused, as MXBridge refuses them: `margolaria.EditRefused` in
 /// Python (registered in the module below).
 struct EditRefused : std::runtime_error {
@@ -100,6 +118,32 @@ Session& Current() {
         throw std::runtime_error("No document: the margolaria module works while Margolaria runs a script.");
     }
     return *session;
+}
+
+/// The run's document, or a RuntimeError in a startup script, which has none.
+mxbridge::Document& CurrentDocument() {
+    Session& run = Current();
+    if (!run.document.isLoaded()) {
+        throw std::runtime_error("No document: startup scripts run before any is open. Register a command with "
+                                 "@margolaria.command(\"Title\"): it runs on the document of the window it is "
+                                 "chosen in.");
+    }
+    return run.document;
+}
+
+/// Registers `function` as the command `title`, replacing one registered
+/// with that title before: a startup script run again, or a function
+/// typed again in the Console.
+void Register(const std::string& title, const py::object& function) {
+    for (Command& command : *registered) {
+        if (command.title == title) {
+            command.function = function;
+            return;
+        }
+    }
+    registered->push_back(Command{title, function});
+    std::lock_guard<std::mutex> lock(titlesLock);
+    titles.push_back(title);
 }
 
 /// Holds Python's global lock (the GIL) for this thread while it exists,
@@ -127,6 +171,9 @@ void Check(bool made, const std::string& errorMessage) {
 
 /// Ends a step called `name` if the document changed since the last one.
 void Checkpoint(Session& run, const std::string& name) {
+    if (!run.document.isLoaded()) {
+        return;
+    }
     std::string difference;
     if (run.document.isEquivalent(run.checkpoint, difference)) {
         return;
@@ -139,6 +186,8 @@ void Checkpoint(Session& run, const std::string& name) {
 /// Asks the Swift side for `function`; returns its results, or raises its
 /// error.
 mxbridge::StringVector CallHost(const std::string& function, mxbridge::StringVector arguments) {
+    // Every call asks about the document, or its window.
+    CurrentDocument();
     Session& run = Current();
     if (!run.host) {
         throw std::runtime_error("margolaria." + function + "() isn't available here.");
@@ -191,13 +240,14 @@ public:
     explicit EditBlock(std::string name) : _name(std::move(name)) {}
 
     mx::DocumentPtr enter() {
+        mxbridge::Document& document = CurrentDocument();
         Session& run = Current();
         if (run.blockStarts.empty()) {
             // What changed before the block is a step of its own.
             Checkpoint(run, run.stepName);
         }
-        run.blockStarts.push_back(run.document.copy());
-        return std::static_pointer_cast<mx::Document>(run.document.materialXDocument());
+        run.blockStarts.push_back(document.copy());
+        return std::static_pointer_cast<mx::Document>(document.materialXDocument());
     }
 
     void exit(const py::object& exceptionType) {
@@ -252,7 +302,7 @@ PYBIND11_MODULE(margolaria, module) {
 
     module.def(
         "document",
-        []() { return std::static_pointer_cast<mx::Document>(Current().document.materialXDocument()); },
+        []() { return std::static_pointer_cast<mx::Document>(CurrentDocument().materialXDocument()); },
         "The document the script is run on, as a MaterialX.Document: the app's own, so changes made with "
         "MaterialX's API are the app's too. It stays the same object after Undo.");
 
@@ -267,6 +317,36 @@ PYBIND11_MODULE(margolaria, module) {
         "edit", [](const std::string& name) { return EditBlock(name); }, py::arg("name"),
         "with margolaria.edit(\"Name\"): makes the block's changes one undo step called Name. If the block "
         "raises, its changes are taken back. Changes outside blocks are steps named after the script.");
+
+    // --- Commands (M6d) ------------------------------------------------
+
+    module.def(
+        "command",
+        [](const py::object& title) {
+            // `@margolaria.command` without the title gets the function
+            // here: say what's missing, rather than pybind11's message.
+            if (!py::isinstance<py::str>(title)) {
+                throw py::type_error("margolaria.command takes the command's title: @margolaria.command(\"Title\")");
+            }
+            std::string name = title.cast<std::string>();
+            if (name.empty()) {
+                throw py::value_error("A command needs a title.");
+            }
+            // The decorator itself: registers the function, and returns it
+            // as it is, so it can still be called by name.
+            return py::cpp_function([name](const py::object& function) {
+                if (!PyCallable_Check(function.ptr())) {
+                    throw py::type_error("@margolaria.command(\"" + name + "\") decorates a function.");
+                }
+                Register(name, function);
+                return function;
+            });
+        },
+        py::arg("title"),
+        "@margolaria.command(\"Title\") registers the function below it as a command: listed in the Scripts "
+        "menu and the command palette, and run, with no arguments, on the document of the window it is "
+        "chosen in, its changes one undo step called Title. A command registered again with the same title "
+        "replaces the first.");
 
     // --- The selection -------------------------------------------------
 
@@ -284,7 +364,7 @@ PYBIND11_MODULE(margolaria, module) {
         "add_node",
         [](const std::string& nodeDef, const std::string& parent, const std::string& name) {
             std::string newPath, error;
-            Check(Current().document.addNode(parent, nodeDef, name, newPath, error), error);
+            Check(CurrentDocument().addNode(parent, nodeDef, name, newPath, error), error);
             return newPath;
         },
         py::arg("nodedef"), py::arg("parent") = "", py::arg("name") = "",
@@ -295,7 +375,7 @@ PYBIND11_MODULE(margolaria, module) {
         "remove_node",
         [](const std::string& path) {
             std::string error;
-            Check(Current().document.removeNode(path, error), error);
+            Check(CurrentDocument().removeNode(path, error), error);
         },
         py::arg("path"), "Removes a node or nodegraph, disconnecting everything that used it.");
 
@@ -303,7 +383,7 @@ PYBIND11_MODULE(margolaria, module) {
         "rename_node",
         [](const std::string& path, const std::string& name) {
             std::string newPath, error;
-            Check(Current().document.renameNode(path, name, newPath, error), error);
+            Check(CurrentDocument().renameNode(path, name, newPath, error), error);
             return newPath;
         },
         py::arg("path"), py::arg("name"),
@@ -313,7 +393,7 @@ PYBIND11_MODULE(margolaria, module) {
         "change_nodedef",
         [](const std::string& path, const std::string& nodeDef) {
             std::string error;
-            Check(Current().document.changeNodeDef(path, nodeDef, error), error);
+            Check(CurrentDocument().changeNodeDef(path, nodeDef, error), error);
         },
         py::arg("path"), py::arg("nodedef"),
         "Changes a node to another type variant (\"ND_multiply_color3FA\"), keeping the inputs and "
@@ -323,7 +403,7 @@ PYBIND11_MODULE(margolaria, module) {
         "set_value",
         [](const std::string& path, const std::string& input, const py::object& value) {
             std::string error;
-            Check(Current().document.setInputValue(path, input, ValueText(value), error), error);
+            Check(CurrentDocument().setInputValue(path, input, ValueText(value), error), error);
         },
         py::arg("path"), py::arg("input"), py::arg("value"),
         "Sets an input's value, disconnecting it if it was connected: a string as MaterialX writes it "
@@ -333,7 +413,7 @@ PYBIND11_MODULE(margolaria, module) {
         "reset_input",
         [](const std::string& path, const std::string& input) {
             std::string error;
-            Check(Current().document.resetInput(path, input, error), error);
+            Check(CurrentDocument().resetInput(path, input, error), error);
         },
         py::arg("path"), py::arg("input"), "Removes an input, so the node uses its nodedef's default again.");
 
@@ -342,7 +422,7 @@ PYBIND11_MODULE(margolaria, module) {
         [](const std::string& path, const std::string& input, const py::object& colorSpace) {
             std::string error;
             std::string space = colorSpace.is_none() ? "" : colorSpace.cast<std::string>();
-            Check(Current().document.setInputColorSpace(path, input, space, error), error);
+            Check(CurrentDocument().setInputColorSpace(path, input, space, error), error);
         },
         py::arg("path"), py::arg("input"), py::arg("colorspace"),
         "Sets an input's colorspace (None removes it), leaving its value as it is.");
@@ -352,7 +432,7 @@ PYBIND11_MODULE(margolaria, module) {
         [](const std::string& path, const std::string& input, const std::string& source, const py::object& output) {
             std::string error;
             std::string outputName = output.is_none() ? "" : output.cast<std::string>();
-            Check(Current().document.connectInput(path, input, source, outputName, error), error);
+            Check(CurrentDocument().connectInput(path, input, source, outputName, error), error);
         },
         py::arg("path"), py::arg("input"), py::arg("source"), py::arg("output") = py::none(),
         "Connects input of the node at path to the node or nodegraph source in the same graph (its output, "
@@ -363,7 +443,7 @@ PYBIND11_MODULE(margolaria, module) {
         "connect_interface",
         [](const std::string& path, const std::string& input, const std::string& interface) {
             std::string error;
-            Check(Current().document.connectInterface(path, input, interface, error), error);
+            Check(CurrentDocument().connectInterface(path, input, interface, error), error);
         },
         py::arg("path"), py::arg("input"), py::arg("interface"),
         "Connects an input inside a nodegraph to one of the graph's own inputs.");
@@ -372,7 +452,7 @@ PYBIND11_MODULE(margolaria, module) {
         "disconnect",
         [](const std::string& path, const std::string& input) {
             std::string error;
-            Check(Current().document.disconnectInput(path, input, error), error);
+            Check(CurrentDocument().disconnectInput(path, input, error), error);
         },
         py::arg("path"), py::arg("input"),
         "Disconnects an input (or an <output>, with input \"\"). A node's input with no value of its own is "
@@ -382,7 +462,7 @@ PYBIND11_MODULE(margolaria, module) {
         "set_position",
         [](const std::string& path, float x, float y) {
             std::string error;
-            Check(Current().document.setPosition(path, x, y, error), error);
+            Check(CurrentDocument().setPosition(path, x, y, error), error);
         },
         py::arg("path"), py::arg("x"), py::arg("y"),
         "Sets an element's xpos and ypos, in MaterialX's units (one node of MaterialX's Graph Editor). "
@@ -514,6 +594,21 @@ bool Interpreter::isRunning() {
     return running;
 }
 
+bool Interpreter::addSitePackages(const std::string& folder, std::string& errorMessage) {
+    if (!running) {
+        errorMessage = "Python isn't running.";
+        return false;
+    }
+    Gil gil;
+    try {
+        py::module_::import("site").attr("addsitedir")(folder);
+        return true;
+    } catch (py::error_already_set& error) {
+        errorMessage = error.what();
+        return false;
+    }
+}
+
 std::string Interpreter::version() {
     if (!running) {
         return "";
@@ -523,8 +618,8 @@ std::string Interpreter::version() {
 }
 
 RunResult Interpreter::run(const std::string& code, const std::string& filename, const std::string& stepName,
-                           int console, int64_t runID, const mxbridge::Document& document, HostFunction host,
-                           void* hostContext) {
+                           int console, const std::string& command, int64_t runID, const mxbridge::Document& document,
+                           HostFunction host, void* hostContext) {
     RunResult result;
     if (!running) {
         result.output = "Python isn't running.";
@@ -536,7 +631,9 @@ RunResult Interpreter::run(const std::string& code, const std::string& filename,
     run.stepName = stepName;
     run.host = host;
     run.hostContext = hostContext;
-    run.checkpoint = document.copy();
+    if (document.isLoaded()) {
+        run.checkpoint = document.copy();
+    }
 
     // Take the GIL for this thread: start() released it.
     Gil gil;
@@ -572,10 +669,27 @@ RunResult Interpreter::run(const std::string& code, const std::string& filename,
         // margolaria.document() needs to return one.
         py::module_::import("MaterialX");
 
+        // The command's function, found before the script can be stopped:
+        // a title that isn't registered is reported without running.
+        py::object function;
+        if (!command.empty()) {
+            for (const Command& registeredCommand : *registered) {
+                if (registeredCommand.title == command) {
+                    function = registeredCommand.function;
+                }
+            }
+            if (!function) {
+                throw std::runtime_error("No command called " + command + ": the script that registered it may "
+                                         "have changed. Reload the startup scripts.");
+            }
+        }
+
+        // The namespace the code runs in. (A command's function has its
+        // own: its module's.)
         py::object globals;
         if (console != 0) {
             globals = consoles->at(console);
-        } else {
+        } else if (!function) {
             py::dict fresh;
             fresh["__name__"] = "__main__";
             fresh["__file__"] = filename;
@@ -591,8 +705,12 @@ RunResult Interpreter::run(const std::string& code, const std::string& filename,
             // Stopped before it started: raised as its first line runs.
             PyThreadState_SetAsyncExc(run.threadId, PyExc_KeyboardInterrupt);
         }
-        py::object compiled = builtins.attr("compile")(code, filename, console != 0 ? "single" : "exec");
-        builtins.attr("exec")(compiled, globals);
+        if (function) {
+            function();
+        } else {
+            py::object compiled = builtins.attr("compile")(code, filename, console != 0 ? "single" : "exec");
+            builtins.attr("exec")(compiled, globals);
+        }
         result.succeeded = true;
     } catch (py::error_already_set& error) {
         raised.emplace(std::move(error));
@@ -678,6 +796,22 @@ void Interpreter::closeConsole(int console) {
     }
     Gil gil;
     consoles->erase(console);
+}
+
+mxbridge::StringVector Interpreter::commands() {
+    std::lock_guard<std::mutex> lock(titlesLock);
+    return titles;
+}
+
+void Interpreter::clearCommands() {
+    if (!running) {
+        return;
+    }
+    Gil gil;
+    // The functions go, with the GIL held, as they are Python objects.
+    registered->clear();
+    std::lock_guard<std::mutex> lock(titlesLock);
+    titles.clear();
 }
 
 EntryState Interpreter::checkEntry(const std::string& source, const std::string& filename, std::string& errorMessage) {

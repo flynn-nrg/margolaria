@@ -12,11 +12,15 @@
 // (autosave, versions, Revert To, Duplicate, Rename, Move To). The decision
 // is in docs/PLAN.md §3.
 //
+// The app delegate also runs the user's startup scripts at launch (M6d),
+// and handles the Scripts menu's own items.
+//
 // Introduces (SWIFT): `@main` on a type with `static func main()`,
 // `@MainActor` on a function, `withExtendedLifetime`, `NSObject` subclasses
 // conforming to Objective-C protocols, selector-based notification observers.
 
 import AppKit
+import ScriptKit
 
 /// The program's entry point.
 ///
@@ -88,6 +92,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // main thread: AppKit posts window notifications there).
         NotificationCenter.default.addObserver(self, selector: #selector(windowOcclusionChanged(_:)),
                                                name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        runStartupScripts()
+    }
+
+    // MARK: Startup scripts (M6d)
+
+    /// How long launch waits for each startup script before going on
+    /// (it then ends in the background), as a window waits for a script.
+    private static let startupPatience: TimeInterval = 0.25
+
+    /// Runs the startup scripts (ScriptKit's StartupScripts); the windows'
+    /// Consoles report them when they end. Python only starts if there are
+    /// any.
+    private func runStartupScripts() {
+        StartupScripts.run(from: .inApp(), waitingUpTo: Self.startupPatience) { reports in
+            MaterialXDocument.startupScriptsEnded(reports)
+        }
+    }
+
+    /// Scripts > Reload Startup Scripts: runs them again, after forgetting
+    /// their commands, so a script just edited takes effect. Modules they
+    /// import aren't read again: Python keeps them until Margolaria quits.
+    @objc func reloadStartupScripts(_ sender: Any?) {
+        runStartupScripts()
+    }
+
+    /// Scripts > Open Scripts Folder: shows the startup scripts' folder in
+    /// the Finder, made first if it isn't there.
+    @objc func openScriptsFolder(_ sender: Any?) {
+        do {
+            try FileManager.default.createDirectory(at: StartupScripts.folder, withIntermediateDirectories: true)
+            NSWorkspace.shared.open(StartupScripts.folder)
+        } catch {
+            NSApp.presentError(error)
+        }
+    }
+
+    /// Scripts > Stop Script: stops the script running, wherever it was
+    /// started: a startup script, which has no window and no Stop button
+    /// of its own, or a window's (as its sheet's Stop does).
+    @objc func stopScript(_ sender: Any?) {
+        ScriptRun.current?.stop()
     }
 
     /// Places the colour panel the first time it appears: where it was
@@ -118,5 +163,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - size.height)
         }
         return frame
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// Stop Script while a script runs; Reload Startup Scripts while none
+    /// does (they would be refused).
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        switch item.action {
+        case #selector(stopScript(_:)):
+            return ScriptRun.current.map { !$0.isStopping } ?? false
+        case #selector(reloadStartupScripts(_:)):
+            return ScriptRun.current == nil && !StartupScripts.isRunning
+        default:
+            return true
+        }
     }
 }

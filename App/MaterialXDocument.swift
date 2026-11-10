@@ -250,6 +250,12 @@ final class MaterialXDocument: NSDocument {
 
     /// Creates the document's window. AppKit calls this once, after reading.
     override func makeWindowControllers() {
+        // A startup script failed before any window was open (M6d): this
+        // first one shows it in its Console.
+        if Self.startupReportPending {
+            Self.startupReportPending = false
+            showStartupScripts(failed: true)
+        }
         // SWIFT: `NSHostingController` is an AppKit view controller whose
         // view is a SwiftUI view: the bridge from AppKit to SwiftUI.
         // (`NSViewRepresentable`, in ViewportKit, goes the other way.)
@@ -449,9 +455,14 @@ final class MaterialXDocument: NSDocument {
     /// while ContentView shows its "Running… Stop" sheet; nil otherwise.
     private(set) var scriptRun: ScriptRun? = nil
 
-    /// Counts the times a script run from File > Run Script… had something
-    /// to show in the Console: ContentView shows the tab when it changes.
+    /// Counts the times a script run from File > Run Script…, a command or
+    /// a startup script had something to show in the Console: ContentView
+    /// shows the tab when it changes.
     private(set) var consoleRequests: Int = 0
+
+    /// True when a startup script failed while no window was open: the
+    /// next window made shows it (M6d).
+    private static var startupReportPending: Bool = false
 
     /// What the running script selected (`margolaria.select`), selected
     /// on the canvas once it has ended.
@@ -498,12 +509,60 @@ final class MaterialXDocument: NSDocument {
         }
         let script: Script = .file(code, path: url.path(percentEncoded: false))
         run(script) { [weak self] result in
-            guard let self, !result.succeeded || !result.output.isEmpty else {
-                return
-            }
-            console.show(result, title: script.stepName)
+            self?.showInConsole(result, of: script)
+        }
+    }
+
+    /// Scripts > a command a script registered (`@margolaria.command`,
+    /// M6d), or the same from the command palette: runs it on this
+    /// document, its changes one undo step named after it. As for Run
+    /// Script…, what it prints, or its traceback, is shown in the Console.
+    /// The item's represented object is the command's title (MainMenu).
+    @objc func runCommand(_ sender: Any?) {
+        guard let title = (sender as? NSMenuItem)?.representedObject as? String else {
+            return
+        }
+        let script: Script = .command(title)
+        run(script) { [weak self] result in
+            self?.showInConsole(result, of: script)
+        }
+    }
+
+    /// Shows what a script run from a menu printed, or its traceback, in
+    /// the Console tab, titled with its undo step's name. Nothing for a
+    /// script that succeeded silently.
+    private func showInConsole(_ result: ScriptResult, of script: Script) {
+        guard !result.succeeded || !result.output.isEmpty else {
+            return
+        }
+        console.show(result, title: script.stepName)
+        consoleRequests += 1
+    }
+
+    /// The startup scripts have ended (AppDelegate, M6d): the open windows'
+    /// Consoles show what they printed; if one failed, they show its
+    /// traceback, opening the Console tab. If no window is open, the next
+    /// one does.
+    static func startupScriptsEnded(_ reports: [StartupScripts.Report]) {
+        let failed: Bool = reports.contains { !$0.result.succeeded }
+        let documents: [MaterialXDocument] = NSDocumentController.shared.documents.compactMap {
+            $0 as? MaterialXDocument
+        }
+        startupReportPending = failed && documents.isEmpty
+        for document in documents {
+            document.showStartupScripts(failed: failed)
+        }
+    }
+
+    /// Shows the startup scripts' report in the Console: at once, opening
+    /// the tab, if one `failed`; otherwise when the Console is next shown,
+    /// if it hasn't begun.
+    private func showStartupScripts(failed: Bool) {
+        if failed {
+            openConsole()
             consoleRequests += 1
         }
+        console.showStartupScripts()
     }
 
     /// The Console tab is shown: Python starts, if it hasn't, and the

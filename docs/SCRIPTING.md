@@ -1,6 +1,6 @@
 # Scripting Margolaria
 
-Margolaria runs Python 3.13 on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window, and the bottom panel's **Console** tab runs what you type, line by line. Both use two modules:
+Margolaria runs Python 3.13 on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window, the bottom panel's **Console** tab runs what you type, line by line, and **startup scripts** add commands of your own to the Scripts menu. They all use two modules:
 
 - **`MaterialX`**: MaterialX's own Python API (PyMaterialX 1.39.5), the same as in Houdini or MaterialX's Graph Editor.
 - **`margolaria`**: the open document, the editor's edits on it, undo steps, the selection, validation and export.
@@ -38,6 +38,40 @@ A script, or a Console entry, that runs for more than a moment shows a **Running
 **Stop** (or Escape, or ⌘.) raises `KeyboardInterrupt` in the script at its next line of Python, as Ctrl-C does in a terminal, and its changes are taken back. A script stops only between lines of Python: a long call into MaterialX, or a `time.sleep()`, finishes first. A script that catches `KeyboardInterrupt` (a bare `except:`) keeps running.
 
 One script runs at a time, in the whole app: starting another meanwhile, from another window, says which is running instead. `input()` has nothing to read, and raises `EOFError`.
+
+## Startup scripts and commands
+
+Every `.py` file in `~/Library/Application Support/Margolaria/Scripts` (Scripts > Open Scripts Folder) is a **startup script**: Margolaria runs them when it starts, one after the other, in the order Finder lists them (`2 tools.py` before `10 more.py`). They run before any document is open, so `margolaria.document()`, the edits and the window's functions raise `RuntimeError` in them. What they do is set things up, mainly registering **commands**:
+
+```python
+import margolaria
+
+@margolaria.command("Add Brick Material")
+def add_brick_material():
+    shader = margolaria.add_node("ND_standard_surface_surfaceshader", name="brick_shader")
+    material = margolaria.add_node("ND_surfacematerial", name="brick")
+    margolaria.connect(material, "surfaceshader", shader)
+```
+
+- **Where they appear:** the Scripts menu lists the commands, in the order they were registered, and the command palette (⌘K) lists them under "Scripts". They are greyed out with no window open.
+- **What running one does:** the function is called, with no arguments, on the document of the front window. Its changes are one undo step named after the command, "Undo Add Brick Material" (or several, with `with margolaria.edit(...)`), and none if it only reads. It works as a script run with Run Script…: what it prints, or its traceback, is shown in the Console, and a command that raises changes nothing.
+- **A title registered again** replaces the first command with that title. The decorated function stays an ordinary function, which the script can still call.
+- Commands can be registered anywhere, not only in startup scripts: a script run with Run Script…, or a function typed in the Console, adds to the Scripts menu too, until Margolaria quits.
+- **Errors:** a startup script that raises is reported in the Console tab of the open windows (or of the next one opened), and the next script runs. What startup scripts print is shown in the Console too.
+- **Reload Startup Scripts** (Scripts menu) forgets every command and runs the startup scripts again, so a script just edited takes effect. Modules they import aren't read again: Python keeps them until Margolaria quits.
+- A slow startup script doesn't hold up the app: it runs on in the background, and another script started meanwhile says it is still running. **Scripts > Stop Script** stops it, or any script that is running.
+
+[`scripting/commands.py`](scripting/commands.py) is an example startup script, with two commands.
+
+## Your own packages
+
+Python packages of your own go in `~/Library/Application Support/Margolaria/Python/site-packages`, which is on the import path after Margolaria's own packages. Its `.pth` files are read, as in any site-packages folder. Install packages there with a Python 3.13 of your own:
+
+```
+python3.13 -m pip install --target ~/Library/Application\ Support/Margolaria/Python/site-packages some-package
+```
+
+They must be **pure Python**: packages with compiled modules (`.so` files, such as `numpy`) are refused by macOS, as Margolaria only loads code signed by its own developer (PLAN.md §7.1). A module of your own that startup scripts share can go there too.
 
 ## Undo
 
@@ -106,5 +140,6 @@ Relative paths are relative to the document's folder; a document that was never 
 
 - What a script prints shows when it ends, not as it prints.
 - The Console takes a line at a time: text pasted with several lines is entered as if typed one by one, and a block needs its empty line to end.
-- Python packages you install yourself must be pure Python (PLAN.md §7.1); a folder for them comes in M6d.
+- Python packages you install yourself must be pure Python (PLAN.md §7.1).
+- Commands have no keyboard shortcuts, and take no arguments.
 - `pxr` (OpenUSD's Python API) isn't included (PLAN.md §8.7).

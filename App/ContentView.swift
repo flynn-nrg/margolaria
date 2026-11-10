@@ -392,10 +392,16 @@ struct ContentView: View {
         .sheet(isPresented: Binding(get: { document.scriptRun != nil }, set: { _ in })) {
             ScriptRunningSheet(run: document.scriptRun)
         }
-        // A script run from File > Run Script… printed something, or
-        // failed: the Console shows it.
+        // A script run from File > Run Script… or the Scripts menu printed
+        // something, or failed, or a startup script did (M6d): the Console
+        // shows it. Also when that came before the window was open.
         .onChange(of: document.consoleRequests) {
             showBottomTab(.console)
+        }
+        .onAppear {
+            if document.consoleRequests > 0 {
+                showBottomTab(.console)
+            }
         }
     }
 

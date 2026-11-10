@@ -12,6 +12,9 @@
 // line that starts a block (`for node in doc.getNodes():`) asks for more
 // lines, and a blank line ends it; an expression's value is printed.
 //
+// What the startup scripts printed, and their tracebacks, are shown too
+// (M6d): an error in one is reported here.
+//
 // Introduces (SWIFT): a class whose `deinit` cleans up after a C++ API.
 
 import Foundation
@@ -102,6 +105,8 @@ public final class PythonConsole {
     @ObservationIgnored private var recalled: Int? = nil
     /// What was typed before Up, for Down to come back to.
     @ObservationIgnored private var draft: String = ""
+    /// The run of the startup scripts last shown (StartupScripts.generation).
+    @ObservationIgnored private var startupShown: Int = 0
 
     public init() {}
 
@@ -116,6 +121,21 @@ public final class PythonConsole {
         let version: String = Python.version.split(separator: " ").first.map(String.init) ?? ""
         append(.note, "Python \(version). margolaria and MaterialX (as mx) are imported; "
             + "margolaria.document() is this window's document.")
+        showStartupScripts()
+    }
+
+    /// Shows what the startup scripts printed, and the tracebacks of those
+    /// that failed (M6d), once for each run of them, if the Console has
+    /// begun and they have ended. Called by `begin`, and by the app when
+    /// they end.
+    public func showStartupScripts() {
+        guard namespace != nil, startupShown != StartupScripts.generation, let reports = StartupScripts.reports else {
+            return
+        }
+        startupShown = StartupScripts.generation
+        for report in reports where !report.result.succeeded || !report.result.output.isEmpty {
+            show(report.result, title: "Startup script \(report.name)")
+        }
     }
 
     /// Takes one typed line, showing it. Returns the entry to run once the
@@ -165,7 +185,7 @@ public final class PythonConsole {
             return nil
         }
         return Script(code: source, filename: Self.filename, name: "Console", stepName: Self.stepName,
-                      console: namespace)
+                      console: namespace, command: nil)
     }
 
     /// Shows what a run printed: a traceback as an error. `title`, for a

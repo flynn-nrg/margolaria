@@ -63,6 +63,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | String indices | Strings are sliced with `String.Index` values (`path[..<slash]`), not integers, because characters vary in size | — | `GraphPanel.swift` (`parent(of:)`) |
 | Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLTextTests.swift` (`Reference`; MXXMLText.swift until M4e) |
 | `popLast()`, `compactMap` | Remove-and-return the last element (nil if empty); `map` that drops nils | `pop_back` with a check | `MXXMLText.swift` |
+| `ArraySlice` | `array[...]`, `array[2...]` or `dropFirst()` on one: a view of part of an array, sharing its storage, without copying | A Go slice, `std::span` | `StartupScripts.swift` (M6d) |
+| `localizedStandardCompare` | Compares strings as Finder sorts names: numbers by value ("2" before "10"), capitals with their lowercase | `-localizedStandardCompare:` | `StartupScripts.swift` (M6d) |
 | `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
 | `ClosedRange` | `0...1`: a range including both ends; SwiftUI sliders take one | — | `MXValue.swift` (`sliderRange`) |
 | `zip` | Pairs two sequences element by element into tuples | Python `zip` | `MXValue.swift` (`MXPortUI`) |

@@ -22,6 +22,10 @@
 // from any other item it is given to), so the key moves between the two
 // items as the focus does, and each menu shows ⌘G where it applies.
 //
+// The Scripts menu (M6d) lists the commands scripts registered
+// (`@margolaria.command`), rebuilt whenever they change, so the palette
+// lists them too, under "Scripts".
+//
 // Introduces (SWIFT): `#selector` with a type name (`NSDocument.save(_:)`),
 // `Selector(("name:"))` for actions with no Swift declaration, variadic
 // parameters (`Item...`), option sets (`[.command, .shift]`);
@@ -30,6 +34,7 @@
 
 import AppKit
 import GraphKit
+import ScriptKit
 
 /// Builds the main menu.
 @MainActor
@@ -54,7 +59,8 @@ enum MainMenu {
         static let separator = Item("", nil)
     }
 
-    /// The whole menu bar: the app menu, File, Edit, View, Graph, Window, Help.
+    /// The whole menu bar: the app menu, File, Edit, View, Graph, Scripts, Window,
+    /// Help.
     static func make() -> NSMenu {
         let appName: String = ProcessInfo.processInfo.processName
         let bar = NSMenu()
@@ -183,6 +189,24 @@ enum MainMenu {
         bar.addItem(submenu: graphMenu)
         shareCommandG()
 
+        // Scripts (M6d): the commands, first (updateScriptCommands), then
+        // the startup scripts' own items, AppDelegate's.
+        let scriptsMenu: NSMenu = menu("Scripts",
+                                       .separator,
+                                       Item("Stop Script", #selector(AppDelegate.stopScript(_:))),
+                                       .separator,
+                                       Item("Reload Startup Scripts", #selector(AppDelegate.reloadStartupScripts(_:))),
+                                       Item("Open Scripts Folder", #selector(AppDelegate.openScriptsFolder(_:))))
+        self.scriptsMenu = scriptsMenu
+        updateScriptCommands()
+        commandsObserver = NotificationCenter.default.addObserver(forName: Python.commandsDidChange, object: nil,
+                                                                  queue: .main) { _ in
+            MainActor.assumeIsolated {
+                updateScriptCommands()
+            }
+        }
+        bar.addItem(submenu: scriptsMenu)
+
         // Window. Registering it as the windows menu makes AppKit list the
         // open windows at its end.
         let windowMenu: NSMenu = menu("Window",
@@ -245,6 +269,39 @@ enum MainMenu {
         other.keyEquivalent = ""
         owner.keyEquivalent = "g"
         owner.keyEquivalentModifierMask = .command
+    }
+
+    // MARK: Scripts (M6d)
+
+    private static var scriptsMenu: NSMenu? = nil
+    /// The registration for `Python.commandsDidChange`, kept so it lasts.
+    private static var commandsObserver: (any NSObjectProtocol)? = nil
+
+    /// Puts the commands scripts registered at the top of the Scripts
+    /// menu, in the order they were registered, replacing those there; a
+    /// greyed-out "No Commands" if there are none. Each item's represented
+    /// object is its command's title, which MaterialXDocument.runCommand
+    /// runs: in the front window, as with any document command, and
+    /// greyed out with no window open.
+    private static func updateScriptCommands() {
+        guard let scriptsMenu else {
+            return
+        }
+        // The items before the first separator are the commands.
+        while let first = scriptsMenu.items.first, !first.isSeparatorItem {
+            scriptsMenu.removeItem(first)
+        }
+        let commands: [String] = Python.commands
+        guard !commands.isEmpty else {
+            // No action: AppKit greys it out, and the palette leaves it out.
+            scriptsMenu.insertItem(NSMenuItem(title: "No Commands", action: nil, keyEquivalent: ""), at: 0)
+            return
+        }
+        for (index, title) in commands.enumerated() {
+            let item = NSMenuItem(title: title, action: #selector(MaterialXDocument.runCommand(_:)), keyEquivalent: "")
+            item.representedObject = title
+            scriptsMenu.insertItem(item, at: index)
+        }
     }
 
     /// A menu with the given items.
