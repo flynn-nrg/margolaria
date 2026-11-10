@@ -66,13 +66,14 @@ public final class ScriptRun {
     /// Called once, on the main thread, when the run ends.
     private var finished: ((pybridge.RunResult) -> Void)?
 
-    /// Starts `script` on a worker thread (see `Python.start`).
-    init(script: Script, document: MXDocument, calls: HostCalls, finished: @escaping (pybridge.RunResult) -> Void) {
+    /// Starts `script` on a worker thread (see `Python.start`). With no
+    /// `document` (a startup script's), there are no calls to answer.
+    init(script: Script, document: MXDocument?, calls: HostCalls?, finished: @escaping (pybridge.RunResult) -> Void) {
         self.script = script
         self.finished = finished
         Self.lastID += 1
         id = Self.lastID
-        channel = Channel(answer: { call in calls.answer(call) })
+        channel = Channel(answer: { call in calls?.answer(call) })
         Self.current = self
         // SWIFT: `[weak self]`: the channel doesn't keep the run alive;
         // `current` does, until it ends.
@@ -87,13 +88,17 @@ public final class ScriptRun {
         // Sendable`, which tells the compiler we have made sure. Here we
         // have: the main thread doesn't touch the document, nor `calls`'
         // object (outside `pump`), until the run ends.
+        //
+        // `mxbridge.Document()` is an empty handle, no document.
         let work = Work(code: std.string(script.code), filename: std.string(script.filename),
-                        stepName: std.string(script.stepName), console: script.console?.id ?? 0, id: id,
-                        document: document.handle, channel: channel)
+                        stepName: std.string(script.stepName), console: script.console?.id ?? 0,
+                        command: std.string(script.command ?? ""), id: id,
+                        document: document?.handle ?? mxbridge.Document(), channel: channel)
         let thread = Thread {
             let result: pybridge.RunResult = pybridge.Interpreter.run(work.code, work.filename, work.stepName,
-                                                                      work.console, work.id, work.document,
-                                                                      Channel.function, work.channel.context)
+                                                                      work.console, work.command, work.id,
+                                                                      work.document, Channel.function,
+                                                                      work.channel.context)
             work.channel.finish(result)
         }
         // SWIFT: A `Thread` (NSThread) is a real thread of its own, rather
@@ -140,6 +145,8 @@ public final class ScriptRun {
         let finished = self.finished
         self.finished = nil
         finished?(result)
+        // The script may have registered commands (M6d).
+        Python.noticeCommands()
     }
 }
 
@@ -149,6 +156,7 @@ private struct Work: @unchecked Sendable {
     let filename: std.string
     let stepName: std.string
     let console: Int32
+    let command: std.string
     let id: Int64
     let document: mxbridge.Document
     let channel: Channel

@@ -20,6 +20,10 @@
 // own kept between them. Runs are on a worker thread, so the window can
 // offer to stop one: `interrupt` raises KeyboardInterrupt in it.
 //
+// Startup scripts (M6d) run with no document, and register commands with
+// `@margolaria.command("Title")`: functions kept here, which `run` calls
+// later on a document, and which the app lists in its Scripts menu.
+//
 // The same rules as MXBridge.h, so it imports cleanly into Swift: no Python,
 // pybind11 or MaterialX headers here; no exceptions cross into Swift (a
 // script's exceptions come back as its output); simple types only.
@@ -111,19 +115,27 @@ public:
     /// The interpreter's version, as `sys.version` gives it. "" before start().
     static std::string version();
 
+    /// Adds `folder` to Python's import path as a site-packages folder
+    /// (`site.addsitedir`): its `.pth` files are read too. It needn't
+    /// exist yet. Returns false and sets `errorMessage` if Python raised.
+    static bool addSitePackages(const std::string& folder, std::string& errorMessage);
+
     /// Runs `code` as a script, named `filename` in tracebacks, in a fresh
     /// `__main__` namespace; or, if `console` isn't 0, as an entry typed in
     /// that Console (`openConsole`), in its namespace, printing the value
-    /// of an expression as Python's own console does. While it runs,
+    /// of an expression as Python's own console does; or, if `command`
+    /// isn't empty, calls the command registered with that title, with no
+    /// arguments, and `code` is unused. While it runs,
     /// `margolaria.document()` returns `document`, and the module's edits
-    /// change it; after, they raise. Changes outside `margolaria.edit`
+    /// change it; after, they raise. An empty `document` (a startup
+    /// script's) makes them raise too. Changes outside `margolaria.edit`
     /// blocks make steps named `stepName`. `host` answers the calls only
     /// Swift can (it may be null: those calls then raise), on the thread
     /// running the script. `runID` names the run for `interrupt`: larger
     /// than any run's before. Python must be running.
     static RunResult run(const std::string& code, const std::string& filename, const std::string& stepName,
-                         int console, int64_t runID, const mxbridge::Document& document, HostFunction host,
-                         void* hostContext);
+                         int console, const std::string& command, int64_t runID, const mxbridge::Document& document,
+                         HostFunction host, void* hostContext);
 
     /// Stops the run `runID`: raises KeyboardInterrupt in the script, as
     /// Ctrl-C in a terminal would; if it hasn't started yet, as soon as it
@@ -143,6 +155,14 @@ public:
     /// as Python's console decides (the `codeop` module). For an invalid
     /// one, `errorMessage` is the SyntaxError, as the console prints it.
     static EntryState checkEntry(const std::string& source, const std::string& filename, std::string& errorMessage);
+
+    /// The titles of the commands scripts have registered
+    /// (`@margolaria.command`), in the order they were first registered.
+    /// Doesn't wait for a running script.
+    static mxbridge::StringVector commands();
+
+    /// Forgets every command, before the startup scripts run again.
+    static void clearCommands();
 };
 
 } // namespace pybridge

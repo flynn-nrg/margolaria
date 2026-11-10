@@ -5,7 +5,9 @@
 // underneath is PythonBridge, with the `margolaria` module; this file
 // turns its results into Swift's, ScriptHost.swift answers the module's
 // calls to Swift, and ScriptRun.swift runs scripts on a worker thread
-// (M6c), so they can be stopped.
+// (M6c), so they can be stopped. StartupScripts.swift runs the user's
+// startup scripts, whose commands (`@margolaria.command`) are run here too
+// (M6d).
 //
 // Where Python lives: in the app, Python.framework is embedded in
 // Contents/Frameworks and the MaterialX package in
@@ -37,6 +39,11 @@ public struct ScriptResult: Sendable {
     /// True if it was stopped (`ScriptRun.stop()`): it failed with
     /// KeyboardInterrupt.
     public let interrupted: Bool
+
+    /// A script that couldn't run, with why as its output.
+    static func failed(_ message: String) -> ScriptResult {
+        ScriptResult(succeeded: false, output: message, steps: [], interrupted: false)
+    }
 }
 
 /// Python code to run, and where: a script from a file, or an entry typed
@@ -53,11 +60,20 @@ public struct Script: Sendable {
     /// The Console's namespace it runs in; nil for a script, which runs in
     /// a fresh one.
     public let console: ConsoleNamespace?
+    /// The title of the command it runs (`@margolaria.command`), rather
+    /// than `code`; nil for code.
+    public let command: String?
 
     /// A script from the file at `path`.
     public static func file(_ code: String, path: String) -> Script {
         let name: String = URL(filePath: path).lastPathComponent
-        return Script(code: code, filename: path, name: name, stepName: "Run \(name)", console: nil)
+        return Script(code: code, filename: path, name: name, stepName: "Run \(name)", console: nil, command: nil)
+    }
+
+    /// The command a script registered with `@margolaria.command(title)`:
+    /// its changes are steps called `title`.
+    public static func command(_ title: String) -> Script {
+        Script(code: "", filename: "", name: title, stepName: title, console: nil, command: title)
     }
 }
 
@@ -97,25 +113,31 @@ public enum Python {
     /// `sitePackages` the MaterialX package. `cache`, if not nil, is where
     /// Python keeps the modules it compiles, so later launches don't
     /// compile them again.
+    /// `userSitePackages`, if not nil, is the user's own packages' folder,
+    /// after the bundled one on the import path (M6d).
     public struct Location: Sendable {
         public let home: URL
         public let sitePackages: URL
         public let cache: URL?
+        public let userSitePackages: URL?
 
-        public init(home: URL, sitePackages: URL, cache: URL? = nil) {
+        public init(home: URL, sitePackages: URL, cache: URL? = nil, userSitePackages: URL? = nil) {
             self.home = home
             self.sitePackages = sitePackages
             self.cache = cache
+            self.userSitePackages = userSitePackages
         }
 
         /// Where the app's bundle has them (project.yml), with the cache in
         /// the user's Caches folder (`~/Library/Caches/<bundle id>/Python`),
-        /// as the app itself is signed and can't be written to.
+        /// as the app itself is signed and can't be written to, and the
+        /// user's packages in `userFolder`'s `Python/site-packages`.
         public static func inApp(_ bundle: Bundle = .main) -> Location {
             let caches: URL? = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
             return Location(home: bundle.privateFrameworksURL!.appending(path: "Python.framework/Versions/3.13"),
                             sitePackages: bundle.resourceURL!.appending(path: "Python/site-packages"),
-                            cache: caches?.appending(path: "\(bundle.bundleIdentifier ?? "Margolaria")/Python"))
+                            cache: caches?.appending(path: "\(bundle.bundleIdentifier ?? "Margolaria")/Python"),
+                            userSitePackages: Python.userFolder.appending(path: "Python/site-packages"))
         }
 
         /// Where the scripts in Vendor put them, for tests.
@@ -136,6 +158,17 @@ public enum Python {
         }
     }
 
+    /// Margolaria's folder in the user's Application Support
+    /// (`~/Library/Application Support/Margolaria`), for what scripters add
+    /// (M6d): their packages, in `Python/site-packages`, and their startup
+    /// scripts, in `Scripts`. Not made until it is needed.
+    ///
+    /// SWIFT: `nonisolated`, unlike the rest of `Python`, so that
+    /// `Location.inApp`, which isn't the main actor's, can read it.
+    public nonisolated static var userFolder: URL {
+        URL.applicationSupportDirectory.appending(path: "Margolaria")
+    }
+
     /// Starts Python from `location`, once; later calls do nothing.
     public static func start(from location: Location) throws {
         if pybridge.Interpreter.isRunning() {
@@ -154,6 +187,47 @@ public enum Python {
                                          &errorMessage) else {
             throw PythonError.startFailed(errorMessage.swiftString)
         }
+        if let folder = location.userSitePackages {
+            try addSitePackages(folder)
+        }
+    }
+
+    /// Adds `folder` to Python's import path, as a site-packages folder:
+    /// its `.pth` files are read too. It needn't exist yet.
+    static func addSitePackages(_ folder: URL) throws {
+        var errorMessage = std.string()
+        guard pybridge.Interpreter.addSitePackages(std.string(folder.path(percentEncoded: false)), &errorMessage) else {
+            throw PythonError.startFailed(errorMessage.swiftString)
+        }
+    }
+
+    /// The titles of the commands scripts have registered
+    /// (`@margolaria.command`), in the order they were first registered.
+    public static var commands: [String] {
+        pybridge.Interpreter.commands().map(\.swiftString)
+    }
+
+    /// Posted, on the main thread, when `commands` changes: after the run
+    /// of a script that registered one, or `clearCommands`.
+    public static let commandsDidChange = Notification.Name("MargolariaScriptCommandsDidChange")
+
+    /// `commands` when `commandsDidChange` was last posted.
+    private static var knownCommands: [String] = []
+
+    /// Forgets every command, before the startup scripts run again.
+    public static func clearCommands() {
+        pybridge.Interpreter.clearCommands()
+        noticeCommands()
+    }
+
+    /// Posts `commandsDidChange` if `commands` has changed. After each run.
+    static func noticeCommands() {
+        let commands: [String] = commands
+        guard commands != knownCommands else {
+            return
+        }
+        knownCommands = commands
+        NotificationCenter.default.post(name: commandsDidChange, object: nil)
     }
 
     /// True once Python has started.
@@ -190,9 +264,9 @@ public enum Python {
                 ended = result
             }
         } catch {
-            return ScriptResult(succeeded: false, output: error.localizedDescription, steps: [], interrupted: false)
+            return .failed(error.localizedDescription)
         }
-        return ended ?? ScriptResult(succeeded: false, output: "", steps: [], interrupted: false)
+        return ended ?? .failed("")
     }
 
     /// Starts `script` on `document`, on a worker thread (ScriptRun.swift),
@@ -224,6 +298,22 @@ public enum Python {
         let calls = HostCalls(document: document, host: host)
         let run = ScriptRun(script: script, document: document, calls: calls) { result in
             finished(ended(result, on: document, before: before, undoManager: undoManager, changed: changed))
+        }
+        _ = run.wait(upTo: timeout)
+        return run
+    }
+
+    /// Starts `script` with no document, as a startup script runs (M6d):
+    /// `margolaria.document()`, the edits and the calls to Swift raise in
+    /// it. Otherwise as `start(_:on:...)`.
+    public static func start(_ script: Script, waitingUpTo timeout: TimeInterval,
+                             finished: @escaping (ScriptResult) -> Void) throws -> ScriptRun {
+        if let current = ScriptRun.current {
+            throw PythonError.busy(current.name)
+        }
+        let run = ScriptRun(script: script, document: nil, calls: nil) { result in
+            finished(ScriptResult(succeeded: result.succeeded, output: result.output.swiftString, steps: [],
+                                  interrupted: result.interrupted))
         }
         _ = run.wait(upTo: timeout)
         return run
