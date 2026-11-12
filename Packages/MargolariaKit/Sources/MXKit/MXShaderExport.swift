@@ -1,7 +1,8 @@
 // MXShaderExport.swift
 //
 // Writes generated shader code to files (M5d, PLAN.md §8.6): Export
-// Shader… in the app, and the tests. OSL is also compiled to .oso, with
+// Shader… in the app, `margolaria.export_shader` in scripts, the command
+// line (M6e), and the tests. `generate` makes the code they all export. OSL is also compiled to .oso, with
 // an oslc the caller names (the app's is chosen by the user; the tests use
 // scripts/build-osl.sh's), since that is what OSL renderers load.
 //
@@ -25,6 +26,25 @@ import Foundation
 /// SWIFT: An `enum` with no cases is a namespace for static functions: it
 /// can't be instantiated, unlike a struct with a private init.
 public enum MXShaderExport {
+    /// `language`'s code for the element at `path`, as the Generated
+    /// Shader tab shows and exports it: generated from `previewXML`, the
+    /// document's preview text (``MXDocument/previewXMLString()``:
+    /// included files inline, texture paths absolute, so the code finds
+    /// the textures wherever it is used), with `library`. See
+    /// ``MXDocument/generateCode(for:in:library:colorSpace:)``.
+    public static func generate(_ language: MXShaderLanguage, for path: String, previewXML: String,
+                                colorSpace: String, library: MXLibrary) throws -> MXShaderCode {
+        let preview = try MXDocument(xml: previewXML)
+        preview.setDataLibrary(library)
+        return try preview.generateCode(for: path, in: language, library: library, colorSpace: colorSpace)
+    }
+
+    /// The name of the files exported for the element at `path`: its own,
+    /// without its nodegraph ("noise1" for "NG_brick/noise1").
+    public static func fileName(for path: String) -> String {
+        path.split(separator: "/").last.map(String.init) ?? path
+    }
+
     /// Writes `code` into `folder` (created if needed) as files named after
     /// `name` (see the file comment), and returns them. For OSL, `oslc`, if
     /// given, compiles the .osl to an .oso beside it.

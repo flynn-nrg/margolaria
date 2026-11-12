@@ -2,7 +2,7 @@
 //
 // The `margolaria` module's calls that only Swift can answer (M6b): the
 // selection, which is the window's; validation, export and the working
-// space, which MXKit, ColorKit and ViewportKit do as the app does. The
+// space, which MXKit, ColorKit and Export.swift do as the app does. The
 // module is C++ (PythonBridge.cpp); it calls back through one C function
 // pointer, with a HostCall naming the function and its arguments, on the
 // script's thread. ScriptRun.swift hands the call to the main thread
@@ -16,7 +16,6 @@ import Foundation
 import MXBridge
 import MXKit
 import PythonBridge
-import ViewportKit
 
 /// What a script asks of the window it runs in: the app's document window,
 /// or a test's stand-in.
@@ -92,17 +91,16 @@ final class HostCalls {
                                 converting: arguments[2] == "convert")
             return []
         case "export_usd":
-            try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(),
-                                              to: try url(arguments[0]))
+            try Export.usd(document, to: try url(arguments[0]))
             return []
         case "export_usdz":
-            try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(),
-                                            to: try url(arguments[0]),
-                                            materialName: arguments[1].isEmpty ? nil : arguments[1])
+            try Export.usdz(document, to: try url(arguments[0]), material: arguments[1].isEmpty ? nil : arguments[1])
             return []
         case "export_shader":
-            return try exportShader(of: arguments[0], to: try url(arguments[1]), language: arguments[2],
-                                    colorSpace: arguments[3], oslc: arguments[4].isEmpty ? nil : try url(arguments[4]))
+            let files: [URL] = try Export.shader(of: arguments[0], in: document, language: arguments[2],
+                                                 colorSpace: arguments[3], to: try url(arguments[1]),
+                                                 oslc: arguments[4].isEmpty ? nil : try url(arguments[4]))
+            return files.map { $0.path(percentEncoded: false) }
         default:
             throw ScriptError.unknownFunction(function)
         }
@@ -143,23 +141,6 @@ final class HostCalls {
             throw error
         }
     }
-
-    /// As the Generated Shader tab's Export does (MaterialXDocument.swift),
-    /// the files named after the element. Returns their paths.
-    private func exportShader(of path: String, to folder: URL, language: String, colorSpace: String,
-                              oslc: URL?) throws -> [String] {
-        let languages: [String: MXShaderLanguage] = ["msl": .msl, "glsl": .glsl, "osl": .osl,
-                                                     "osl_network": .oslNetwork]
-        guard let shaderLanguage = languages[language] else {
-            throw ScriptError.unknownLanguage(language)
-        }
-        let library: MXLibrary = try MXLibrary.bundled.get()
-        let code: MXShaderCode = try document.generateCode(for: path, in: shaderLanguage, library: library,
-                                                           colorSpace: colorSpace)
-        let name: String = path.split(separator: "/").last.map(String.init) ?? path
-        let files: [URL] = try MXShaderExport.write(code, named: name, to: folder, oslc: oslc, library: library)
-        return files.map { $0.path(percentEncoded: false) }
-    }
 }
 
 /// Why a module function couldn't be answered; raised in Python as a
@@ -169,6 +150,8 @@ enum ScriptError: Error, LocalizedError {
     case relativePath(String)
     case unknownLanguage(String)
     case unknownFunction(String)
+    /// A material asked for, and those there are.
+    case noMaterial(String, [String])
 
     var errorDescription: String? {
         switch self {
@@ -180,6 +163,9 @@ enum ScriptError: Error, LocalizedError {
             return "No shader language \(language): msl, glsl, osl or osl_network."
         case .unknownFunction(let function):
             return "margolaria.\(function)() isn't known to this version of Margolaria."
+        case .noMaterial(let material, let materials):
+            return "No material called \(material) in the document"
+                + (materials.isEmpty ? "." : ": " + materials.joined(separator: ", ") + ".")
         }
     }
 }

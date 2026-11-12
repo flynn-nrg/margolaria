@@ -15,9 +15,15 @@
 // The app delegate also runs the user's startup scripts at launch (M6d),
 // and handles the Scripts menu's own items.
 //
+// The same executable is the `margolaria` command line (M6e): started with
+// a subcommand (`margolaria run ...`, `margolaria export ...`), it runs it
+// without a window (ScriptKit's CommandLineTool) and exits, before AppKit
+// starts.
+//
 // Introduces (SWIFT): `@main` on a type with `static func main()`,
 // `@MainActor` on a function, `withExtendedLifetime`, `NSObject` subclasses
-// conforming to Objective-C protocols, selector-based notification observers.
+// conforming to Objective-C protocols, selector-based notification observers;
+// `exit` (M6e).
 
 import AppKit
 import ScriptKit
@@ -36,6 +42,14 @@ enum MargolariaApp {
     /// made from main-actor code.
     @MainActor
     static func main() {
+        // A command line runs, and the process ends with its status.
+        //
+        // SWIFT: `exit` is C's, from the system library: it ends the
+        // process at once with that status, and never returns.
+        if let status = CommandLineTool.run(CommandLine.arguments) {
+            exit(status)
+        }
+
         // The shared application object, NSApp in Objective-C.
         let application: NSApplication = NSApplication.shared
         let delegate = AppDelegate()

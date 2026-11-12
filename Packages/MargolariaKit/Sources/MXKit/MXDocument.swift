@@ -148,14 +148,21 @@ public final class MXDocument {
     /// Wraps a handle that was loaded some other way (`read(from:)`,
     /// `copy()`).
     ///
-    /// SWIFT: A `package init`: code in this package can call it (ScriptKit
-    /// wraps the copies a script's undo steps keep, M6b), the app can't.
-    /// Swift lets a class have several initializers, distinguished by their
-    /// labels.
-    package init(handle: mxbridge.Document, fileURL: URL?, fileVersion: String?) {
+    /// SWIFT: Swift lets a class have several initializers, distinguished
+    /// by their labels. This one is `internal`: other modules of the
+    /// package use `sharingFile(with:)`, as Xcode's Release builds don't
+    /// let them see a `package init` (M6e).
+    init(handle: mxbridge.Document, fileURL: URL?, fileVersion: String?) {
         self.handle = handle
         self.fileURL = fileURL
         self.fileVersion = fileVersion
+    }
+
+    /// A document wrapping `handle`, from the same file as this one (its
+    /// `fileURL` and `fileVersion`): ScriptKit wraps the copies a script's
+    /// undo steps keep with it (M6b).
+    package func sharingFile(with handle: mxbridge.Document) -> MXDocument {
+        MXDocument(handle: handle, fileURL: fileURL, fileVersion: fileVersion)
     }
 
     /// Reads a .mtlx file from disk.

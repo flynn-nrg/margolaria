@@ -287,7 +287,9 @@ let package = Package(
         // Scripts run on documents through PyMaterialX (M6).
         .testTarget(
             name: "ScriptKitTests",
-            dependencies: ["ScriptKit", "MXKit", "PythonBridge"],
+            // ViewportKit: the command line's exports are checked against
+            // the app's own calls (M6e).
+            dependencies: ["ScriptKit", "MXKit", "PythonBridge", "ViewportKit"],
             swiftSettings: [.interoperabilityMode(.Cxx)]
         ),
 

@@ -329,8 +329,7 @@ public enum Python {
                                 interrupted: result.interrupted)
         }
         let steps: [MXUndoStep] = result.steps.map { step in
-            MXUndoStep(name: step.name.swiftString,
-                       after: MXDocument(handle: step.after, fileURL: document.fileURL, fileVersion: document.fileVersion))
+            MXUndoStep(name: step.name.swiftString, after: document.sharingFile(with: step.after))
         }
         if let undoManager {
             MXUndo.register(steps, on: undoManager, startingFrom: before, in: document, changed: changed)
