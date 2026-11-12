@@ -243,11 +243,8 @@ struct GeneratedShaderTab: View {
             }
             let generated: Result<MXShaderCode, any Error> = await Task.detached {
                 Result {
-                    let library: MXLibrary = try MXLibrary.bundled.get()
-                    let preview = try MXDocument(xml: request.previewXML)
-                    preview.setDataLibrary(library)
-                    return try preview.generateCode(for: request.path, in: request.language, library: library,
-                                                    colorSpace: request.colorSpace)
+                    try MXShaderExport.generate(request.language, for: request.path, previewXML: request.previewXML,
+                                                colorSpace: request.colorSpace, library: try MXLibrary.bundled.get())
                 }
             }.value
             // The request may have changed while generating; the newer
@@ -299,9 +296,7 @@ struct GeneratedShaderTab: View {
             .disabled(shownText == nil)
             Button("Export…") {
                 if let code = shownCode, let path {
-                    // Files named after the element, without its nodegraph.
-                    let name: String = path.split(separator: "/").last.map(String.init) ?? path
-                    document.exportShader(code, named: name)
+                    document.exportShader(code, named: MXShaderExport.fileName(for: path))
                 }
             }
             .disabled(shownCode == nil)

@@ -1,6 +1,6 @@
 # Scripting Margolaria
 
-Margolaria runs Python 3.13 on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window, the bottom panel's **Console** tab runs what you type, line by line, and **startup scripts** add commands of your own to the Scripts menu. They all use two modules:
+Margolaria runs Python 3.13 on the open document: File > Run Script… picks a `.py` file and runs it on the document in the front window, the bottom panel's **Console** tab runs what you type, line by line, **startup scripts** add commands of your own to the Scripts menu, and the **`margolaria` command line** runs scripts and exports without a window. They all use two modules:
 
 - **`MaterialX`**: MaterialX's own Python API (PyMaterialX 1.39.5), the same as in Houdini or MaterialX's Graph Editor.
 - **`margolaria`**: the open document, the editor's edits on it, undo steps, the selection, validation and export.
@@ -133,8 +133,32 @@ Relative paths are relative to the document's folder; a document that was never 
 | Function | What it does |
 |---|---|
 | `export_usd(path)` | The document's materials as USD (`.usda`, `.usdc` or `.usd`), as File > Export as USD… |
-| `export_usdz(path, material=None)` | A USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ…: a sphere with `material` (by name; the first if `None`), the other materials, and every texture. |
+| `export_usdz(path, material=None)` | A USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ…: a sphere with `material` (by name; the first if `None`; a name the document doesn't have raises), the other materials, and every texture. |
 | `export_shader(path, folder, language="msl", colorspace="lin_rec709", oslc=None)` | The shader MaterialX generates for the element at `path`, written into `folder` as the Generated Shader tab's Export… does. `language`: `"msl"`, `"glsl"`, `"osl"` or `"osl_network"`. `colorspace`: `"lin_rec709"` or `"acescg"`. For `"osl"`, `oslc` (the compiler's path) also compiles it to `.oso`. Returns the files' paths. |
+
+## The command line
+
+Margolaria's own executable is also a command-line tool, for pipelines: started with a command, it runs it without a window and exits. Put a link to it on your `PATH`, named `margolaria`:
+
+```
+ln -s /Applications/Margolaria.app/Contents/MacOS/Margolaria /usr/local/bin/margolaria
+```
+
+| Command | What it does |
+|---|---|
+| `margolaria run SCRIPT [FILE] [-o OUTPUT]` | Runs the script on `FILE` (a new, empty document if there is none), as File > Run Script… does, and saves the result as `OUTPUT`, as Save does. Without `-o`, nothing is saved (a script that only reads, or exports, needs none). |
+| `margolaria export usd FILE OUTPUT` | `FILE`'s materials as USD (`.usda`, `.usdc` or `.usd`), as File > Export as USD…. |
+| `margolaria export usdz FILE OUTPUT [--material NAME]` | A USDZ package, as File > Export as USDZ…: a sphere with the material `NAME` (the first if not given), the other materials, and every texture. |
+| `margolaria export shader FILE ELEMENT FOLDER [--language LANGUAGE] [--colorspace SPACE] [--oslc PATH]` | The shader generated for `ELEMENT` (`"Tiled_Brass"`, `"NG_brick/out"`), written into `FOLDER` as the Generated Shader tab's Export… does. `LANGUAGE`: `msl` (the default), `glsl`, `osl` or `osl_network`. `SPACE`: `lin_rec709` or `acescg`; the document's working space if not given, as in the tab. For `osl`, `oslc` also compiles it. |
+| `margolaria help` | How to use it. |
+
+Each does what the app does, with the same code, so it writes the same files.
+
+- **A script run from the command line** works as in the app, with no window: `selection()` is empty and `select()` does nothing. Relative export paths are from the document's folder (the current folder for a new document). What it prints goes to standard output when it ends; a traceback to standard error.
+- **Exit status:** 0 when it worked; 1 when it failed (a script that raised, a file that couldn't be read or written); 2 for arguments that don't make a command.
+- Startup scripts don't run: they set up the app's menus. Your own packages (above) are on the import path.
+- Ctrl-C ends the tool at once, script and all; nothing is saved.
+- Started with no command, or with files, the executable is the app, as when it is opened from the Finder.
 
 ## Limits for now
 
