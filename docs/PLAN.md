@@ -422,7 +422,7 @@ Left for later: binding materials to the user's own USD models; MDL and Slang ta
 
 *An alternative* (the user, 2026-11-08; pros and cons to discuss later): ship a small Hydra renderer plugin in Margolaria that only talks to Izpi over the network, with Izpi running as its own process, on this Mac or another. Izpi would then evolve independently of Margolaria's releases: a new Izpi wouldn't need a new Margolaria, and it wouldn't have to be built against SwiftUsd's OpenUSD.
 
-### 8.7 M6 plan (Python)
+### 8.7 M6 plan (Python; done, see `docs/milestones/M6-python.md`)
 
 Drafted 2026-11-08. M6 makes Margolaria scriptable in Python: a script, typed in a console, run from a file or from the command palette, edits the open document through the same layer as the UI, and its changes are one undo step. Split into PRs like M5. A spike comes first, because the exit criterion's second half (the notarized build still passes `spctl`) depends on embedding and signing an interpreter and its native modules, which only a real release build can tell.
 
