@@ -2,9 +2,10 @@
 //
 // The 3D preview for one document (PLAN.md §4.1, region 4): a bar above
 // the Storm viewport from ViewportKit, which shows the chosen material on a
-// sphere. Drag to orbit, scroll to zoom. The bar picks the material, the
-// light around the sphere, the OCIO view transform (M3b), and the Hydra
-// renderer (M5e; only Storm today, so the bar just names it).
+// sphere, or since M7a another shape. Drag to orbit, scroll to zoom. The bar
+// picks the material, the shape (M7a), the light around it, the OCIO view
+// transform (M3b), and the Hydra renderer (M5e; only Storm today, so the
+// bar just names it).
 //
 // The viewport shows the document as it is in memory (M2c), edits included,
 // saved or not: after each edit it gets the new text (`viewportXML`: the
@@ -47,6 +48,10 @@ struct ViewportPanel: View {
     /// next launch. It stores strings, numbers and enums with a String or
     /// Int raw value, like ViewportEnvironment.
     @AppStorage("viewportEnvironment") private var environment: ViewportEnvironment = .studio
+
+    /// The shape the material is shown on (M7a), kept between launches.
+    /// Export as USDZ… writes the same one (ViewportShape.chosen).
+    @AppStorage(ViewportShape.defaultsKey) private var shape: ViewportShape = .sphere
 
     /// The OCIO display and view chosen, kept between launches. Empty until
     /// one is chosen; the config's default is shown until then.
@@ -112,7 +117,7 @@ struct ViewportPanel: View {
                           systemImage: "scope")
                         .foregroundStyle(Color(red: 0.98, green: 0.68, blue: 0.2))
                         .lineLimit(1)
-                        .help("The node's output alone on the sphere. ⌥-click its swatch again, press S, or ✕, for the material.")
+                        .help("The node's output alone on the shape. ⌥-click its swatch again, press S, or ✕, for the material.")
                     Button {
                         self.soloPath = nil
                     } label: {
@@ -134,6 +139,14 @@ struct ViewportPanel: View {
                     .disabled(materials.count < 2)
                 }
                 Spacer()
+                Picker("Shape", selection: $shape) {
+                    ForEach(ViewportShape.allCases) { shape in
+                        Text(shape.title).tag(shape)
+                    }
+                }
+                .labelsHidden()
+                .fixedSize()
+                .help("The shape the material is shown on, and that Export as USDZ… writes")
                 Picker("Light", selection: $environment) {
                     ForEach(ViewportEnvironment.allCases) { environment in
                         Text(environment.title).tag(environment)
@@ -141,7 +154,7 @@ struct ViewportPanel: View {
                 }
                 .labelsHidden()
                 .fixedSize()
-                .help("The light around the sphere")
+                .help("The light around the shape")
                 if let viewTransform {
                     viewTransformPicker(showing: viewTransform)
                 }
@@ -161,11 +174,11 @@ struct ViewportPanel: View {
             if let solo {
                 ViewportView(source: .text(solo.xml), materialName: solo.materialName,
                              environment: environment, viewTransform: shownTransform(for: solo),
-                             renderer: renderer)
+                             renderer: renderer, shape: shape)
             } else if !materials.isEmpty, !document.viewportXML.isEmpty {
                 ViewportView(source: .text(document.viewportXML), materialName: materialName,
                              environment: environment, viewTransform: viewTransform,
-                             renderer: renderer)
+                             renderer: renderer, shape: shape)
             } else {
                 ContentUnavailableView("No Materials", systemImage: "circle.lefthalf.filled",
                                        description: Text("The preview shows the document's materials on a sphere."))

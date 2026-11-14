@@ -1,7 +1,8 @@
 // MGStormRenderer.h
 //
 // Renders a MaterialX material (from a .mtlx file, or from XML text) on a
-// preview sphere with Hydra Storm on Metal.
+// preview shape with Hydra Storm on Metal: a sphere, or since M7a another
+// of MGPreviewShape.h's.
 // This is the only code in ViewportKit that touches OpenUSD; ViewportKit
 // (Swift) imports this header and sees an ordinary Objective-C class.
 //
@@ -25,18 +26,21 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 
+#import "MGPreviewShape.h"
+
 NS_ASSUME_NONNULL_BEGIN
 
 /// The NSError domain used by MGStormRenderer.
 extern NSErrorDomain const MGStormRendererErrorDomain;
 
-/// A Hydra Storm renderer for one material on a preview sphere.
+/// A Hydra Storm renderer for one material on a preview shape.
 ///
-/// It owns an in-memory USD stage containing a sphere, two lights (a key
+/// It owns an in-memory USD stage containing the shape (a mesh at
+/// /World/Shape, a sphere until `shape` is set), two lights (a key
 /// light and a dome light for the environment) and a
 /// reference to the .mtlx file (or to MaterialX text, kept in a temporary file). OpenUSD's UsdMtlx plugin translates the
 /// MaterialX document into UsdShade prims; one of its materials is bound to
-/// the sphere (the first, unless bindMaterialAtPath: picks another).
+/// the shape (the first, unless bindMaterialAtPath: picks another).
 ///
 /// Not thread-safe: use one renderer from one thread (the main thread, in the
 /// app).
@@ -67,7 +71,7 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// the texture to the screen, reading it back) runs after Storm's own work.
 @property (nonatomic, readonly) id<MTLCommandQueue> commandQueue;
 
-/// The USD path of the material bound to the sphere, for example
+/// The USD path of the material bound to the shape, for example
 /// "/World/MaterialX/Materials/M_BrushedCopper". The first material in the
 /// file, until bindMaterialAtPath: chooses another. Empty if an update
 /// left no material to show.
@@ -77,7 +81,7 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// path component is the MaterialX material's name.
 @property (nonatomic, readonly) NSArray<NSString *> *materialPaths;
 
-/// Binds the material at `path` (one of materialPaths) to the sphere.
+/// Binds the material at `path` (one of materialPaths) to the shape.
 /// Returns NO, and changes nothing, if there is no material there.
 - (BOOL)bindMaterialAtPath:(NSString *)path;
 
@@ -88,7 +92,11 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 /// be read.
 - (BOOL)updateMaterialXString:(NSString *)xml error:(NSError **)error;
 
-/// The latitude-longitude HDR image lighting the sphere (the dome light's
+/// The shape the material is shown on (M7a): the sphere until set. The
+/// material shown stays bound; the camera stays where it is.
+@property (nonatomic) MGPreviewShape shape;
+
+/// The latitude-longitude HDR image lighting the shape (the dome light's
 /// texture), or nil for OpenUSD's default, an outdoor scene
 /// ("StinsonBeach.hdr", as in usdview). Nil until set.
 @property (nonatomic, copy, nullable) NSURL *environmentURL;
@@ -122,7 +130,8 @@ extern NSErrorDomain const MGStormRendererErrorDomain;
 @property (nonatomic) double azimuth;
 /// Height above the equator, in degrees. Clamped to ±89.
 @property (nonatomic) double elevation;
-/// Distance from the origin, in scene units. The sphere has radius 1.
+/// Distance from the origin, in scene units. The sphere has radius 1, and
+/// the other shapes about the same room.
 @property (nonatomic) double distance;
 
 /// Renders one frame of `width` × `height` pixels.

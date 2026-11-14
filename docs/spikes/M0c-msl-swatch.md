@@ -45,7 +45,7 @@ What MaterialX 1.39.5's MSL looks like, and what `SwatchRenderer` does about it:
 | Lights | `LightData_pixel` (`u_lightData`), an array of `MAX_LIGHT_SOURCES` | Left zeroed, with `u_numActiveLightSources = 0`: environment lighting only. |
 | Environment | `u_envRadiance_tex`/`_sampler`, `u_envIrradiance_tex`/`_sampler` | Our two textures, plus a linear, mipmapped sampler. |
 | Buffer indices | **Different for every shader.** For example, `u_pub` is buffer 0 for the noise node and buffer 2 for the copper material. | Taken from reflection (`.bindingInfo` and `.bufferTypeInfo`), never hard-coded. |
-| Orientation | The vertex stage ends with `pos.y = -pos.y` | The projection is pre-flipped, so swatches come out upright. |
+| Orientation | The vertex stage ends with `pos.y = -pos.y` | The projection is pre-flipped, so swatches come out upright. (Right: checked in M7a, when the viewport turned out to be the one upside down.) |
 
 ## Timing
 

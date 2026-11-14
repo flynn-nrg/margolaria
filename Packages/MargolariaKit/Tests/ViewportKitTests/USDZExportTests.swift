@@ -5,7 +5,8 @@
 // OpenUSD's validators, holds every texture it refers to, and is drawn by
 // RealityKit, the engine of Quick Look and Reality Composer Pro: from its
 // MaterialX graph (a ShaderGraphMaterial) for every material Margolaria
-// doesn't warn about, a fallback for the others, and never nothing.
+// doesn't warn about, a fallback for the others, and never nothing. Since
+// M7a, also each preview shape (exportsShape).
 //
 // RealityKit draws offscreen here with RealityRenderer, as in spike M5a
 // (Spikes/M5aUSDZ/RealityKitRender.swift), lit by Storm's environment.
@@ -135,13 +136,14 @@ struct USDZExportTests {
         return (folder, keptFolder == nil)
     }
 
-    /// Exports `document` as a USDZ at `url`, with `material` on the sphere,
+    /// Exports `document` as a USDZ at `url`, with `material` on `shape`,
     /// and checks the package: OpenUSD's validators find nothing, and
     /// every texture it refers to is inside it, by relative path.
-    static func exportAndCheck(_ document: MXDocument, material: String, to url: URL, _ label: String) throws {
+    static func exportAndCheck(_ document: MXDocument, material: String, to url: URL, _ label: String,
+                               shape: ViewportShape = .sphere) throws {
         try? FileManager.default.removeItem(at: url)
         try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(), to: url,
-                                        materialName: material)
+                                        materialName: material, shape: shape.bridged)
         let problems: [String] = MGUSDExporter.validationMessagesForFile(at: url)
         #expect(problems.isEmpty, "\(label): \(problems)")
         let packaged: Set<String> = Set(MGUSDExporter.filesInPackage(at: url))
@@ -193,6 +195,33 @@ struct USDZExportTests {
             }
             Self.expectDrawn(image, label)
         }
+    }
+
+    @Test("Each preview shape exports as a USDZ named after it, which RealityKit draws from the graph (M7a)",
+          .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
+          arguments: ViewportShape.allCases)
+    @MainActor
+    func exportsShape(_ shape: ViewportShape) async throws {
+        let drawing: RealityKitDrawing = try #require(RealityKitDrawing.shared)
+        let (folder, remove) = try Self.folder()
+        defer {
+            if remove {
+                try? FileManager.default.removeItem(at: folder)
+            }
+        }
+        // Textured, so the shape's texture coordinates are exercised.
+        let url: URL = try #require(Examples.files.first { $0.lastPathComponent == "standard_surface_brass_tiled.mtlx" })
+        let document = try MXDocument.read(from: url)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        let usdz: URL = folder.appending(path: "brass.\(shape.rawValue).usdz")
+        try Self.exportAndCheck(document, material: "Tiled_Brass", to: usdz, "\(shape)", shape: shape)
+
+        let entity = try await Entity(contentsOf: usdz)
+        let name: String = shape == .shaderBall ? "ShaderBall" : shape.title
+        #expect(entity.findEntity(named: name) != nil, "\(shape): no \(name) in the scene")
+        let (kinds, image) = try await drawing.draw(usdz)
+        #expect(kinds == ["ShaderGraphMaterial"], "\(shape): \(kinds), not drawn from its graph")
+        Self.expectDrawn(image, "\(shape)")
     }
 
     /// A brick texture from MaterialX's resources, greyscale (one channel).

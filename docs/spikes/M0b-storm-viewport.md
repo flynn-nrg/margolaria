@@ -57,7 +57,7 @@ This is the stage PLAN.md §5 describes: Hydra renders a generated USD stage tha
 | `.mtlx` into USD | `AddReference(path, "/MaterialX")` works; the UsdMtlx plugin ships in SwiftUsd. Materials appear at `<ref>/Materials/<name>`. |
 | Getting the frame | `engine.GetAovTexture(HdAovTokens->color)` → `HgiMetalTexture::GetTextureId()` returns an RGBA16Float `id<MTLTexture>`. |
 | Showing it | Use an `MTKView` with the following settings, then blit the texture into the drawable using Storm's own command queue, so the blit runs after Storm's work:<br>• `colorPixelFormat = .rgba16Float`, so the pixel format matches and a blit works without a shader;<br>• `colorspace = sRGB`;<br>• `framebufferOnly = false`. |
-| Orientation | Storm's texture is upright in Metal. Core Image needs `.downMirrored` for snapshots. |
+| Orientation | Storm's texture is upright in Metal. Core Image needs `.downMirrored` for snapshots. *Wrong, found in M7a:* Hydra writes its image bottom row first, so the viewport was upside down; the sphere is symmetric, so it didn't show. MGStormRenderer turns the projection over (and `flipFrontFacing`). |
 | Colour | `colorCorrectionMode = sRGB` gives display-ready pixels. M3 replaces this with OCIO. |
 | Swift-facing API | Objective-C++ was the right choice: `id<MTLTexture>` only exists in HgiMetal's Objective-C++ API, and an ObjC class hides every C++ type from Swift. |
 

@@ -10,7 +10,9 @@
 // The app doesn't offer Embree (ViewportRenderer.unusable): with Metal's
 // validation on, OpenUSD stops in its depth copy (PLAN.md §8.2). `swift
 // test` runs without validation, where the colour image is right, so the
-// switching is still checked here, for the renderers to come.
+// switching is still checked here, for the renderers to come. With
+// MTL_DEBUG_LAYER=1, the rendering test is skipped (since M7a), so the
+// rest of the tests can run under validation.
 //
 // With VIEWPORT_SNAPSHOT_DIR set, every render is saved.
 //
@@ -62,6 +64,8 @@ extension StormRendererTests {
 
     @Test("Every example renders in every renderer, and Storm's image comes back",
           .enabled(if: !Examples.files.isEmpty, "Run scripts/fetch-materialx-examples.sh to fetch the examples"),
+          .enabled(if: ProcessInfo.processInfo.environment["MTL_DEBUG_LAYER"] != "1",
+                   "Embree stops under Metal's validation (PLAN.md §8.2)"),
           arguments: Examples.files)
     func rendersExampleInEveryRenderer(_ url: URL) throws {
         // From the viewport's text, as the app shows a document.

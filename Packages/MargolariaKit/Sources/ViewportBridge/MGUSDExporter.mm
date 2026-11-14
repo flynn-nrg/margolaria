@@ -6,14 +6,14 @@
 // copied into one layer, so nothing refers to the MaterialX file any more.
 //
 //   MaterialX text ──file──▶ UsdMtlx ──reference──▶ stage (/MaterialX,
-//                                                      │  or /World with a sphere)
+//                                                      │  or /World with a shape)
 //                                                      │ Flatten()
 //                                                      ▼
 //                                   one layer ──Export──▶ .usda / .usdc
 //                                             └─UsdUtils─▶ .usdz (textures packaged)
 
 #import "MGUSDExporter.h"
-#import "MGPreviewSphere.h"
+#import "MGPreviewShapes.h"
 
 #include <functional>
 #include <string>
@@ -126,13 +126,13 @@ void MakeAssetPathsRelative(const SdfLayerRefPtr &layer, const std::string &fold
 
 /// What UsdMtlx makes of the MaterialX text `xml`, flattened into one
 /// layer, with inputs without values removed. Under `/MaterialX` (the
-/// default prim), or, with `previewSphere`, under `/World/MaterialX`
-/// with a sphere bound to the material named `materialName` (or the
-/// first), in decimetres, Y up, as Quick Look wants. `folder` is a folder
+/// default prim), or, with `preview`, under `/World/MaterialX`
+/// with the preview `shape` bound to the material named `materialName`
+/// (or the first), in decimetres, Y up, as Quick Look wants. `folder` is a folder
 /// of the caller's for the MaterialX file. Null, with `error` set, on
 /// failure; OpenUSD's messages are left in `mark`.
-SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewSphere, NSString *materialName,
-                                  TfErrorMark &mark, NSError **error) {
+SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool preview, MGPreviewShape shape,
+                                  NSString *materialName, TfErrorMark &mark, NSError **error) {
     // UsdMtlx reads files, not text.
     NSString *mtlxPath = [folder stringByAppendingPathComponent:@"material.mtlx"];
     if (![xml writeToFile:mtlxPath atomically:YES encoding:NSUTF8StringEncoding error:error]) {
@@ -140,9 +140,9 @@ SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewS
     }
     UsdStageRefPtr stage = UsdStage::CreateInMemory();
     SdfPath materialXPath("/MaterialX");
-    if (previewSphere) {
+    if (preview) {
         UsdGeomSetStageUpAxis(stage, UsdGeomTokens->y);
-        // Decimetres: the radius-1 sphere is 20 cm across in AR (Quick Look
+        // Decimetres: the radius-1 sphere (and the other shapes) is 20 cm across in AR (Quick Look
         // places objects at their real size).
         UsdGeomSetStageMetersPerUnit(stage, 0.1);
         UsdGeomXform world = UsdGeomXform::Define(stage, SdfPath("/World"));
@@ -150,7 +150,7 @@ SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewS
         materialXPath = SdfPath("/World/MaterialX");
     }
     UsdPrim materialX = stage->DefinePrim(materialXPath);
-    if (!previewSphere) {
+    if (!preview) {
         stage->SetDefaultPrim(materialX);
     }
     // UsdMtlx puts everything under /MaterialX, and sets no default prim.
@@ -169,7 +169,7 @@ SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewS
         }
         return nullptr;
     }
-    if (previewSphere) {
+    if (preview) {
         UsdShadeMaterial bound = materials.front();
         for (const UsdShadeMaterial &material : materials) {
             if (materialName && material.GetPrim().GetName().GetString() == materialName.UTF8String) {
@@ -177,8 +177,9 @@ SdfLayerRefPtr FlattenedMaterials(NSString *xml, NSString *folder, bool previewS
                 break;
             }
         }
-        UsdGeomMesh sphere = MGDefineSphereMesh(stage, SdfPath("/World/Sphere"));
-        UsdShadeMaterialBindingAPI::Apply(sphere.GetPrim()).Bind(bound);
+        // Named after the shape: /World/Sphere, /World/ShaderBall ...
+        UsdGeomMesh mesh = MGDefinePreviewMesh(stage, SdfPath("/World/" + MGPreviewShapeName(shape)), shape);
+        UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim()).Bind(bound);
     }
 
     SdfLayerRefPtr flat = stage->Flatten();
@@ -223,7 +224,7 @@ std::string Describe(const VtValue &value) {
     bool written = false;
     // A C++ exception must never reach Swift.
     try {
-        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, false, nil, mark, error)) {
+        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, false, MGPreviewShapeSphere, nil, mark, error)) {
             MakeAssetPathsRelative(flat, url.URLByDeletingLastPathComponent.path.fileSystemRepresentation);
             written = flat->Export(url.path.fileSystemRepresentation);
             if (!written && error) {
@@ -246,6 +247,7 @@ std::string Describe(const VtValue &value) {
 + (BOOL)exportPreviewFromMaterialXString:(NSString *)xml
                                    toURL:(NSURL *)url
                             materialName:(nullable NSString *)materialName
+                                   shape:(MGPreviewShape)shape
                                    error:(NSError **)error {
     // A folder of our own for the .mtlx and the flattened layer the USDZ
     // is packaged from.
@@ -254,7 +256,7 @@ std::string Describe(const VtValue &value) {
     bool written = false;
     // A C++ exception must never reach Swift.
     try {
-        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, true, materialName, mark, error)) {
+        if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, true, shape, materialName, mark, error)) {
             NSString *rootPath = [folder stringByAppendingPathComponent:@"root.usdc"];
             if (flat->Export(rootPath.fileSystemRepresentation)) {
                 // The ARKit variant also checks the package against what

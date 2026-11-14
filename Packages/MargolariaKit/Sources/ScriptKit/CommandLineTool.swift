@@ -12,7 +12,7 @@
 //
 //   margolaria run SCRIPT [FILE] [-o OUTPUT]
 //   margolaria export usd FILE OUTPUT
-//   margolaria export usdz FILE OUTPUT [--material NAME]
+//   margolaria export usdz FILE OUTPUT [--material NAME] [--shape SHAPE]
 //   margolaria export shader FILE ELEMENT FOLDER [--language LANGUAGE]
 //                                                [--colorspace SPACE] [--oslc PATH]
 //
@@ -24,6 +24,7 @@
 
 import Foundation
 import MXKit
+import ViewportKit
 
 /// The command line's subcommands, run without a window.
 @MainActor
@@ -49,9 +50,10 @@ public enum CommandLineTool {
               a traceback to standard error.
           margolaria export usd FILE OUTPUT
               Writes FILE's materials as USD (.usda, .usdc or .usd), as File > Export as USD….
-          margolaria export usdz FILE OUTPUT [--material NAME]
-              Writes a USDZ package, as File > Export as USDZ…: a sphere with the material
-              NAME (the first if not given), the other materials, and every texture.
+          margolaria export usdz FILE OUTPUT [--material NAME] [--shape SHAPE]
+              Writes a USDZ package, as File > Export as USDZ…: SHAPE (sphere, the default;
+              plane, cylinder, cloth or shader_ball) with the material NAME (the first if not
+              given), the other materials, and every texture.
           margolaria export shader FILE ELEMENT FOLDER [--language LANGUAGE]
                                    [--colorspace SPACE] [--oslc PATH]
               Writes the shader generated for ELEMENT ("brick", "NG_brick/out") into FOLDER,
@@ -177,12 +179,16 @@ public enum CommandLineTool {
             }
             try Export.usd(try open(file(options.positional[0])), to: file(options.positional[1]))
         case "usdz":
-            let options = try Options(words, values: ["--material"])
+            let options = try Options(words, values: ["--material", "--shape"])
             guard options.positional.count == 2 else {
                 throw UsageError("export usdz takes a .mtlx file and the USDZ file to write.")
             }
+            let name: String = options.value("--shape") ?? ViewportShape.sphere.rawValue
+            guard let shape = ViewportShape(rawValue: name) else {
+                throw UsageError(ScriptError.unknownShape(name).localizedDescription)
+            }
             try Export.usdz(try open(file(options.positional[0])), to: file(options.positional[1]),
-                            material: options.value("--material"))
+                            material: options.value("--material"), shape: shape)
         case "shader":
             let options = try Options(words, values: ["--language", "--colorspace", "--oslc"])
             guard options.positional.count == 3 else {

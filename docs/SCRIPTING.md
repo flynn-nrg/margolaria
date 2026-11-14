@@ -133,7 +133,7 @@ Relative paths are relative to the document's folder; a document that was never 
 | Function | What it does |
 |---|---|
 | `export_usd(path)` | The document's materials as USD (`.usda`, `.usdc` or `.usd`), as File > Export as USD… |
-| `export_usdz(path, material=None)` | A USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ…: a sphere with `material` (by name; the first if `None`; a name the document doesn't have raises), the other materials, and every texture. |
+| `export_usdz(path, material=None, shape="sphere")` | A USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ…: `shape` (`"sphere"`, `"plane"`, `"cylinder"`, `"cloth"` or `"shader_ball"`, the viewport's shapes) with `material` (by name; the first if `None`; a name the document doesn't have raises), the other materials, and every texture. The menu command writes the viewport's shape; a script names its own, the sphere unless it says. |
 | `export_shader(path, folder, language="msl", colorspace="lin_rec709", oslc=None)` | The shader MaterialX generates for the element at `path`, written into `folder` as the Generated Shader tab's Export… does. `language`: `"msl"`, `"glsl"`, `"osl"` or `"osl_network"`. `colorspace`: `"lin_rec709"` or `"acescg"`. For `"osl"`, `oslc` (the compiler's path) also compiles it to `.oso`. Returns the files' paths. |
 
 ## The command line
@@ -148,7 +148,7 @@ ln -s /Applications/Margolaria.app/Contents/MacOS/Margolaria /usr/local/bin/marg
 |---|---|
 | `margolaria run SCRIPT [FILE] [-o OUTPUT]` | Runs the script on `FILE` (a new, empty document if there is none), as File > Run Script… does, and saves the result as `OUTPUT`, as Save does. Without `-o`, nothing is saved (a script that only reads, or exports, needs none). |
 | `margolaria export usd FILE OUTPUT` | `FILE`'s materials as USD (`.usda`, `.usdc` or `.usd`), as File > Export as USD…. |
-| `margolaria export usdz FILE OUTPUT [--material NAME]` | A USDZ package, as File > Export as USDZ…: a sphere with the material `NAME` (the first if not given), the other materials, and every texture. |
+| `margolaria export usdz FILE OUTPUT [--material NAME] [--shape SHAPE]` | A USDZ package, as File > Export as USDZ…: `SHAPE` (`sphere`, the default, `plane`, `cylinder`, `cloth` or `shader_ball`) with the material `NAME` (the first if not given), the other materials, and every texture. |
 | `margolaria export shader FILE ELEMENT FOLDER [--language LANGUAGE] [--colorspace SPACE] [--oslc PATH]` | The shader generated for `ELEMENT` (`"Tiled_Brass"`, `"NG_brick/out"`), written into `FOLDER` as the Generated Shader tab's Export… does. `LANGUAGE`: `msl` (the default), `glsl`, `osl` or `osl_network`. `SPACE`: `lin_rec709` or `acescg`; the document's working space if not given, as in the tab. For `osl`, `oslc` also compiles it. |
 | `margolaria help` | How to use it. |
 
