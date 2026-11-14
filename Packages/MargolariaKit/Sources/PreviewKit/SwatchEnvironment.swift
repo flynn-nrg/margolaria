@@ -20,8 +20,8 @@
 // Orientation. MaterialX's shaders look a direction up in a lat-long image
 // with their own convention (mx_latlong_projection: the first texture row
 // is straight up, the middle column is -Z), and Storm with another (the
-// first row stored in the file is straight down, the first column -Z;
-// StudioEnvironment.direction). `matrix`, which shaders apply to every
+// first row stored in the file is straight up too, but the first column is
+// -Z; StudioEnvironment.direction). `matrix`, which shaders apply to every
 // direction before the lookup (u_envMatrix), converts one into the other.
 //
 // Introduces (SWIFT): `static let` caching in a type, Core Image filters
@@ -45,15 +45,14 @@ struct SwatchEnvironment {
     /// (u_envMatrix), so that the image lights the swatch as Storm's dome
     /// light shows it in the viewport.
     ///
-    /// The textures hold the image's rows in the order they are stored, so
-    /// the first row (Storm's straight down) is where MaterialX looks for
-    /// straight up: y is negated. Along a row, Storm's -Z is the first
-    /// column and MaterialX's the middle one: half a turn around Y, which
-    /// negates x and z. Negating all three maps each direction to its
-    /// opposite. (A reflection, not a rotation, but a direction lookup
-    /// doesn't care.) Checked by rendering a mirror sphere both ways
-    /// (ViewportKit's SwatchAgreementTests).
-    static let matrix: simd_float4x4 = simd_float4x4(diagonal: SIMD4(-1, -1, -1, 1))
+    /// The textures hold the image's rows in the order they are stored, and
+    /// the first row is straight up for both. Along a row, Storm's -Z is
+    /// the first column and MaterialX's the middle one: half a turn around
+    /// Y, which negates x and z. Checked by rendering a mirror sphere both
+    /// ways (ViewportKit's SwatchAgreementTests). Until M7a, y was negated
+    /// too, to match the viewport's image, which was upside down
+    /// (MGStormRenderer.mm).
+    static let matrix: simd_float4x4 = simd_float4x4(diagonal: SIMD4(-1, 1, -1, 1))
 
     /// Where StinsonBeach.hdr lives: inside the Usd_Plug framework that
     /// SwiftUsd ships, found by bundle identifier (see MXLibrary.swift for why

@@ -208,10 +208,33 @@ struct CommandLineToolTests {
 
         #expect(margolaria("export", "usdz", path, folder.appending(path: "cli.usdz").path).status == 0)
         try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(),
-                                        to: folder.appending(path: "app.usdz"), materialName: nil)
+                                        to: folder.appending(path: "app.usdz"), materialName: nil, shape: .sphere)
         let packaged: [String: Data] = try zipContents(of: folder.appending(path: "cli.usdz"))
         #expect(Set(packaged.keys) == ["root.usdc", "0/brass_color.jpg", "0/brass_roughness.jpg"])
         #expect(packaged == (try zipContents(of: folder.appending(path: "app.usdz"))))
+
+        // Another shape (M7a), as when the viewport shows it; and from a
+        // script, which names it too.
+        #expect(margolaria("export", "usdz", path, folder.appending(path: "cli-ball.usdz").path,
+                           "--shape", "shader_ball").status == 0)
+        try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(),
+                                        to: folder.appending(path: "app-ball.usdz"), materialName: nil,
+                                        shape: .shaderBall)
+        let ball: [String: Data] = try zipContents(of: folder.appending(path: "cli-ball.usdz"))
+        #expect(ball == (try zipContents(of: folder.appending(path: "app-ball.usdz"))))
+        #expect(ball["root.usdc"] != packaged["root.usdc"])
+        let script: URL = folder.appending(path: "ball.py")
+        let written: URL = folder.appending(path: "script-ball.usdz")
+        try "import margolaria\nmargolaria.export_usdz(\(written.path(percentEncoded: false).debugDescription), shape='shader_ball')\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        let run = margolaria("run", script.path(percentEncoded: false), path)
+        #expect(run.status == 0, "\(run.errors)")
+        #expect(try zipContents(of: written) == ball)
+
+        let shape = margolaria("export", "usdz", path, folder.appending(path: "shape.usdz").path, "--shape", "teapot")
+        #expect(shape.status == 2)
+        #expect(shape.errors.hasPrefix("margolaria: No preview shape teapot: sphere, plane, cylinder, cloth, shader_ball."),
+                "\(shape.errors)")
 
         let named = margolaria("export", "usdz", path, folder.appending(path: "named.usdz").path,
                                "--material", "no_such_material")

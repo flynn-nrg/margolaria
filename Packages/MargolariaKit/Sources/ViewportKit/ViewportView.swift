@@ -1,7 +1,7 @@
 // ViewportView.swift
 //
 // The 3D viewport: a SwiftUI view showing a MaterialX material on a sphere,
-// rendered by Hydra Storm (MGStormRenderer). Drag to orbit, scroll to zoom.
+// or since M7a another ViewportShape, rendered by Hydra Storm (MGStormRenderer). Drag to orbit, scroll to zoom.
 // It shows a .mtlx file, or a document's text; when the text changes (an
 // edit, M2c), the same renderer shows the new version.
 // Frames are rendered at twice the size and scaled down, which smooths the
@@ -65,6 +65,9 @@ public struct ViewportView: View {
     /// The Hydra renderer that draws it (M5e).
     public let renderer: ViewportRenderer
 
+    /// The shape the material is shown on (M7a).
+    public let shape: ViewportShape
+
     /// What the viewport currently shows.
     ///
     /// SWIFT: An enum with *associated values* is a tagged union: each case
@@ -90,12 +93,14 @@ public struct ViewportView: View {
     /// free; the automatic one is `internal`. Code in other modules (the app)
     /// needs this explicit `public init`.
     public init(source: ViewportSource, materialName: String? = nil, environment: ViewportEnvironment = .studio,
-                viewTransform: ViewTransform? = .standard, renderer: ViewportRenderer = .storm) {
+                viewTransform: ViewTransform? = .standard, renderer: ViewportRenderer = .storm,
+                shape: ViewportShape = .sphere) {
         self.source = source
         self.materialName = materialName
         self.environment = environment
         self.viewTransform = viewTransform
         self.renderer = renderer
+        self.shape = shape
     }
 
     /// Shows a .mtlx file (the M0b spike).
@@ -113,7 +118,7 @@ public struct ViewportView: View {
             case .ready(let renderer):
                 StormView(renderer: renderer, text: text, materialName: materialName,
                           environment: environment, viewTransform: viewTransform,
-                          rendererID: self.renderer.id) { error in
+                          rendererID: self.renderer.id, shape: shape) { error in
                     updateError = error
                 }
                 // A short note along the bottom when an edit can't be shown.
@@ -200,12 +205,14 @@ private struct StormView: NSViewRepresentable {
     let viewTransform: ViewTransform?
     /// The Hydra renderer plugin to draw with (M5e).
     let rendererID: String
+    let shape: ViewportShape
     /// Told whether the latest text could be shown: nil if so, otherwise why not.
     let onUpdate: (String?) -> Void
 
     func makeNSView(context: Context) -> StormMTKView {
         let view = StormMTKView(renderer: renderer, environment: environment, viewTransform: viewTransform)
         view.rendererID = rendererID
+        view.shape = shape
         // The renderer was made from this text already.
         view.shownText = text
         view.bindMaterial(named: materialName)
@@ -233,6 +240,7 @@ private struct StormView: NSViewRepresentable {
         view.environment = environment
         view.viewTransform = viewTransform
         view.rendererID = rendererID
+        view.shape = shape
     }
 }
 
@@ -251,8 +259,10 @@ final class StormMTKView: MTKView {
     var renderer: MGStormRenderer {
         didSet {
             device = renderer.device
-            // A new renderer starts with its own lighting, and Storm.
+            // A new renderer starts with its own lighting, Storm, and the
+            // sphere.
             renderer.use(environment)
+            renderer.shape = shape.bridged
             useRenderer()
             needsDisplay = true
         }
@@ -282,7 +292,17 @@ final class StormMTKView: MTKView {
         }
     }
 
-    /// The light around the sphere.
+    /// The shape shown (M7a), the sphere until set.
+    var shape: ViewportShape = .sphere {
+        didSet {
+            if shape != oldValue {
+                renderer.shape = shape.bridged
+                needsDisplay = true
+            }
+        }
+    }
+
+    /// The light around the shape.
     var environment: ViewportEnvironment {
         didSet {
             // SWIFT: `oldValue` is the value before the assignment, given

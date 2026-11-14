@@ -65,10 +65,11 @@ struct SwatchEnvironmentTests {
             for column in stride(from: 0, to: width, by: 4) {
                 // The texel's direction in the shaders' convention, and the
                 // world direction whose lookup lands on it: the matrix is
-                // its own inverse (it negates all three axes).
+                // its own inverse (half a turn around Y, since M7a; it
+                // negated y too before, for the viewport's upside-down image).
                 let lookup: SIMD3<Float> = SwatchEnvironment.latLongDirection(column: column, row: row,
                                                                               width: width, height: height)
-                let normal: SIMD3<Float> = -lookup
+                let normal: SIMD3<Float> = SIMD3(-lookup.x, lookup.y, -lookup.z)
                 let expected: Float = Self.studioIrradiance(facing: normal)
                 let value: Float = map[row * width + column].x
                 // 5% and a little: the map is made from a 64 × 32 copy of

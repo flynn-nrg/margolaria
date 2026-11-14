@@ -7,13 +7,16 @@
 //  - File > Export as USD… (M5b): the materials only, as .usda or .usdc,
 //    for referencing into a scene.
 //  - File > Export as USDZ… (M5c, after spike M5a, docs/spikes/M5a-usdz.md):
-//    a preview sphere with the materials, packaged with their textures,
+//    a preview shape (a sphere, or since M7a the viewport's) with the
+//    materials, packaged with their textures,
 //    for Quick Look and Reality Composer Pro.
 //
 // Same rules as MGStormRenderer.h: no OpenUSD headers, no exceptions, only
 // Foundation types.
 
 #import <Foundation/Foundation.h>
+
+#import "MGPreviewShape.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -41,7 +44,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// for Quick Look and Reality Composer Pro. The text must stand on its
 /// own: MXKit's `usdzXMLString()`.
 ///
-/// The scene is a sphere 20 cm across (`/World/Sphere`; decimetres, Y up)
+/// The scene is `shape`, about 20 cm across (decimetres, Y up), named
+/// after it (`/World/Sphere`, `/World/ShaderBall` ...: MGPreviewShape.h),
 /// bound to the material named `materialName` (the first if nil or not
 /// found), and every material under `/World/MaterialX/Materials`, for
 /// binding in Reality Composer Pro. Every texture is copied into the
@@ -53,6 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
 + (BOOL)exportPreviewFromMaterialXString:(NSString *)xml
                                    toURL:(NSURL *)url
                             materialName:(nullable NSString *)materialName
+                                   shape:(MGPreviewShape)shape
                                    error:(NSError **)error;
 
 /// Every problem OpenUSD's validators (all of those registered) find in

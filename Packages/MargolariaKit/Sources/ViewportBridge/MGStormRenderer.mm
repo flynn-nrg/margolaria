@@ -29,7 +29,7 @@
 // MaterialX's MslShaderGenerator), so nothing here deals with shaders.
 
 #import "MGStormRenderer.h"
-#import "MGPreviewSphere.h"
+#import "MGPreviewShapes.h"
 
 #include <exception>
 #include <memory>
@@ -78,8 +78,8 @@ namespace {
 // up at /World/MaterialX/Materials/<name>.
 const char *const kMaterialXRootPath = "/World/MaterialX";
 
-/// The preview sphere.
-const char *const kSpherePath = "/World/Sphere";
+/// The preview shape (M7a; a sphere before).
+const char *const kShapePath = "/World/Shape";
 
 /// The lights (AddLights).
 const char *const kKeyLightPath = "/World/Lights/Key";
@@ -207,6 +207,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     NSString *_boundMaterialPath;
     NSArray<NSString *> *_materialPaths;
     NSURL *_environmentURL;
+    MGPreviewShape _shape;
 }
 
 - (nullable instancetype)initWithMaterialXFile:(NSURL *)fileURL error:(NSError **)error {
@@ -280,7 +281,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     materialXRoot.GetReferences().AddReference(materialXPath, SdfPath("/MaterialX"));
 }
 
-/// The rest of initialisation, the same for files and text: the sphere
+/// The rest of initialisation, the same for files and text: the shape
 /// with the first material bound, the lights, and the Storm engine.
 /// `name` describes the source in error messages. Returns NO, with `error`
 /// set, on failure.
@@ -302,9 +303,10 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         }
         [self listMaterials:materials];
 
-        // The preview sphere, with the first material bound to it.
-        UsdGeomMesh sphere = MGDefineSphereMesh(_stage, SdfPath(kSpherePath));
-        UsdShadeMaterialBindingAPI::Apply(sphere.GetPrim()).Bind(materials.front());
+        // The preview shape, a sphere until set, with the first material
+        // bound to it.
+        UsdGeomMesh shape = MGDefinePreviewMesh(_stage, SdfPath(kShapePath), MGPreviewShapeSphere);
+        UsdShadeMaterialBindingAPI::Apply(shape.GetPrim()).Bind(materials.front());
         _boundMaterialPath = _materialPaths.firstObject;
 
         AddLights(_stage);
@@ -359,7 +361,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
     // ourselves (renderWithWidth:height:), so switch presentation off.
     _engine->SetEnablePresentation(false);
 
-    // Light the sphere with the dome's environment image, but don't draw
+    // Light the shape with the dome's environment image, but don't draw
     // the image behind it: the background stays the neutral clear colour,
     // which makes the material easier to judge.
     _engine->SetRendererSetting(HdRenderSettingsTokens->domeLightCameraVisibility, VtValue(false));
@@ -406,13 +408,13 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         const std::vector<UsdShadeMaterial> materials = FindMaterials(materialXRoot);
         [self listMaterials:materials];
         if (![_materialPaths containsObject:_boundMaterialPath]) {
-            UsdPrim sphere = _stage->GetPrimAtPath(SdfPath(kSpherePath));
+            UsdPrim shape = _stage->GetPrimAtPath(SdfPath(kShapePath));
             if (materials.empty()) {
-                // Nothing to show: Storm draws the sphere in its fallback grey.
-                UsdShadeMaterialBindingAPI(sphere).UnbindDirectBinding();
+                // Nothing to show: Storm draws the shape in its fallback grey.
+                UsdShadeMaterialBindingAPI(shape).UnbindDirectBinding();
                 _boundMaterialPath = @"";
             } else {
-                UsdShadeMaterialBindingAPI(sphere).Bind(materials.front());
+                UsdShadeMaterialBindingAPI(shape).Bind(materials.front());
                 _boundMaterialPath = _materialPaths.firstObject;
             }
         }
@@ -452,13 +454,37 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         }
         // Rebinding is an ordinary stage edit; UsdImaging notices it and
         // Storm compiles the new material on the next render.
-        UsdPrim sphere = _stage->GetPrimAtPath(SdfPath(kSpherePath));
-        UsdShadeMaterialBindingAPI(sphere).Bind(material);
+        UsdPrim shape = _stage->GetPrimAtPath(SdfPath(kShapePath));
+        UsdShadeMaterialBindingAPI(shape).Bind(material);
         _boundMaterialPath = [path copy];
         return YES;
     } catch (const std::exception &exception) {
         NSLog(@"MGStormRenderer: binding %@ failed: %s", path, exception.what());
         return NO;
+    }
+}
+
+- (MGPreviewShape)shape {
+    return _shape;
+}
+
+- (void)setShape:(MGPreviewShape)shape {
+    if (shape == _shape) {
+        return;
+    }
+    try {
+        // A new mesh at the same path, bound again to the material shown
+        // (the binding was the old prim's). UsdImaging sees a prim
+        // replaced, and Storm draws the new one on the next render, with
+        // the material's shader as it was.
+        UsdGeomMesh mesh = MGDefinePreviewMesh(_stage, SdfPath(kShapePath), shape);
+        UsdShadeMaterial material(_stage->GetPrimAtPath(SdfPath(_boundMaterialPath.UTF8String)));
+        if (material) {
+            UsdShadeMaterialBindingAPI::Apply(mesh.GetPrim()).Bind(material);
+        }
+        _shape = shape;
+    } catch (const std::exception &exception) {
+        NSLog(@"MGStormRenderer: changing the shape failed: %s", exception.what());
     }
 }
 
@@ -563,7 +589,7 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         view.SetLookAt(eye, GfVec3d(0.0), GfVec3d(0.0, 1.0, 0.0));
 
         // A 30° field of view across the narrower side of the image, so the
-        // sphere fits in tall, narrow views as well as wide ones. GfFrustum
+        // shape fits in tall, narrow views as well as wide ones. GfFrustum
         // takes the vertical angle; for a tall view, widen it until the
         // horizontal angle is 30°.
         const double aspect = static_cast<double>(w) / h;
@@ -575,13 +601,25 @@ std::vector<UsdShadeMaterial> FindMaterials(const UsdPrim &root) {
         }
         GfFrustum frustum;
         frustum.SetPerspective(verticalFov, aspect, 0.1, 100.0);
-        _engine->SetCameraState(view, frustum.ComputeProjectionMatrix());
+        // Upside down, on purpose. Hydra writes its image bottom row
+        // first, as OpenGL does, and Metal reads a texture top row first,
+        // so the image came out upside down; the sphere being symmetric,
+        // nobody saw until M7a's shapes (spike M0b had thought it upright).
+        // Turning the projection over makes Hydra write it the right way
+        // up for Metal, for the viewport and the snapshots alike.
+        // (Row vectors: the scale applies after the projection.)
+        const GfMatrix4d turnOver = GfMatrix4d().SetScale(GfVec3d(1.0, -1.0, 1.0));
+        _engine->SetCameraState(view, frustum.ComputeProjectionMatrix() * turnOver);
 
         UsdImagingGLRenderParams params;
         params.clearColor = GfVec4f(0.18f, 0.18f, 0.18f, 1.0f);
         params.enableLighting = true;
         params.enableSceneLights = true;
         params.enableSceneMaterials = true;
+        // The turned projection turns the faces' winding too: front faces
+        // would be taken for back faces (lit from behind, on a double-sided
+        // card or cloth).
+        params.flipFrontFacing = true;
         // Storm works in linear light; this encodes its output as sRGB,
         // without tone mapping or clamping. ViewportKit's DisplayPass
         // decodes it again and applies the OCIO view transform (M3b).

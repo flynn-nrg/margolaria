@@ -9,6 +9,9 @@
 // Storm, or another renderer plugin found at run time. Today that is Storm
 // alone: SwiftUsd's other one, Embree, is left out (see `unusable`).
 //
+// Since M7a, the shape the material is shown on (ViewportShape), which
+// Export as USDZ… writes too.
+//
 // Introduces (SWIFT): enums with `String` raw values, `switch` as an
 // expression.
 
@@ -54,6 +57,52 @@ public enum ViewportEnvironment: String, CaseIterable, Identifiable, Sendable {
     /// Whether the distant key light shines too.
     var usesKeyLight: Bool {
         self == .outdoor
+    }
+}
+
+/// The shape the material is shown on (M7a). Swatches stay spheres.
+public enum ViewportShape: String, CaseIterable, Identifiable, Sendable {
+    case sphere
+    case plane
+    case cylinder
+    /// A square cloth draped over a ball, in folds: for fabrics.
+    case cloth
+    /// Margolaria's shader ball: a grooved ball on a foot.
+    case shaderBall = "shader_ball"
+
+    /// The raw value, as scripts and the command line name the shape
+    /// (`shape="shader_ball"`, `--shape shader_ball`).
+    public var id: String { rawValue }
+
+    /// The name shown in menus.
+    public var title: String {
+        switch self {
+        case .sphere: "Sphere"
+        case .plane: "Plane"
+        case .cylinder: "Cylinder"
+        case .cloth: "Cloth"
+        case .shaderBall: "Shader Ball"
+        }
+    }
+
+    /// The user defaults key the app keeps the choice under, for every
+    /// viewport (`@AppStorage`) and for Export as USDZ….
+    public static let defaultsKey: String = "viewportShape"
+
+    /// The shape chosen in the app, the sphere until one is.
+    public static var chosen: ViewportShape {
+        UserDefaults.standard.string(forKey: defaultsKey).flatMap(ViewportShape.init(rawValue:)) ?? .sphere
+    }
+
+    /// The same shape, as ViewportBridge names it.
+    public var bridged: MGPreviewShape {
+        switch self {
+        case .sphere: .sphere
+        case .plane: .plane
+        case .cylinder: .cylinder
+        case .cloth: .cloth
+        case .shaderBall: .shaderBall
+        }
     }
 }
 

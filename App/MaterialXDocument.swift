@@ -279,7 +279,7 @@ final class MaterialXDocument: NSDocument {
 
     /// The material the viewport shows, by MaterialX name; nil before the
     /// viewport has picked one. Window state, kept here (not in
-    /// ContentView) so that Export as USDZ… can put it on the sphere.
+    /// ContentView) so that Export as USDZ… can put it on the shape.
     var previewMaterial: String? = nil
 
     /// The node selected on the canvas (one only), by path: window state,
@@ -327,8 +327,8 @@ final class MaterialXDocument: NSDocument {
     }
 
     /// File > Export as USDZ…: writes a USDZ package for Quick Look and
-    /// Reality Composer Pro: a sphere with the material the viewport
-    /// shows, the document's other materials for binding there, and every
+    /// Reality Composer Pro: the viewport's shape (M7a) with the material
+    /// it shows, the document's other materials for binding there, and every
     /// texture inside (MGUSDExporter.h). The panel says which materials
     /// they won't draw from their graphs (MXDocument.quickLookIssues).
     @objc func exportAsUSDZ(_ sender: Any?) {
@@ -342,9 +342,10 @@ final class MaterialXDocument: NSDocument {
             return
         }
         let material: String? = previewMaterial
+        let shape: ViewportShape = .chosen
         let panel = NSSavePanel()
         panel.title = "Export as USDZ"
-        var message: String = "A sphere with the material the viewport shows"
+        var message: String = "The viewport's shape (\(shape.title.lowercased())) with the material it shows"
             + (material.map { " (\($0))" } ?? "")
             + ", for Quick Look and Reality Composer Pro. The other materials are included, "
             + "and every texture is packed inside."
@@ -357,7 +358,8 @@ final class MaterialXDocument: NSDocument {
         panel.nameFieldStringValue = exportName + ".usdz"
         panel.allowedContentTypes = [.usdz]
         runExportPanel(panel) { url in
-            try MGUSDExporter.exportPreview(fromMaterialXString: text, to: url, materialName: material)
+            try MGUSDExporter.exportPreview(fromMaterialXString: text, to: url, materialName: material,
+                                            shape: shape.bridged)
         }
     }
 

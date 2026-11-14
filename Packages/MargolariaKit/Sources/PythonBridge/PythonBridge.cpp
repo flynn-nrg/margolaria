@@ -512,12 +512,14 @@ PYBIND11_MODULE(margolaria, module) {
 
     module.def(
         "export_usdz",
-        [](const py::object& path, const py::object& material) {
-            CallHost("export_usdz", {PathText(path), material.is_none() ? "" : material.cast<std::string>()});
+        [](const py::object& path, const py::object& material, const std::string& shape) {
+            CallHost("export_usdz",
+                     {PathText(path), material.is_none() ? "" : material.cast<std::string>(), shape});
         },
-        py::arg("path"), py::arg("material") = py::none(),
-        "Writes a USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ: a sphere "
-        "with material (by name; the first if None), the other materials, and every texture.");
+        py::arg("path"), py::arg("material") = py::none(), py::arg("shape") = "sphere",
+        "Writes a USDZ package for Quick Look and Reality Composer Pro, as File > Export as USDZ: shape "
+        "(sphere, plane, cylinder, cloth or shader_ball) with material (by name; the first if None), the other "
+        "materials, and every texture.");
 
     module.def(
         "export_shader",

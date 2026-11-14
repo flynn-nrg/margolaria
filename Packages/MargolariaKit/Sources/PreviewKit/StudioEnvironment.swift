@@ -44,7 +44,7 @@ public enum StudioEnvironment {
     /// Swift makes this thread-safe (like C++'s function-local statics).
     public static let fileURL: URL? = {
         let url: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Margolaria-studio-environment-2.hdr")
+            .appendingPathComponent("Margolaria-studio-environment-3.hdr")
         if FileManager.default.fileExists(atPath: url.path) {
             return url
         }
@@ -156,17 +156,19 @@ public enum StudioEnvironment {
     }
 
     /// The direction texel (column, row) of the image shows, as Storm's
-    /// dome light maps it: the first row stored is straight *down* (-Y),
-    /// the last straight up, the middle row the horizon. Going along a row,
+    /// dome light maps it: the first row stored is straight up (+Y), the
+    /// last straight down, the middle row the horizon. Going along a row,
     /// the image goes round the Y axis from -Z, through +X (a quarter of the
     /// way), +Z (half way) and -X (three quarters). Found by rendering a
-    /// mirror sphere (StudioRenderTests): an image's first stored row is
-    /// usually its top, but Storm reads .hdr files bottom row first.
+    /// mirror sphere (StudioRenderTests). Until M7a, the rows were thought
+    /// to go the other way: the viewport showed its image upside down
+    /// (MGStormRenderer.mm), and the soft boxes were placed by it, below
+    /// the horizon.
     static func direction(column: Int, row: Int) -> SIMD3<Float> {
         // Texel centres: u and v from 0 to 1.
         let u: Float = (Float(column) + 0.5) / Float(width)
         let v: Float = (Float(row) + 0.5) / Float(height)
-        let polar: Float = (1 - v) * .pi            // from +Y, 0 to π
+        let polar: Float = v * .pi                  // from +Y, 0 to π
         let azimuth: Float = u * 2 * .pi - .pi / 2  // round the Y axis, from -Z
         return SIMD3(sin(polar) * cos(azimuth), cos(polar), sin(polar) * sin(azimuth))
     }

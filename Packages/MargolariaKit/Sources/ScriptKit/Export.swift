@@ -22,17 +22,17 @@ enum Export {
         try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(), to: url)
     }
 
-    /// A USDZ package at `url`: a sphere with `material` (by name; the
+    /// A USDZ package at `url`: `shape` with `material` (by name; the
     /// first if nil), the other materials, and every texture. A material
     /// the document doesn't have is an error, rather than the exporter's
     /// first: a name mistyped in a script or a pipeline would go unseen.
-    static func usdz(_ document: MXDocument, to url: URL, material: String?) throws {
+    static func usdz(_ document: MXDocument, to url: URL, material: String?, shape: ViewportShape) throws {
         let materials: [String] = document.topLevelElements.filter { $0.type == "material" }.map(\.name)
         if let material, !materials.contains(material) {
             throw ScriptError.noMaterial(material, materials)
         }
         try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(), to: url,
-                                        materialName: material)
+                                        materialName: material, shape: shape.bridged)
     }
 
     /// The shader for the element at `path`, in `language` ("msl", "glsl",

@@ -16,6 +16,7 @@ import Foundation
 import MXBridge
 import MXKit
 import PythonBridge
+import ViewportKit
 
 /// What a script asks of the window it runs in: the app's document window,
 /// or a test's stand-in.
@@ -94,7 +95,11 @@ final class HostCalls {
             try Export.usd(document, to: try url(arguments[0]))
             return []
         case "export_usdz":
-            try Export.usdz(document, to: try url(arguments[0]), material: arguments[1].isEmpty ? nil : arguments[1])
+            guard let shape = ViewportShape(rawValue: arguments[2]) else {
+                throw ScriptError.unknownShape(arguments[2])
+            }
+            try Export.usdz(document, to: try url(arguments[0]), material: arguments[1].isEmpty ? nil : arguments[1],
+                            shape: shape)
             return []
         case "export_shader":
             let files: [URL] = try Export.shader(of: arguments[0], in: document, language: arguments[2],
@@ -149,6 +154,7 @@ enum ScriptError: Error, LocalizedError {
     case noWindow
     case relativePath(String)
     case unknownLanguage(String)
+    case unknownShape(String)
     case unknownFunction(String)
     /// A material asked for, and those there are.
     case noMaterial(String, [String])
@@ -161,6 +167,9 @@ enum ScriptError: Error, LocalizedError {
             return "\(path) is relative, but the document has no folder yet: save it, or give an absolute path."
         case .unknownLanguage(let language):
             return "No shader language \(language): msl, glsl, osl or osl_network."
+        case .unknownShape(let shape):
+            return "No preview shape \(shape): "
+                + ViewportShape.allCases.map(\.rawValue).joined(separator: ", ") + "."
         case .unknownFunction(let function):
             return "margolaria.\(function)() isn't known to this version of Margolaria."
         case .noMaterial(let material, let materials):
