@@ -2,7 +2,8 @@
 //
 // Where things are on the canvas, in graph coordinates: node frames, port
 // positions, wire curves and backdrops (M4d). Both renderers (Canvas and Core Animation) and
-// hit testing use these functions, so they always agree.
+// hit testing use these functions, so they always agree. Also the canvas's
+// colours, dark and light (GraphPalette, light since M7b).
 //
 // Node anatomy (PLAN.md §4.1), top to bottom:
 //
@@ -273,34 +274,94 @@ public enum GraphLayout {
     }
 }
 
-/// The canvas's colours, as RGBA components (0...1). Kept as plain numbers
-/// so the SwiftUI and Core Graphics renderers can both use them.
-public enum GraphPalette {
-    public static let background: (CGFloat, CGFloat, CGFloat) = (0.13, 0.13, 0.14)
-    public static let nodeBody: (CGFloat, CGFloat, CGFloat) = (0.22, 0.22, 0.24)
+/// The canvas's colours, as RGB components (0...1), for a dark or a light
+/// appearance (light since M7b; the canvas follows the system's, as the
+/// rest of the window does). Kept as plain numbers so the SwiftUI and Core
+/// Graphics renderers can both use them.
+///
+/// SWIFT: A struct with two `static let` instances, rather than an enum of
+/// constants: the views hold the palette for their appearance in a
+/// variable and read `palette.background`, whichever it is. A typealias
+/// names the tuple type once.
+public struct GraphPalette: Sendable {
+    /// Red, green and blue, 0...1, in sRGB.
+    public typealias RGB = (CGFloat, CGFloat, CGFloat)
+
+    public let isDark: Bool
+    public let background: RGB
+    public let nodeBody: RGB
+    /// A hairline around each node, for the light canvas, where white nodes
+    /// on a light background need an edge; nil for none.
+    public let nodeEdge: RGB?
     /// The disc where a swatch will appear, until it does.
-    public static let thumbnailPlaceholder: (CGFloat, CGFloat, CGFloat) = (0.27, 0.27, 0.29)
-    public static let text: (CGFloat, CGFloat, CGFloat) = (0.88, 0.88, 0.9)
-    public static let secondaryText: (CGFloat, CGFloat, CGFloat) = (0.6, 0.6, 0.63)
-    public static let wire: (CGFloat, CGFloat, CGFloat) = (0.62, 0.62, 0.66)
-    public static let selection: (CGFloat, CGFloat, CGFloat) = (0.25, 0.55, 1.0)
+    public let thumbnailPlaceholder: RGB
+    public let text: RGB
+    public let secondaryText: RGB
+    public let wire: RGB
+    public let selection: RGB
     /// The node shown alone in the viewport (M3d).
-    public static let solo: (CGFloat, CGFloat, CGFloat) = (0.98, 0.68, 0.2)
+    public let solo: RGB
     /// The ⌥-drag cut line, and the wires it will cut.
-    public static let cut: (CGFloat, CGFloat, CGFloat) = (0.95, 0.35, 0.3)
+    public let cut: RGB
     /// How strongly rows a dragged wire can't connect to are dimmed: the
     /// opacity of the background colour laid over them.
-    public static let dimOpacity: CGFloat = 0.7
+    public let dimOpacity: CGFloat
     /// Backdrops (M4d): a muted violet, laid over the background at
     /// `backdropOpacity` (its header twice as strong), with an edge and a
-    /// lighter title, as in the mockup (docs/mockup).
-    public static let backdrop: (CGFloat, CGFloat, CGFloat) = (0.31, 0.29, 0.53)
-    public static let backdropOpacity: CGFloat = 0.14
-    public static let backdropEdge: (CGFloat, CGFloat, CGFloat) = (0.43, 0.40, 0.72)
-    public static let backdropTitle: (CGFloat, CGFloat, CGFloat) = (0.71, 0.69, 0.94)
+    /// title in a stronger violet, as in the mockup (docs/mockup).
+    public let backdrop: RGB
+    public let backdropOpacity: CGFloat
+    public let backdropEdge: RGB
+    public let backdropTitle: RGB
 
-    /// Muted header colours by category.
-    public static func header(_ category: NodeCategory) -> (CGFloat, CGFloat, CGFloat) {
+    /// The dark canvas, as it has been since M0d, with the secondary text
+    /// and the "other" header adjusted for contrast in M7b.
+    public static let dark = GraphPalette(
+        isDark: true,
+        background: (0.13, 0.13, 0.14), nodeBody: (0.22, 0.22, 0.24), nodeEdge: nil,
+        thumbnailPlaceholder: (0.27, 0.27, 0.29), text: (0.88, 0.88, 0.9), secondaryText: (0.64, 0.64, 0.67),
+        wire: (0.62, 0.62, 0.66), selection: (0.25, 0.55, 1.0), solo: (0.98, 0.68, 0.2), cut: (0.95, 0.35, 0.3),
+        dimOpacity: 0.7,
+        backdrop: (0.31, 0.29, 0.53), backdropOpacity: 0.14, backdropEdge: (0.43, 0.40, 0.72),
+        backdropTitle: (0.71, 0.69, 0.94))
+
+    /// The light canvas (M7b): near-white nodes with a hairline edge on a
+    /// light grey, dark text, pastel headers (``header(_:)``) and slightly
+    /// deeper pins (``pin(_:)``), so each keeps its contrast.
+    public static let light = GraphPalette(
+        isDark: false,
+        background: (0.88, 0.88, 0.9), nodeBody: (0.98, 0.98, 0.99), nodeEdge: (0.72, 0.72, 0.75),
+        thumbnailPlaceholder: (0.88, 0.88, 0.9), text: (0.1, 0.1, 0.12), secondaryText: (0.38, 0.38, 0.42),
+        wire: (0.45, 0.45, 0.5), selection: (0.0, 0.45, 0.95), solo: (0.9, 0.5, 0.0), cut: (0.85, 0.2, 0.15),
+        dimOpacity: 0.7,
+        backdrop: (0.42, 0.38, 0.8), backdropOpacity: 0.12, backdropEdge: (0.45, 0.4, 0.75),
+        backdropTitle: (0.3, 0.26, 0.62))
+
+    /// The palette for a dark or a light appearance.
+    public static func forDark(_ isDark: Bool) -> GraphPalette {
+        isDark ? .dark : .light
+    }
+
+    /// Muted header colours by category; on the light canvas, the same
+    /// hues mixed 60% with white, under dark text.
+    public func header(_ category: NodeCategory) -> RGB {
+        let dark: RGB = Self.darkHeader(category)
+        guard !isDark else {
+            return dark
+        }
+        let white: CGFloat = 0.6
+        return (dark.0 + (1 - dark.0) * white, dark.1 + (1 - dark.1) * white, dark.2 + (1 - dark.2) * white)
+    }
+
+    /// Pin colours by type family; on the light canvas, 20% darker, to
+    /// stand out against white.
+    public func pin(_ type: PortType) -> RGB {
+        let bright: RGB = Self.darkPin(type)
+        return isDark ? bright : (bright.0 * 0.8, bright.1 * 0.8, bright.2 * 0.8)
+    }
+
+    /// The dark canvas's header colours.
+    private static func darkHeader(_ category: NodeCategory) -> RGB {
         switch category {
         case .pbr: return (0.45, 0.30, 0.30)
         case .material: return (0.50, 0.36, 0.24)
@@ -315,12 +376,12 @@ public enum GraphPalette {
         case .organization: return (0.30, 0.30, 0.30)
         case .nodeGraph: return (0.24, 0.34, 0.52)
         case .graphInterface: return (0.26, 0.26, 0.28)
-        case .other: return (0.40, 0.40, 0.40)
+        case .other: return (0.37, 0.37, 0.37)
         }
     }
 
-    /// Pin colours by type family.
-    public static func pin(_ type: PortType) -> (CGFloat, CGFloat, CGFloat) {
+    /// The dark canvas's pin colours by type family.
+    private static func darkPin(_ type: PortType) -> RGB {
         switch type.family {
         case .scalar: return (0.65, 0.65, 0.65)
         case .color: return (0.90, 0.75, 0.25)

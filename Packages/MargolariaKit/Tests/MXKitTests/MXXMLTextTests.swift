@@ -1,7 +1,8 @@
 // MXXMLTextTests.swift
 //
 // Tests for the XML panel's helpers: syntax tokens, finding an element's
-// text, and where the canvas shows an issue's element. MXXMLText scans
+// text and the element at a position (M7b), and where the canvas shows an
+// issue's element. MXXMLText scans
 // bytes (since M4e); `Reference` below is how it worked before, with
 // regular expressions, and the scanning must find the same, in every
 // example and in text cut off part-way, as typing leaves it.
@@ -54,6 +55,40 @@ struct MXXMLTextTests {
         // `grain` exists, but not at the top level.
         #expect(MXXMLText.range(ofElementAt: "grain", in: xml) == nil)
         #expect(MXXMLText.range(ofElementAt: "", in: xml) == nil)
+    }
+
+    @Test("Finds the element around a position, the reverse of finding its text (M7b)")
+    func elementPaths() throws {
+        let xml: String = try copperXML()
+        let document = try MXDocument.read(from: Fixtures.url("brushed_copper.mtlx"))
+        // Every element on a canvas level, and every input written there.
+        var paths: [String] = []
+        for level in ["", "NG_copper"] {
+            for node in try document.graph(at: level).nodes {
+                paths.append(node.path)
+                paths += node.inputs.filter(\.isAuthored).map { node.path + "/" + $0.name }
+            }
+        }
+        #expect(paths.count >= 10, "\(paths)")
+        for path in paths {
+            let range = try #require(MXXMLText.range(ofElementAt: path, in: xml), "\(path)")
+            // Just inside its start tag, and in its end tag (or the end
+            // of a self-closing one).
+            #expect(MXXMLText.elementPath(at: xml.index(after: range.lowerBound), in: xml) == path)
+            #expect(MXXMLText.elementPath(at: xml.index(before: range.upperBound), in: xml) == path)
+        }
+
+        // Between a node's inputs: the node.
+        let grain = try #require(MXXMLText.range(ofElementAt: "NG_copper/grain", in: xml))
+        let firstInput = try #require(xml[grain].range(of: "<input"))
+        #expect(MXXMLText.elementPath(at: xml.index(before: firstInput.lowerBound), in: xml) == "NG_copper/grain")
+        // Just after it: the nodegraph around it.
+        #expect(MXXMLText.elementPath(at: grain.upperBound, in: xml) == "NG_copper")
+        // Before every element, in a comment, and at the end: none.
+        #expect(MXXMLText.elementPath(at: xml.startIndex, in: xml) == nil)
+        let comment = try #require(xml.range(of: "<!-- Test fixture"))
+        #expect(MXXMLText.elementPath(at: xml.index(after: comment.lowerBound), in: xml) == nil)
+        #expect(MXXMLText.elementPath(at: xml.endIndex, in: xml) == nil)
     }
 
     @Test("XML comments survive reading and writing, and aren't listed as elements")

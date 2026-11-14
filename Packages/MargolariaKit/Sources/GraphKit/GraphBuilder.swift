@@ -21,6 +21,11 @@
 // nodedef (a graph implementing one) can't hold a position: they are
 // locked.
 //
+// At the document root, an `<output>` can also be read: an input with
+// `output="…"` and no node names a top-level output (M7b). Those outputs
+// get an output pin as well as their input, and the wire is drawn; it
+// can't be made or moved on the canvas (GraphPort.startsWires).
+//
 // Backdrops (M4d) come last, framing the canvas nodes they contain. One
 // saved without a size (by another tool) is fitted around its nodes once
 // they are placed.
@@ -32,7 +37,7 @@
 //
 // Introduces (SWIFT): `filter`, dictionary lookups returning optionals,
 // `enumerated()`, `firstIndex(where:)`, `map`/`flatMap` on an optional,
-// `URL.lastPathComponent`.
+// `URL.lastPathComponent`; `if` as an expression (M7b).
 
 import CoreGraphics
 import Foundation
@@ -222,13 +227,26 @@ public enum GraphBuilder {
             kinds.append(.node)
         }
 
-        // 3. The level's <output> elements: small nodes with one input.
+        // 3. The level's <output> elements: small nodes with one input,
+        // and at the document root an output too, if something reads them.
+        let readOutputs: Set<String> = graph.path.isEmpty ? Set(graph.nodes.flatMap { node in
+            // SWIFT: `if` as an expression, like `switch` as one: each
+            // branch is a single value, `name` or `nil`, and the `if`
+            // gives the chosen one. `compactMap` keeps the non-nil ones.
+            node.inputs.compactMap { input in
+                if case .output(let name)? = input.connection { name } else { nil }
+            }
+        }) : []
+        var outputIndex: [String: Int] = [:]
         for output in graph.outputs {
             let id: Int = nodes.count
+            outputIndex[output.name] = id
+            let isRead: Bool = readOutputs.contains(output.name)
             nodes.append(GraphNode(id: id, title: output.name, category: .graphInterface,
                                    position: savedPosition(output.position, id: id, in: &positioned),
                                    inputs: [GraphPort(name: output.type, type: PortType(output.type))],
-                                   outputs: [],
+                                   outputs: isRead ? [GraphPort(name: output.type, type: PortType(output.type),
+                                                                startsWires: false)] : [],
                                    hasThumbnail: false, subtitle: "output"))
             paths.append(childPath(graph.path, output.name))
             kinds.append(.output)
@@ -260,10 +278,10 @@ public enum GraphBuilder {
                 }
             case .interface(let name):
                 source = interfaceIndex[name].map { PortReference(node: $0, index: 0) }
-            case .output:
-                // `output="…"` alone names a top-level <output> element.
-                // None of MaterialX's examples uses it; not drawn yet.
-                source = nil
+            case .output(let name):
+                // `output="…"` alone names a top-level <output> element,
+                // which has an output pin when it is read (above).
+                source = outputIndex[name].flatMap { nodes[$0].outputs.isEmpty ? nil : PortReference(node: $0, index: 0) }
             }
             if let source {
                 wires.append(GraphWire(from: source, to: target))

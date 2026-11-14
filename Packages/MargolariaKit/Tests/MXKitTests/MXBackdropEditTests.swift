@@ -5,7 +5,8 @@
 // other edits. M4d's exit criterion, for the document: a backdrop around
 // every level of every example round-trips through the file, and undo
 // (restoring the copy taken before) gives back the document it was. (The
-// canvas moving a backdrop's nodes is in GraphKitTests.)
+// canvas moving a backdrop's nodes is in GraphKitTests.) Since M7b, also
+// backdrops copied, pasted and ungrouped.
 //
 // Introduces (SWIFT): nothing new.
 
@@ -144,6 +145,71 @@ struct MXBackdropEditTests {
         try document.renameOutput(output, of: graph, to: "colour")
         let contains: [String] = try backdrop("backdrop", in: document, at: graph).contains
         #expect(contains.contains("uv_in") && contains.contains("colour"))
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+    }
+
+    @Test("Copied and pasted with what it frames, alone, and into a nodegraph (M7b)")
+    func copyAndPaste() throws {
+        let document = try document()
+        let frame = CGRect(x: 1.5, y: -0.5, width: 3, height: 4)
+        let path: String = try document.addBackdrop(containing: ["uv", "dirt", "paint"], frame: frame, named: "Textures")
+        try document.setNote("Both tiled 4×", ofBackdrop: path)
+
+        // With two of its three nodes: it frames those two copies.
+        let xml: String = try document.copyNodes(["dirt", "paint"], backdrops: [path], in: "")
+        let paths: [String] = try document.paste(xml, into: "")
+        #expect(paths.count == 3)
+        let pasted: MXBackdrop = try backdrop(try #require(paths.last), in: document)
+        #expect(pasted.name != "Textures", "renamed: the name is taken")
+        #expect(pasted.contains == Array(paths.prefix(2)))
+        #expect(pasted.note == "Both tiled 4×")
+        #expect(pasted.position == frame.origin)
+        #expect(pasted.size == frame.size)
+        // The original is as it was.
+        #expect(try backdrop(path, in: document).contains == ["uv", "dirt", "paint"])
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // Alone: an empty backdrop, where it was.
+        let alone: [String] = try document.paste(try document.copyNodes([], backdrops: [path], in: ""), into: "")
+        #expect(alone.count == 1)
+        #expect(try backdrop(try #require(alone.first), in: document).contains.isEmpty)
+        #expect(try backdrop(try #require(alone.first), in: document).size == frame.size)
+
+        // Into a nodegraph, with a node.
+        let graph: String = try document.addNodeGraph(named: "NG_textures")
+        let inside: [String] = try document.paste(try document.copyNodes(["dirt"], backdrops: [path], in: ""), into: graph)
+        #expect(inside == [graph + "/dirt", graph + "/Textures"])
+        #expect(try backdrop("Textures", in: document, at: graph).contains == ["dirt"])
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // A backdrop that isn't there.
+        #expect(throws: MXError.self) {
+            try document.copyNodes(["dirt"], backdrops: ["gone"], in: "")
+        }
+    }
+
+    @Test("Ungrouped: the graph's backdrops come out with its nodes, moved as they are (M7b)")
+    func ungroupKeepsBackdrops() throws {
+        let document = try document()
+        let graph: String = try document.collapse(["dirt", "paint", "blend"])
+        let level: MXGraph = try document.graph(at: graph)
+        let names: [String] = level.nodes.map(\.name) + level.interfaceInputs.map(\.name) + level.outputs.map(\.name)
+        try document.addBackdrop(containing: names, in: graph, frame: CGRect(x: 1, y: -1, width: 6, height: 4),
+                                 named: "Inside")
+        // The graph moved since its nodes were placed: they come out
+        // where it is, and the backdrop with them.
+        try document.setPosition(CGPoint(x: 10, y: 10), of: graph)
+        let dirtBefore: CGPoint = try #require(level.node(named: "dirt")?.position)
+
+        let nodes: [String] = try document.ungroup(graph)
+        let inside: MXBackdrop = try backdrop("Inside", in: document)
+        // Only the nodes: the graph's own inputs and outputs are gone.
+        #expect(Set(inside.contains) == Set(nodes))
+        let dirtAfter: CGPoint = try #require(try document.graph(at: "").node(named: "dirt")?.position)
+        let origin: CGPoint = try #require(inside.position)
+        #expect(abs((origin.x - dirtAfter.x) - (1 - dirtBefore.x)) < 0.01)
+        #expect(abs((origin.y - dirtAfter.y) - (-1 - dirtBefore.y)) < 0.01)
+        #expect(dirtAfter != dirtBefore, "the graph had moved")
         #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
     }
 

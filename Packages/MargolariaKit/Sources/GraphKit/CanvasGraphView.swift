@@ -11,7 +11,8 @@
 // The app uses the Core Animation renderer; this one stays for the M0d
 // comparison benchmark. Of M2d's wiring, it draws the dragged wire and the
 // cut line, but doesn't dim or highlight. Backdrops (M4d) are drawn plainly:
-// frame, header and title.
+// frame, header and title. It stays dark (the light canvas, M7b, is the
+// Core Animation renderer's).
 //
 // Introduces (SWIFT): `Canvas` and `GraphicsContext`, `Color(red:green:blue:)`,
 // `Path(_ cgPath:)`, reading `@Observable` properties in `body`, `.overlay`.
@@ -73,21 +74,21 @@ public struct CanvasGraphView: View {
             if let wirePreview {
                 let path = CGMutablePath()
                 GraphLayout.addWire(from: wirePreview.start, to: wirePreview.end, to: path)
-                context.stroke(Path(path), with: .color(Self.color(GraphPalette.pin(wirePreview.type))), lineWidth: 2)
+                context.stroke(Path(path), with: .color(Self.color(Self.palette.pin(wirePreview.type))), lineWidth: 2)
             }
             if let cutLine {
                 var path = Path()
                 path.move(to: cutLine.start)
                 path.addLine(to: cutLine.end)
-                context.stroke(path, with: .color(Self.color(GraphPalette.cut)), lineWidth: 1.5 / zoom)
+                context.stroke(path, with: .color(Self.color(Self.palette.cut)), lineWidth: 1.5 / zoom)
             }
             if let marquee {
                 let path = Path(marquee)
-                context.fill(path, with: .color(Self.color(GraphPalette.selection, opacity: 0.15)))
-                context.stroke(path, with: .color(Self.color(GraphPalette.selection)), lineWidth: 1 / zoom)
+                context.fill(path, with: .color(Self.color(Self.palette.selection, opacity: 0.15)))
+                context.stroke(path, with: .color(Self.color(Self.palette.selection)), lineWidth: 1 / zoom)
             }
         }
-        .background(Self.color(GraphPalette.background))
+        .background(Self.color(Self.palette.background))
         .overlay(GraphEventCatcher(controller: controller))
     }
 
@@ -109,7 +110,7 @@ public struct CanvasGraphView: View {
                 GraphLayout.addWire(from: start, to: end, to: path)
             }
         }
-        context.stroke(Path(path), with: .color(color(GraphPalette.wire)), lineWidth: 2)
+        context.stroke(Path(path), with: .color(color(palette.wire)), lineWidth: 2)
     }
 
     /// A backdrop: tinted, outlined, with a header and its title.
@@ -117,17 +118,17 @@ public struct CanvasGraphView: View {
                              in context: inout GraphicsContext) {
         let radius: CGFloat = GraphLayout.backdropCornerRadius
         let shape = Path(roundedRect: backdrop.frame, cornerRadius: radius)
-        context.fill(shape, with: .color(color(GraphPalette.backdrop, opacity: GraphPalette.backdropOpacity)))
+        context.fill(shape, with: .color(color(palette.backdrop, opacity: palette.backdropOpacity)))
         context.fill(Path(GraphLayout.roundedPath(GraphLayout.backdropHeaderFrame(of: backdrop), topRadius: radius,
                                                   bottomRadius: 0)),
-                     with: .color(color(GraphPalette.backdrop, opacity: GraphPalette.backdropOpacity * 2)))
-        context.stroke(shape, with: .color(selected ? color(GraphPalette.selection)
-                                                    : color(GraphPalette.backdropEdge, opacity: 0.5)),
+                     with: .color(color(palette.backdrop, opacity: palette.backdropOpacity * 2)))
+        context.stroke(shape, with: .color(selected ? color(palette.selection)
+                                                    : color(palette.backdropEdge, opacity: 0.5)),
                        lineWidth: selected ? 2 : 1)
         if zoom >= GraphLayout.titleMinimumZoom {
             let title = Text(backdrop.title)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(color(GraphPalette.backdropTitle))
+                .foregroundStyle(color(palette.backdropTitle))
             context.draw(title, at: CGPoint(x: backdrop.frame.minX + 10,
                                             y: backdrop.frame.minY + GraphLayout.backdropHeaderHeight / 2),
                          anchor: .leading)
@@ -136,8 +137,8 @@ public struct CanvasGraphView: View {
 
     static func drawNode(_ node: GraphNode, frame: CGRect, selected: Bool, zoom: CGFloat,
                          thumbnail: Image?, in context: inout GraphicsContext) {
-        context.fill(Path(GraphLayout.bodyPath(for: frame)), with: .color(color(GraphPalette.nodeBody)))
-        context.fill(Path(GraphLayout.headerPath(for: frame)), with: .color(color(GraphPalette.header(node.category))))
+        context.fill(Path(GraphLayout.bodyPath(for: frame)), with: .color(color(palette.nodeBody)))
+        context.fill(Path(GraphLayout.headerPath(for: frame)), with: .color(color(palette.header(node.category))))
 
         if let thumbnail, node.hasThumbnail {
             context.draw(thumbnail, in: GraphLayout.thumbnailFrame(of: node))
@@ -155,7 +156,7 @@ public struct CanvasGraphView: View {
         if zoom >= GraphLayout.titleMinimumZoom {
             let title = Text(node.title)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(color(GraphPalette.text))
+                .foregroundStyle(color(palette.text))
             context.draw(title, at: CGPoint(x: frame.minX + 8, y: frame.minY + GraphLayout.headerHeight / 2),
                          anchor: .leading)
         }
@@ -176,21 +177,24 @@ public struct CanvasGraphView: View {
 
         if selected {
             context.stroke(Path(GraphLayout.outlinePath(for: frame)),
-                           with: .color(color(GraphPalette.selection)), lineWidth: 2)
+                           with: .color(color(palette.selection)), lineWidth: 2)
         }
     }
 
     static func drawPin(at point: CGPoint, type: PortType, in context: inout GraphicsContext) {
         let r: CGFloat = GraphLayout.portRadius
         context.fill(Path(ellipseIn: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r)),
-                     with: .color(color(GraphPalette.pin(type))))
+                     with: .color(color(palette.pin(type))))
     }
 
     static func label(_ string: String, secondary: Bool = false) -> Text {
         Text(string)
             .font(.system(size: 10))
-            .foregroundStyle(color(secondary ? GraphPalette.secondaryText : GraphPalette.text))
+            .foregroundStyle(color(secondary ? palette.secondaryText : palette.text))
     }
+
+    /// Its colours: the dark canvas's.
+    static let palette: GraphPalette = .dark
 
     /// A SwiftUI colour from palette components.
     static func color(_ rgb: (CGFloat, CGFloat, CGFloat), opacity: Double = 1) -> Color {

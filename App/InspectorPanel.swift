@@ -1305,6 +1305,8 @@ private struct ConnectionChip: View {
     let connection: MXConnection
     let type: String
     let action: () -> Void
+    /// Dark or light, for the pin's colour (M7b).
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Button(action: action) {
@@ -1346,7 +1348,8 @@ private struct ConnectionChip: View {
     }
 
     private var pinColor: Color {
-        let rgb: (CGFloat, CGFloat, CGFloat) = GraphPalette.pin(PortType(type))
+        // The canvas's pin colour, for this appearance (M7b).
+        let rgb: GraphPalette.RGB = GraphPalette.forDark(colorScheme == .dark).pin(PortType(type))
         return Color(red: rgb.0, green: rgb.1, blue: rgb.2)
     }
 }

@@ -160,15 +160,20 @@ public enum GraphCommand: Sendable {
 public struct GraphCommandRequest: Sendable {
     public let command: GraphCommand
     /// The selected nodes; locked ones are left out of those that change
-    /// the graph (cut, collapse, ungroup).
+    /// the graph (cut, collapse, ungroup). To copy, cut or duplicate,
+    /// the selected backdrops' contents too, as they move with them.
     public let nodes: Set<Int>
+    /// The selected backdrops to copy, cut or duplicate (M7b); empty for
+    /// the other commands.
+    public let backdrops: Set<Int>
     /// Where pasted nodes go, in view coordinates: the pointer, or the
     /// middle of the view when the pointer is elsewhere (on the menu bar).
     public let location: CGPoint
 
-    public init(command: GraphCommand, nodes: Set<Int>, location: CGPoint) {
+    public init(command: GraphCommand, nodes: Set<Int>, backdrops: Set<Int> = [], location: CGPoint) {
         self.command = command
         self.nodes = nodes
+        self.backdrops = backdrops
         self.location = location
     }
 }
@@ -406,6 +411,13 @@ public final class GraphCanvasController {
         case all
         /// The selected nodes (the F key), or everything if none are.
         case selection
+        /// The whole graph, but not so small that port names and values
+        /// aren't drawn (M7b): for a level just opened or arranged. In a
+        /// narrow canvas (the viewport and inspector open), a graph that
+        /// doesn't fit at that zoom starts at its left edge, where its
+        /// inputs and first nodes are, and goes on out of view to the
+        /// right, rather than being shown unreadably small; A shows it all.
+        case readable
     }
 
     @ObservationIgnored private var pendingFrame: FrameRequest? = nil
@@ -548,16 +560,17 @@ public final class GraphCanvasController {
         }
 
         let hit: GraphHit = hitTest(point)
-        // Pins start wires. A locked node's inputs can't be rewired, so
-        // pressing one acts like pressing the node.
+        // Pins start wires. A locked node's inputs can't be rewired, nor
+        // can wires start at a top-level <output> (M7b), so pressing one
+        // acts like pressing the node.
         switch hit {
-        case .output(let port):
+        case .output(let port) where model.nodes[port.node].outputs[port.index].startsWires:
             beginWire(.output(port), at: point)
             return
         case .input(let port) where !model.nodes[port.node].isLocked:
             // SWIFT: `case ... where` adds a condition to a pattern; if it
             // is false, the switch tries the next case.
-            if let wire = model.wire(into: port) {
+            if let wire = model.wire(into: port), model.nodes[wire.from.node].outputs[wire.from.index].startsWires {
                 // Pick up the existing wire by its input end.
                 beginWire(.output(wire.from), at: point, detaching: wire)
             } else {
@@ -1072,13 +1085,21 @@ public final class GraphCanvasController {
 
     /// The selected nodes `command` applies to: all of them to copy, the
     /// ones that aren't locked to change the graph; none if the command
-    /// can't apply (Ungroup needs exactly one nodegraph).
+    /// can't apply (Ungroup needs exactly one nodegraph). Copying, cutting
+    /// and duplicating take the selected backdrops' contents too (M7b).
     private func nodes(for command: GraphCommand) -> Set<Int> {
+        // SWIFT: `reduce(into:)` with `formUnion` gathers every selected
+        // backdrop's contents into one set.
+        let framed: Set<Int> = backdrops(for: command).reduce(into: []) { $0.formUnion(model.backdrops[$1].contents) }
         let unlocked: Set<Int> = selection.filter { !model.nodes[$0].isLocked }
         switch command {
-        case .copy, .duplicate, .backdrop:
+        case .copy, .duplicate:
+            return selection.union(framed)
+        case .backdrop:
             return selection
-        case .cut, .collapse:
+        case .cut:
+            return unlocked.union(framed.filter { !model.nodes[$0].isLocked })
+        case .collapse:
             return unlocked
         case .ungroup:
             return unlocked.count == 1 && unlocked.allSatisfy { model.nodes[$0].category == .nodeGraph } ? unlocked : []
@@ -1087,8 +1108,22 @@ public final class GraphCanvasController {
         }
     }
 
-    /// True if `command` can be done now: there are nodes for it, or, for
-    /// Paste, something to paste. Menus are enabled by this.
+    /// The selected backdrops `command` applies to (M7b): all of them to
+    /// copy or duplicate, the ones that aren't locked to cut.
+    private func backdrops(for command: GraphCommand) -> Set<Int> {
+        switch command {
+        case .copy, .duplicate:
+            return backdropSelection
+        case .cut:
+            return backdropSelection.filter { !model.backdrops[$0].isLocked }
+        case .paste, .collapse, .ungroup, .backdrop:
+            return []
+        }
+    }
+
+    /// True if `command` can be done now: there are nodes (or backdrops)
+    /// for it, or, for Paste, something to paste. Menus are enabled by
+    /// this.
     public func canPerform(_ command: GraphCommand) -> Bool {
         if command == .paste {
             return canPaste?() ?? true
@@ -1097,7 +1132,7 @@ public final class GraphCanvasController {
         if command == .backdrop {
             return true
         }
-        return !nodes(for: command).isEmpty
+        return !nodes(for: command).isEmpty || !backdrops(for: command).isEmpty
     }
 
     /// Asks the app to do `command` (see ``onCommand``), with the pointer
@@ -1107,7 +1142,8 @@ public final class GraphCanvasController {
         guard canPerform(command) else {
             return false
         }
-        onCommand?(GraphCommandRequest(command: command, nodes: nodes(for: command), location: viewPoint))
+        onCommand?(GraphCommandRequest(command: command, nodes: nodes(for: command), backdrops: backdrops(for: command),
+                                       location: viewPoint))
         return true
     }
 
@@ -1148,34 +1184,57 @@ public final class GraphCanvasController {
             pendingFrame = request
             return
         }
-        var bounds: CGRect = .null
-        if request == .selection {
-            for id in selection {
-                bounds = bounds.union(GraphLayout.frame(of: model.nodes[id]))
-            }
-            for id in backdropSelection {
-                bounds = bounds.union(model.backdrops[id].frame)
-            }
-        }
+        var bounds: CGRect = request == .selection ? selectionBounds : .null
         if bounds.isNull {
             bounds = GraphLayout.bounds(of: model)
         }
         // Don't zoom in past 100% just because one small node is selected.
-        fit(bounds, in: viewSize, maximumZoom: 1)
+        fit(bounds, in: viewSize, minimumZoom: request == .readable ? GraphLayout.portLabelMinimumZoom : Self.zoomRange.lowerBound,
+            maximumZoom: 1, fromLeft: request == .readable)
         activeFrame = request
     }
 
+    /// Frames the selection only if some of it is out of view (M7b): what
+    /// is selected from elsewhere (the XML tab's caret, an issue) is shown
+    /// without the canvas moving when it is already on screen.
+    public func reveal() {
+        let bounds: CGRect = selectionBounds
+        if viewSize.width > 0, viewSize.height > 0, !bounds.isNull, visibleGraphRect(viewSize: viewSize).contains(bounds) {
+            return
+        }
+        frame(.selection)
+    }
+
+    /// The selected nodes and backdrops' frames together; null when
+    /// nothing is selected.
+    private var selectionBounds: CGRect {
+        var bounds: CGRect = .null
+        for id in selection {
+            bounds = bounds.union(GraphLayout.frame(of: model.nodes[id]))
+        }
+        for id in backdropSelection {
+            bounds = bounds.union(model.backdrops[id].frame)
+        }
+        return bounds
+    }
+
     /// Sets zoom and offset so `bounds` (graph coordinates) fills a view of
-    /// `size`, with a margin, centred.
-    private func fit(_ bounds: CGRect, in size: CGSize, maximumZoom: CGFloat = zoomRange.upperBound) {
+    /// `size`, with a margin, centred; at no less than `minimumZoom`. When
+    /// it is then wider than the view, it is centred too, or, with
+    /// `fromLeft`, starts at the view's left margin.
+    private func fit(_ bounds: CGRect, in size: CGSize, minimumZoom: CGFloat = zoomRange.lowerBound,
+                     maximumZoom: CGFloat = zoomRange.upperBound, fromLeft: Bool = false) {
         guard !bounds.isNull, bounds.width > 0, bounds.height > 0 else {
             return
         }
         let margin: CGFloat = 40
         let fit: CGFloat = min((size.width - 2 * margin) / bounds.width, (size.height - 2 * margin) / bounds.height)
-        zoom = min(max(fit, Self.zoomRange.lowerBound), maximumZoom)
+        zoom = min(max(fit, minimumZoom), maximumZoom)
         offset = CGPoint(x: (size.width - bounds.width * zoom) / 2 - bounds.minX * zoom,
                          y: (size.height - bounds.height * zoom) / 2 - bounds.minY * zoom)
+        if fromLeft && bounds.width * zoom > size.width - 2 * margin {
+            offset.x = margin - bounds.minX * zoom
+        }
     }
 
     /// Where a new node placed at `viewPoint` goes, in graph coordinates.

@@ -173,6 +173,47 @@ struct CanvasKeyTests {
         #expect(controller.zoom < selectionZoom)
     }
 
+    @Test("A level opens framed readably: whole if it fits with port labels drawn, else from its left edge at that zoom (M7b)")
+    func readableFraming() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 12))
+        let bounds: CGRect = GraphLayout.bounds(of: controller.model)
+        // Narrow: the whole graph only fits below the port labels' zoom.
+        let narrow = CGSize(width: bounds.width * 0.3, height: bounds.height * 0.3)
+        controller.viewSize = narrow
+        controller.frame(.all)
+        #expect(controller.zoom < GraphLayout.portLabelMinimumZoom)
+        controller.frame(.readable)
+        #expect(controller.zoom == GraphLayout.portLabelMinimumZoom)
+        // The left edge at the margin, the middle centred vertically.
+        let leftMiddle: CGPoint = controller.viewPoint(fromGraph: CGPoint(x: bounds.minX, y: bounds.midY))
+        #expect(abs(leftMiddle.x - 40) < 0.5 && abs(leftMiddle.y - narrow.height / 2) < 0.5)
+        // Wide: the same as framing all.
+        controller.viewSize = CGSize(width: bounds.width * 0.8 + 80, height: bounds.height * 0.8 + 80)
+        controller.frame(.all)
+        let (all, offset) = (controller.zoom, controller.offset)
+        controller.frame(.readable)
+        #expect(controller.zoom == all && controller.offset == offset)
+        #expect(all >= GraphLayout.portLabelMinimumZoom)
+    }
+
+    @Test("Revealing the selection moves the canvas only when it is out of view (M7b)")
+    func reveal() {
+        let controller = GraphCanvasController(model: .synthetic(nodeCount: 50))
+        controller.viewSize = CGSize(width: 800, height: 600)
+        controller.frame(.all)
+        let (zoom, offset) = (controller.zoom, controller.offset)
+        controller.selection = [0]
+        controller.reveal()
+        #expect(controller.zoom == zoom && controller.offset == offset, "in view: nothing moves")
+
+        controller.frame(.selection)
+        controller.selection = [49]
+        let far: CGRect = GraphLayout.frame(of: controller.model.nodes[49])
+        #expect(!controller.visibleGraphRect(viewSize: controller.viewSize).contains(far))
+        controller.reveal()
+        #expect(controller.visibleGraphRect(viewSize: controller.viewSize).contains(far))
+    }
+
     @Test("S solos the selected node, as ⌥-click does; only with one node selected")
     func soloKey() {
         let controller = GraphCanvasController(model: .synthetic(nodeCount: 5))

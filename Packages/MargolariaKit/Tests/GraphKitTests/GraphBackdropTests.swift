@@ -2,7 +2,8 @@
 //
 // Tests for backdrops on the canvas (M4d): built from a document, picked up
 // by the header, moved with what they contain, resized by the grip,
-// selected and deleted; nodes dragged in and out change what they contain.
+// selected and deleted; nodes dragged in and out change what they contain;
+// copied, cut and duplicated with what they contain (M7b).
 // M4d's exit criterion, for the canvas: a backdrop made, moved and resized
 // the way the canvas does it moves its nodes in the document, survives
 // saving, and undoes (MXBackdropEditTests checks every example).
@@ -257,6 +258,51 @@ struct GraphBackdropTests {
         controller.frame(.selection)
         let visible: CGRect = controller.visibleGraphRect(viewSize: controller.viewSize)
         #expect(visible.contains(controller.model.backdrops[0].frame))
+    }
+
+    @Test("Copy, Cut and Duplicate take selected backdrops with what they contain; pasted, they frame the copies (M7b)")
+    func copyBackdrops() throws {
+        let document: MXDocument = try document()
+        let (graph, controller) = try canvas(document)
+        var requests: [GraphCommandRequest] = []
+        controller.onCommand = { requests.append($0) }
+
+        // The backdrop alone: its nodes come with it.
+        controller.backdropSelection = [0]
+        for command in [GraphCommand.copy, .cut, .duplicate] {
+            #expect(controller.perform(command, at: .zero))
+            #expect(requests.last?.nodes == [0, 1], "\(command)")
+            #expect(requests.last?.backdrops == [0], "\(command)")
+        }
+        // With another node; Paste and the other commands take no backdrops.
+        controller.selection = [2]
+        #expect(controller.perform(.copy, at: .zero))
+        #expect(requests.last?.nodes == [0, 1, 2])
+        #expect(controller.perform(.collapse, at: .zero))
+        #expect(requests.last?.nodes == [2])
+        #expect(requests.last?.backdrops.isEmpty == true)
+        // Locked, it is copied but not cut.
+        controller.selection = []
+        controller.model.backdrops[0].isLocked = true
+        #expect(controller.perform(.copy, at: .zero))
+        #expect(requests.last?.backdrops == [0])
+        #expect(!controller.canPerform(.cut))
+        controller.model.backdrops[0].isLocked = false
+
+        // As the app copies and pastes it: the pasted backdrop frames the
+        // pasted nodes.
+        let request: GraphCommandRequest = try #require(requests.first)
+        let names: [String] = request.nodes.sorted().map { graph.elementName(of: $0) }
+        let backdrops: [String] = request.backdrops.sorted().map { graph.backdropPaths[$0] }
+        let paths: [String] = try document.paste(try document.copyNodes(names, backdrops: backdrops, in: ""), into: "")
+        var pasted: DocumentGraph = GraphBuilder.build(try document.graph(at: ""))
+        pasted.layout()
+        let last: String = try #require(paths.last)
+        let copy: Int = try #require(pasted.backdropIndex(forPath: last))
+        let framed = Set(paths.dropLast().compactMap { pasted.nodeIndex(forPath: $0) })
+        #expect(framed.count == 2)
+        #expect(pasted.model.backdrops[copy].contents == framed)
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
     }
 
     @Test("Made, moved, resized and deleted through the document, as the app does; it round-trips and undoes (M4d)")

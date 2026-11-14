@@ -136,12 +136,19 @@ public struct GraphPort: Sendable {
     /// For an input: declared `uniform`, so it takes a value or a
     /// nodegraph's own input, never a node's output (see GraphWiring.swift).
     public var isUniform: Bool
+    /// For an output: false when its wires are drawn but none can be made
+    /// or moved from it on the canvas. A top-level `<output>` read by
+    /// `output="…"` (M7b): MaterialX's edits connect inputs to nodes and
+    /// nodegraphs, so the canvas only shows these.
+    public var startsWires: Bool
 
-    public init(name: String, type: PortType, value: String? = nil, isUniform: Bool = false) {
+    public init(name: String, type: PortType, value: String? = nil, isUniform: Bool = false,
+                startsWires: Bool = true) {
         self.name = name
         self.type = type
         self.value = value
         self.isUniform = isUniform
+        self.startsWires = startsWires
     }
 }
 

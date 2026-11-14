@@ -2,7 +2,8 @@
 //
 // Working with a document's XML as text, for the XML panel: where the tag
 // names, attribute names, values and comments are (to colour them), and
-// where a given element is (to highlight the node selected on the canvas).
+// where a given element is (to highlight the node selected on the canvas),
+// and which element a position is in (to select it on the canvas, M7b).
 //
 // This reads the text MaterialX writes (MXDocument.xmlString), which is
 // regular: one element per tag, attributes in double quotes, no CDATA. It is
@@ -13,7 +14,8 @@
 // the reference the scanning must agree with.
 //
 // Introduces (SWIFT): `Range<String.Index>`, `String.utf8` and its
-// indices, `UInt8(ascii:)`, `elementsEqual`, `popLast()`, `compactMap`.
+// indices, `UInt8(ascii:)`, `elementsEqual`, `popLast()`, `compactMap`;
+// `utf8.distance(from:to:)` (M7b).
 
 import Foundation
 
@@ -118,6 +120,43 @@ public enum MXXMLText {
             }
         }
         return nil
+    }
+
+    /// The path of the innermost named element around `position` in `xml`
+    /// (M7b): the caret in the XML tab, inside a node's tags or between
+    /// them, gives that node's path, or its input's ("SR/base_color").
+    /// Nil outside every named element, as between top-level elements. The
+    /// reverse of ``range(ofElementAt:in:)``.
+    public static func elementPath(at position: String.Index, in xml: String) -> String? {
+        let text = Bytes(xml)
+        // SWIFT: `utf8.distance(from:to:)` counts the UTF-8 bytes between
+        // two indices: the position as a byte offset.
+        let offset: Int = xml.utf8.distance(from: xml.startIndex, to: position)
+        var open: [[UInt8]?] = []
+        for tag in text.tags() {
+            // Past the position: the elements open now are around it.
+            if tag.start >= offset {
+                break
+            }
+            if tag.isComment || text.byte(at: tag.start + 1) == Bytes.question {
+                continue
+            }
+            if text.byte(at: tag.start + 1) == Bytes.slash {
+                // In an end tag, its element is still around the position.
+                if offset < tag.end {
+                    break
+                }
+                _ = open.popLast()
+                continue
+            }
+            open.append(text.nameAttribute(in: tag).map { Array(text.bytes[$0]) })
+            let selfClosing: Bool = tag.end - tag.start >= 2 && text.byte(at: tag.end - 2) == Bytes.slash
+            if selfClosing && offset >= tag.end {
+                _ = open.popLast()
+            }
+        }
+        let names: [String] = open.compactMap { $0 }.map { String(decoding: $0, as: UTF8.self) }
+        return names.isEmpty ? nil : names.joined(separator: "/")
     }
 
     /// A tag in the text, by byte offsets: from its `<` to just after its

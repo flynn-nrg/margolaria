@@ -474,7 +474,7 @@ struct GraphPanel: View {
             // Arranged: every node moved, so frame them all, at the same
             // view size, and keep the selection.
             newLevel.controller.viewSize = previous.controller.viewSize
-            newLevel.controller.frame(.all)
+            newLevel.controller.frame(.readable)
             select(Self.selectedPaths(in: previous), in: newLevel)
         } else if let previous {
             newLevel.controller.zoom = previous.controller.zoom
@@ -484,7 +484,7 @@ struct GraphPanel: View {
             newLevel.controller.viewSize = previous.controller.viewSize
             select(Self.selectedPaths(in: previous), in: newLevel)
         } else {
-            newLevel.controller.frame(.all)
+            newLevel.controller.frame(.readable)
         }
         framesAfterRebuild = false
         if !pendingSelection.isEmpty {
@@ -757,22 +757,26 @@ struct GraphPanel: View {
             // In file order, so copies and groups keep it.
             .sorted { $0.id < $1.id }
         let names: [String] = nodes.map { Self.name(of: level.graph.elementPaths[$0.id]) }
-        guard !names.isEmpty || request.command == .paste else {
+        // The backdrops copied, cut or duplicated with them (M7b).
+        let backdrops: [String] = request.backdrops.sorted().map { Self.name(of: level.graph.backdropPaths[$0]) }
+        guard !names.isEmpty || !backdrops.isEmpty || request.command == .paste else {
             NSSound.beep()
             return
         }
         let parent: String = levelPath
         let positions: [String: CGPoint] = autoLayoutPositions(in: level)
-        let title: String = names.count == 1 ? names[0] : "\(names.count) Nodes"
+        let title: String = names.count == 1 ? names[0]
+            : names.isEmpty ? (backdrops.count == 1 ? backdrops[0] : "\(backdrops.count) Backdrops")
+            : "\(names.count) Nodes"
 
         switch request.command {
         case .copy:
-            copy(names, in: level)
+            copy(names, backdrops: backdrops, in: level)
         case .cut:
-            guard copy(names, in: level) else {
+            guard copy(names, backdrops: backdrops, in: level) else {
                 return
             }
-            delete(GraphDeletion(nodes: Set(nodes.map(\.id))), in: level, as: "Cut \(title)")
+            delete(GraphDeletion(nodes: Set(nodes.map(\.id)), backdrops: request.backdrops), in: level, as: "Cut \(title)")
         case .paste:
             guard let xml = NodePasteboard.text() else {
                 NSSound.beep()
@@ -787,10 +791,10 @@ struct GraphPanel: View {
                 pendingSelection = paths
             }
         case .duplicate:
-            let snapshot: MXDocument = positioned(document.content, positions)
+            let snapshot: MXDocument = positioned(document.content, positions, frames: fittedFrames(backdrops, in: level))
             document.edit("Duplicate \(title)") { content in
                 try save(positions, in: content)
-                let xml: String = try snapshot.copyNodes(names, in: parent, keepingInterface: true)
+                let xml: String = try snapshot.copyNodes(names, backdrops: backdrops, in: parent, keepingInterface: true)
                 let paths: [String] = try content.paste(xml, into: parent)
                 // Beside the originals, down and to the right.
                 try place(paths, in: content, around: nil, from: DocumentGraph.units(fromPoints: CGPoint(x: 30, y: 30)))
@@ -813,14 +817,15 @@ struct GraphPanel: View {
         }
     }
 
-    /// Puts the nodes `names` of the level on the pasteboard, with the
-    /// positions the canvas shows. Returns false, having said why, if
-    /// MaterialX couldn't copy them.
+    /// Puts the nodes `names` and the backdrops `backdrops` of the level
+    /// on the pasteboard, with the positions and frames the canvas shows.
+    /// Returns false, having said why, if MaterialX couldn't copy them.
     @discardableResult
-    private func copy(_ names: [String], in level: GraphLevel) -> Bool {
+    private func copy(_ names: [String], backdrops: [String], in level: GraphLevel) -> Bool {
         do {
-            let xml: String = try positioned(document.content, autoLayoutPositions(in: level))
-                .copyNodes(names, in: levelPath)
+            let xml: String = try positioned(document.content, autoLayoutPositions(in: level),
+                                             frames: fittedFrames(backdrops, in: level))
+                .copyNodes(names, backdrops: backdrops, in: levelPath)
             NodePasteboard.write(xml)
             return true
         } catch {
@@ -829,15 +834,33 @@ struct GraphPanel: View {
         }
     }
 
-    /// `content` with `positions` saved, as a copy when there are any:
-    /// what is copied then has the positions the canvas shows, without
-    /// changing the document.
-    private func positioned(_ content: MXDocument, _ positions: [String: CGPoint]) -> MXDocument {
-        guard !positions.isEmpty else {
+    /// The frames (MaterialX units, by path) the canvas fitted for those of
+    /// the backdrops `names` saved without one, by another tool (M4d): a
+    /// copy then has the frame shown.
+    private func fittedFrames(_ names: [String], in level: GraphLevel) -> [String: CGRect] {
+        var frames: [String: CGRect] = [:]
+        for id in level.graph.fittedBackdrops {
+            let path: String = level.graph.backdropPaths[id]
+            if names.contains(Self.name(of: path)) {
+                frames[path] = DocumentGraph.units(fromPoints: level.controller.model.backdrops[id].frame)
+            }
+        }
+        return frames
+    }
+
+    /// `content` with `positions` and backdrop `frames` saved, as a copy
+    /// when there are any: what is copied then has the positions the
+    /// canvas shows, without changing the document.
+    private func positioned(_ content: MXDocument, _ positions: [String: CGPoint],
+                            frames: [String: CGRect] = [:]) -> MXDocument {
+        guard !positions.isEmpty || !frames.isEmpty else {
             return content
         }
         let copy: MXDocument = content.copy()
         try? save(positions, in: copy)
+        for (path, frame) in frames {
+            try? copy.setFrame(frame, ofBackdrop: path)
+        }
         return copy
     }
 
@@ -851,10 +874,19 @@ struct GraphPanel: View {
     /// Moves the nodes at `paths`, just pasted: their middle to `target`,
     /// or each by `offset`. Nodes that came without a position (from
     /// another tool) are put in a row at `target`, or beside the others.
+    /// Backdrops pasted with them (M7b) move as they do; pasted alone,
+    /// their middle goes to `target`. One without a frame is fitted
+    /// around its nodes by the canvas.
     private func place(_ paths: [String], in content: MXDocument, around target: CGPoint?, from offset: CGPoint?) throws {
         let graph: MXGraph = try content.graph(at: levelPath)
         let pasted: [MXNode] = paths.compactMap { path in graph.nodes.first(where: { $0.path == path }) }
-        let placed: [CGPoint] = pasted.compactMap(\.position)
+        let backdrops: [MXBackdrop] = paths.compactMap { path in graph.backdrops.first(where: { $0.path == path }) }
+        let framed: [CGRect] = backdrops.compactMap { backdrop in
+            backdrop.position.flatMap { origin in backdrop.size.map { CGRect(origin: origin, size: $0) } }
+        }
+        // The nodes' positions; without nodes, the backdrops' middles.
+        let placed: [CGPoint] = pasted.isEmpty ? framed.map { CGPoint(x: $0.midX, y: $0.midY) }
+            : pasted.compactMap(\.position)
         // SWIFT: `reduce(_:_:)` folds a sequence into one value: here, the
         // sum of the positions, starting from zero.
         let sum: CGPoint = placed.reduce(CGPoint.zero) { CGPoint(x: $0.x + $1.x, y: $0.y + $1.y) }
@@ -869,6 +901,12 @@ struct GraphPanel: View {
                 row.x += 1.5
             }
         }
+        for backdrop in backdrops {
+            if let origin = backdrop.position, let size = backdrop.size {
+                try content.setFrame(CGRect(origin: CGPoint(x: origin.x + shift.x, y: origin.y + shift.y), size: size),
+                                     ofBackdrop: backdrop.path)
+            }
+        }
     }
 
     /// The last part of a path: the element's name.
@@ -876,15 +914,15 @@ struct GraphPanel: View {
         path.split(separator: "/").last.map(String.init) ?? path
     }
 
-    /// Selects and frames `focus` (a node or a backdrop), if it is on the
-    /// level shown.
+    /// Selects `focus` (a node or a backdrop), if it is on the level shown,
+    /// and frames it unless it is in view already (M7b).
     private func applyFocus() {
         guard let path = focus, let level,
               level.graph.nodeIndex(forPath: path) != nil || level.graph.backdropIndex(forPath: path) != nil else {
             return
         }
         select([path], in: level)
-        level.controller.frame(.selection)
+        level.controller.reveal()
         focus = nil
     }
 }

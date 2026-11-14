@@ -36,7 +36,8 @@ extension MXDocument {
     /// Moves the nodes of the nodegraph at `path` into its parent and
     /// removes the graph, keeping every connection that went through it.
     /// Returns the nodes' new paths (some may be renamed, if their names
-    /// were taken). Refused for a nodegraph that implements a nodedef.
+    /// were taken). The graph's backdrops come out too, framing the same
+    /// nodes (M7b). Refused for a nodegraph that implements a nodedef.
     @discardableResult
     public func ungroup(_ path: String) throws -> [String] {
         var newPaths = mxbridge.StringVector()
@@ -86,26 +87,32 @@ extension MXDocument {
         }
     }
 
-    /// The nodes and nodegraphs `names` of the graph at `parent`, as a small
-    /// MaterialX document for the pasteboard. Connections between them are
-    /// kept; connections to anything else are dropped, except, with
-    /// `keepingInterface`, to the graph's own inputs (for Duplicate, which
-    /// pastes in the same graph). File names are made absolute.
+    /// The nodes and nodegraphs `names` of the graph at `parent`, with its
+    /// backdrops `backdrops` (M7b), as a small MaterialX document for the
+    /// pasteboard. Connections between them are kept; connections to
+    /// anything else are dropped, except, with `keepingInterface`, to the
+    /// graph's own inputs (for Duplicate, which pastes in the same graph).
+    /// A backdrop contains only what is copied with it. File names are made
+    /// absolute.
     ///
     /// Not an edit: the document is unchanged.
-    public func copyNodes(_ names: [String], in parent: String, keepingInterface: Bool = false) throws -> String {
+    public func copyNodes(_ names: [String], backdrops: [String] = [], in parent: String,
+                          keepingInterface: Bool = false) throws -> String {
         var xml = std.string()
         try perform { error in
-            handle.copyNodes(std.string(parent), Self.stringVector(names), keepingInterface, &xml, &error)
+            handle.copyNodes(std.string(parent), Self.stringVector(names), Self.stringVector(backdrops), keepingInterface,
+                             &xml, &error)
         }
         return xml.swiftString
     }
 
-    /// Adds the nodes and nodegraphs of the MaterialX text `xml` (from
-    /// ``copyNodes(_:in:keepingInterface:)``, or another MaterialX tool) to
-    /// the graph at `parent`, renamed where their names are taken. Returns
-    /// their paths, in order. Connections to anything not pasted are
-    /// dropped. Materials and nodegraphs are pasted only at the top level.
+    /// Adds the nodes, nodegraphs and backdrops of the MaterialX text `xml`
+    /// (from ``copyNodes(_:backdrops:in:keepingInterface:)``, or another
+    /// MaterialX tool) to the graph at `parent`, renamed where their names
+    /// are taken. Returns their paths, in order: nodes and nodegraphs, then
+    /// backdrops. Connections to anything not pasted are dropped, and a
+    /// backdrop contains only what was pasted with it. Materials and
+    /// nodegraphs are pasted only at the top level.
     @discardableResult
     public func paste(_ xml: String, into parent: String) throws -> [String] {
         var newPaths = mxbridge.StringVector()
