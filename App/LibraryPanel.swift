@@ -80,7 +80,7 @@ struct LibraryPanel: View {
     /// The library files found: the user library folder's, then the
     /// document folder's. Read when the panel appears, and again after
     /// Save to Library.
-    @State private var libraries: [(title: String, files: [MXLibraryFile])] = []
+    @State private var libraries: [MXLibraryFolder] = []
 
     @State private var query: String = ""
 
@@ -115,8 +115,11 @@ struct LibraryPanel: View {
                         }
                     }
                 }
+                // The catalog's "In Library Files" group (M7c, for the
+                // searches) is left out: the sections above list those
+                // definitions by file.
                 if query.isEmpty {
-                    ForEach(catalog.groups) { group in
+                    ForEach(catalog.groups.filter { $0.name != "library" }) { group in
                         // SWIFT: `Section(isExpanded:)` makes a section the
                         // user can fold with the disclosure triangle in its
                         // header (macOS 14).
@@ -129,7 +132,7 @@ struct LibraryPanel: View {
                         }
                     }
                 } else {
-                    ForEach(catalog.search(query)) { kind in
+                    ForEach(catalog.search(query).filter { $0.libraryFile == nil }) { kind in
                         LibraryRow(kind: kind, showsGroup: true)
                     }
                 }
@@ -189,22 +192,17 @@ struct LibraryPanel: View {
             file.definitions.map { (file: file, definition: $0) }
         }
         .filter { row in
-            catalog.definition(named: row.definition.name) == nil
+            // The catalog lists library files' definitions too (M7c), with
+            // their file; one without is the document's. (One it doesn't
+            // list yet was just saved; the catalog follows.)
+            catalog.definition(named: row.definition.name).map { $0.libraryFile != nil } ?? true
                 && (query.isEmpty || row.definition.node.localizedCaseInsensitiveContains(query))
         }
     }
 
     /// Reads the library folders.
     private func loadLibraries() {
-        var found: [(title: String, files: [MXLibraryFile])] = []
-        if let user = MXLibraryFolders.user {
-            found.append((title: "My Library", files: MXLibraryFolders.files(in: user)))
-        }
-        if let documentFolder, documentFolder.standardizedFileURL != MXLibraryFolders.user?.standardizedFileURL {
-            found.append((title: "This Document's Folder", files: MXLibraryFolders.files(in: documentFolder,
-                                                                                       except: documentFile)))
-        }
-        libraries = found
+        libraries = MXLibraryFolders.libraries(for: documentFile)
     }
 
     /// A binding to whether `group` is open, stored in `expandedGroups`.

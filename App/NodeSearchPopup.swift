@@ -6,7 +6,8 @@
 // NodeSearchPopup: the canvas's node search (M2e). Tab on the canvas opens
 // it under the pointer, in a popover. Type part of a name, pick a result
 // with the arrow keys (or the mouse), and Return adds that node there;
-// Escape closes it. The results are MXNodeCatalog.search's, best first.
+// Escape closes it. Nodes defined in library files the document doesn't
+// include yet are listed too (M7c), with their file; adding one includes it. The results are MXNodeCatalog.search's, best first.
 // Opened by a wire dropped on empty canvas, it lists only the nodes that
 // can take the wire, each as the variant that does, and shows which of
 // its ports the wire will go to.
@@ -15,8 +16,8 @@
 // window. It lists every menu command enabled where the focus was
 // (MaterialXDocument reads the menus), the inspector's actions for the
 // selection and the toolbar's (which views add with `.paletteCommands`),
-// and every node (Return adds it in the middle of the canvas, as the
-// Library does). Fuzzy-matched (GraphKit's FuzzyMatch), with each
+// and every node, library files' included (M7c; Return adds it in the
+// middle of the canvas, as the Library does). Fuzzy-matched (GraphKit's FuzzyMatch), with each
 // command's shortcut. Escape, ⌘K again or a click outside closes it.
 //
 // Introduces (SWIFT): `.onKeyPress`, `ScrollViewReader`; `PreferenceKey`
@@ -115,13 +116,15 @@ struct NodeSearchPopup: View {
         }
     }
 
-    /// One result: the node's name, its group and type, and the port a
-    /// wire would go to ("math · float · in1").
+    /// One result: the node's name, its group (or, for a library file's,
+    /// the file, M7c) and type, and the port a wire would go to
+    /// ("math · float · in1").
     private func row(_ match: MXNodeMatch, isHighlighted: Bool) -> some View {
         HStack {
             Text(match.kind.node)
             Spacer()
-            Text([match.kind.group, match.variant.type, match.port].compactMap { $0 }.joined(separator: " · "))
+            Text([match.variant.libraryFile?.lastPathComponent ?? match.kind.group, match.variant.type, match.port]
+                .compactMap { $0 }.joined(separator: " · "))
                 .font(.caption)
                 .foregroundStyle(isHighlighted ? .primary : .secondary)
         }

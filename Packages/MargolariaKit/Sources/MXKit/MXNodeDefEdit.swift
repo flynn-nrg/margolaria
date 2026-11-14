@@ -9,7 +9,9 @@
 //
 // The definition stays editable in its own document: the graph's inputs,
 // defaults and metadata are then the nodedef's, and M4b's edits change
-// them there (and in its instances, for a renamed or removed input).
+// them there (and in its instances, for a renamed or removed input). Since
+// M7c its outputs too (M4a's edits, MXNodeGraphEdit.swift), and its node's
+// name.
 // Saving it to a library for other documents is M4c2.
 //
 // Introduces (SWIFT): a `static func` returning a suggested value of its
@@ -104,6 +106,21 @@ extension MXDocument {
         let nodes: [MXNode] = (try? graph(at: "").nodes) ?? []
         return nodes.first(where: { $0.isNodeGraph && $0.nodeDefName == nodeDef && ($0.isLocalDefinition || $0.isIncluded) })?
             .path
+    }
+
+    /// Renames the node of the definition the nodegraph at `graph`
+    /// implements (M7c): its category, which every node of it is written
+    /// as. The nodedef ("ND_<node>_<type>") and the graph ("NG_<node>")
+    /// are renamed too where their names came from the old one. Refused
+    /// for a name another definition uses. Returns the graph's path, which
+    /// may have changed.
+    @discardableResult
+    public func renameNodeDefinition(implementedBy graph: String, to node: String) throws -> String {
+        var newPath = std.string()
+        try perform { error in
+            handle.renameNodeDefinition(std.string(graph), std.string(node), &newPath, &error)
+        }
+        return newPath.swiftString
     }
 
     /// Sets an attribute of the nodedef the nodegraph at `graph` implements,

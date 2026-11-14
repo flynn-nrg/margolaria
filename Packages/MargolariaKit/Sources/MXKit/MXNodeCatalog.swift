@@ -16,6 +16,7 @@
 // `sorted`/`min(by:)`, `firstIndex(of:)` as a rank, `lazy` sequences,
 // `allSatisfy`.
 
+import Foundation
 import MXBridge
 
 /// One input or output of a nodedef.
@@ -55,6 +56,10 @@ public struct MXNodeDefinition: Hashable, Sendable, Identifiable {
     public let isFromDocument: Bool
     public let inputs: [MXNodeDefinitionPort]
     public let outputs: [MXNodeDefinitionPort]
+    /// The library file defining it, for a nodedef the document doesn't
+    /// have yet (M7c): adding a node of it includes the file first. Nil for
+    /// the document's own and the data libraries'.
+    public let libraryFile: URL?
 
     public var id: String { name }
 
@@ -67,12 +72,13 @@ public struct MXNodeDefinition: Hashable, Sendable, Identifiable {
         isFromDocument = nodeDef.isFromDocument
         inputs = nodeDef.inputs.map { MXNodeDefinitionPort($0) }
         outputs = nodeDef.outputs.map { MXNodeDefinitionPort($0) }
+        libraryFile = nil
     }
 
     /// For tests and previews.
     public init(name: String, node: String, type: String, group: String? = nil, documentation: String? = nil,
                 isFromDocument: Bool = false, inputs: [MXNodeDefinitionPort] = [],
-                outputs: [MXNodeDefinitionPort] = []) {
+                outputs: [MXNodeDefinitionPort] = [], libraryFile: URL? = nil) {
         self.name = name
         self.node = node
         self.type = type
@@ -81,6 +87,14 @@ public struct MXNodeDefinition: Hashable, Sendable, Identifiable {
         self.isFromDocument = isFromDocument
         self.inputs = inputs
         self.outputs = outputs
+        self.libraryFile = libraryFile
+    }
+
+    /// The same definition, as found in the library file at `url` rather
+    /// than in a document (M7c).
+    func inLibraryFile(_ url: URL) -> MXNodeDefinition {
+        MXNodeDefinition(name: name, node: node, type: type, group: group, documentation: documentation,
+                         isFromDocument: false, inputs: inputs, outputs: outputs, libraryFile: url)
     }
 }
 
@@ -96,6 +110,9 @@ public struct MXNodeKind: Hashable, Sendable, Identifiable {
     public let documentation: String?
     /// True if the document defines any of its variants.
     public let isFromDocument: Bool
+    /// The library file its default variant is in, for a kind the document
+    /// doesn't have yet (M7c); nil otherwise.
+    public var libraryFile: URL? { defaultVariant.libraryFile }
     /// Every variant, in library order.
     public let variants: [MXNodeDefinition]
     /// The variant a new node starts as.
@@ -258,14 +275,15 @@ public struct MXNodeCatalog: Sendable {
     public let kinds: [MXNodeKind]
 
     /// The kinds by `nodegroup`, in ``groupOrder``; nodes the document
-    /// itself defines come first, in a group called "document".
+    /// itself defines come first, in a group called "document", then those
+    /// of library files, in "library" (M7c).
     public let groups: [MXNodeGroup]
 
     /// The groups' order: the ones used to build materials first (PLAN
     /// §4.1 calls the library "grouped by nodegroup"; the order is ours).
     /// Groups not listed follow, alphabetically.
     static let groupOrder: [String] = [
-        "document", "pbr", "texture2d", "texture3d", "procedural2d", "procedural3d", "procedural",
+        "document", "library", "pbr", "texture2d", "texture3d", "procedural2d", "procedural3d", "procedural",
         "geometric", "math", "adjustment", "compositing", "conditional", "channel", "convolution2d",
         "colortransform", "organization", "shader", "material", "light", "npr", "translation",
         "application",
@@ -273,21 +291,33 @@ public struct MXNodeCatalog: Sendable {
 
     /// Headings for the groups whose names don't read well capitalised.
     static let groupTitles: [String: String] = [
-        "document": "In This Document", "pbr": "PBR", "texture2d": "Texture 2D", "texture3d": "Texture 3D",
+        "document": "In This Document", "library": "In Library Files", "pbr": "PBR", "texture2d": "Texture 2D", "texture3d": "Texture 3D",
         "procedural2d": "Procedural 2D", "procedural3d": "Procedural 3D", "convolution2d": "Convolution 2D",
         "colortransform": "Colour Transform", "npr": "NPR",
     ]
 
     /// Builds the catalog from nodedefs, in the order given (document
-    /// first, as ``MXDocument/nodeDefinitions`` lists them).
-    public init(definitions: [MXNodeDefinition]) {
+    /// first, as ``MXDocument/nodeDefinitions`` lists them), and the
+    /// definitions in `libraryFiles` that aren't among them (M7c): those
+    /// the document can use once it includes their file. A nodedef in two
+    /// files is listed from the first.
+    public init(definitions: [MXNodeDefinition], libraryFiles: [MXLibraryFile] = []) {
+        var known = Set(definitions.map(\.name))
+        var all: [MXNodeDefinition] = definitions
+        for file in libraryFiles {
+            // SWIFT: `insert(_:).inserted` is false for a name already in
+            // the set: added only the first time it is seen.
+            for definition in file.definitions where known.insert(definition.name).inserted {
+                all.append(definition.inLibraryFile(file.url))
+            }
+        }
         // SWIFT: `Dictionary(grouping:by:)` makes a dictionary from a key
         // to the array of elements with that key, keeping their order.
-        let byNode: [String: [MXNodeDefinition]] = Dictionary(grouping: definitions, by: \.node)
+        let byNode: [String: [MXNodeDefinition]] = Dictionary(grouping: all, by: \.node)
         kinds = byNode.map { MXNodeKind(node: $0.key, variants: $0.value) }.sorted { $0.node < $1.node }
 
         let byGroup: [String: [MXNodeKind]] = Dictionary(grouping: kinds) { kind in
-            kind.isFromDocument ? "document" : (kind.group ?? "other")
+            kind.isFromDocument ? "document" : kind.libraryFile != nil ? "library" : (kind.group ?? "other")
         }
         groups = byGroup.map { name, kinds in
             MXNodeGroup(name: name, title: Self.groupTitles[name] ?? name.capitalized, kinds: kinds)
@@ -299,9 +329,10 @@ public struct MXNodeCatalog: Sendable {
         }
     }
 
-    /// The catalog for `document`: its own nodedefs and its data library's.
-    public init(document: MXDocument) {
-        self.init(definitions: document.nodeDefinitions)
+    /// The catalog for `document`: its own nodedefs and its data library's,
+    /// and those of `libraryFiles` it doesn't have yet (M7c).
+    public init(document: MXDocument, libraryFiles: [MXLibraryFile] = []) {
+        self.init(definitions: document.nodeDefinitions, libraryFiles: libraryFiles)
     }
 
     /// The kind whose category is `node`, if there is one.

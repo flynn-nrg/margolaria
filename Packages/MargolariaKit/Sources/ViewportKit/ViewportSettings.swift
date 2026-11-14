@@ -85,11 +85,11 @@ public enum ViewportShape: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// The user defaults key the app keeps the choice under, for every
-    /// viewport (`@AppStorage`) and for Export as USDZ….
+    /// The user defaults key the last shape chosen is kept under: what a
+    /// new window starts with (each window has its own since M7c).
     public static let defaultsKey: String = "viewportShape"
 
-    /// The shape chosen in the app, the sphere until one is.
+    /// The shape chosen last, in any window; the sphere until one is.
     public static var chosen: ViewportShape {
         UserDefaults.standard.string(forKey: defaultsKey).flatMap(ViewportShape.init(rawValue:)) ?? .sphere
     }
@@ -161,6 +161,15 @@ public struct ViewportRenderer: Hashable, Identifiable, Sendable {
 
     /// The renderer `id` names if it is still found (a stored choice, from
     /// an earlier launch), otherwise Storm.
+    /// The user defaults key the last renderer chosen is kept under: what
+    /// a new window starts with (M7c; each window then has its own).
+    public static let defaultsKey: String = "viewportRenderer"
+
+    /// The identifier of the renderer chosen last, Storm's until one is.
+    public static var chosenID: String {
+        UserDefaults.standard.string(forKey: defaultsKey) ?? storm.id
+    }
+
     public static func preferred(id: String) -> ViewportRenderer {
         available.first(where: { $0.id == id }) ?? .storm
     }

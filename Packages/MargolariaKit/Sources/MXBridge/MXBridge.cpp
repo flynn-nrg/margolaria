@@ -2354,18 +2354,42 @@ void KeepColorSpace(const std::vector<mx::ElementPtr>& elements, const std::stri
     }
 }
 
-/// The nodegraph at `path`, whose outputs may be edited: not one that
-/// implements a nodedef, whose outputs are the nodedef's.
-mx::NodeGraphPtr GraphWithOwnOutputs(const mx::DocumentPtr& document, const std::string& path) {
+/// The nodegraph at `path`, whose outputs may be edited, and the nodedef
+/// it implements when that is defined in this document (M7c): then the
+/// nodedef's outputs change with the graph's, and its nodes with them.
+/// Refused for a graph implementing a nodedef from the libraries or an
+/// included file.
+struct GraphOutputs {
+    mx::NodeGraphPtr graph;
+    /// The local nodedef, or null.
+    mx::NodeDefPtr nodeDef;
+};
+
+GraphOutputs OutputsOf(const mx::DocumentPtr& document, const std::string& path) {
     mx::NodeGraphPtr graph = path.empty() ? nullptr : EditableElement(document, path)->asA<mx::NodeGraph>();
     if (!graph) {
         throw Refusal("Only nodegraphs have outputs that can be changed");
     }
+    if (mx::NodeDefPtr nodeDef = LocalNodeDef(graph)) {
+        return {graph, nodeDef};
+    }
     if (graph->hasNodeDefString()) {
         throw Refusal("The outputs of " + graph->getName() + " are defined by " + graph->getNodeDefString() +
-                      " and are changed there");
+                      ", in the libraries or an included file");
     }
-    return graph;
+    return {graph, nullptr};
+}
+
+/// The ports next to `node` that read it: its siblings' inputs and the
+/// `<output>`s beside it with `nodename` set to it.
+std::vector<mx::PortElementPtr> PortsReadingNode(const mx::NodePtr& node) {
+    std::vector<mx::PortElementPtr> ports;
+    for (const mx::PortElementPtr& port : SiblingPorts(node->getParent())) {
+        if (port->getNodeName() == node->getName()) {
+            ports.push_back(port);
+        }
+    }
+    return ports;
 }
 
 /// The ports next to `graph` that read its output `outputName`: by name,
@@ -2814,7 +2838,8 @@ bool Document::addNodeGraph(const std::string& parentPath, const std::string& na
 bool Document::addGraphOutput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
                               std::string& newName, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        GraphOutputs target = OutputsOf(document, graphPath);
+        mx::NodeGraphPtr graph = target.graph;
         static const std::set<std::string> standardTypes = {
             "float", "integer", "boolean", "color3", "color4", "vector2", "vector3", "vector4",
             "matrix33", "matrix44", "string", "filename", "BSDF", "EDF", "VDF",
@@ -2828,15 +2853,36 @@ bool Document::addGraphOutput(const std::string& graphPath, const std::string& n
             for (const mx::PortElementPtr& port : PortsReading(graph, first)) {
                 port->setOutputString(first);
             }
+            // So must readers of a definition's nodes, which now give
+            // several outputs (M7c).
+            if (target.nodeDef) {
+                for (const mx::NodePtr& instance : InstancesOf(document, target.nodeDef)) {
+                    for (const mx::PortElementPtr& port : PortsReadingNode(instance)) {
+                        if (port->getOutputString().empty()) {
+                            port->setOutputString(first);
+                        }
+                    }
+                    instance->setType(mx::MULTI_OUTPUT_TYPE_STRING);
+                }
+            }
         }
-        newName = graph->addOutput(graph->createValidChildName(nameHint.empty() ? "out" : nameHint), type)->getName();
+        // A definition's output is named in both the nodedef and the graph.
+        std::string name = graph->createValidChildName(nameHint.empty() ? "out" : nameHint);
+        for (int i = 2; target.nodeDef && (graph->getChild(name) || target.nodeDef->getChild(name)); ++i) {
+            name = mx::createValidName(nameHint.empty() ? "out" : nameHint) + std::to_string(i);
+        }
+        newName = graph->addOutput(name, type)->getName();
+        if (target.nodeDef) {
+            target.nodeDef->addOutput(newName, type);
+        }
     });
 }
 
 bool Document::renameGraphOutput(const std::string& graphPath, const std::string& outputName,
                                  const std::string& newName, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        GraphOutputs target = OutputsOf(document, graphPath);
+        mx::NodeGraphPtr graph = target.graph;
         mx::OutputPtr output = graph->getOutput(outputName);
         if (!output) {
             throw Refusal(graph->getName() + " has no output " + outputName);
@@ -2847,12 +2893,26 @@ bool Document::renameGraphOutput(const std::string& graphPath, const std::string
         if (newName.empty() || mx::createValidName(newName) != newName) {
             throw Refusal("\"" + newName + "\" is not a valid MaterialX name (letters, digits and _ only)");
         }
-        if (graph->getChild(newName)) {
+        if (graph->getChild(newName) || (target.nodeDef && target.nodeDef->getChild(newName))) {
             throw Refusal("There is already a " + newName + " in " + graph->getName());
         }
         for (const mx::PortElementPtr& port : PortsReading(graph, outputName)) {
             if (!port->getOutputString().empty()) {
                 port->setOutputString(newName);
+            }
+        }
+        // A definition's (M7c): its nodedef's output, and what reads its
+        // nodes' output by name.
+        if (target.nodeDef) {
+            for (const mx::NodePtr& instance : InstancesOf(document, target.nodeDef)) {
+                for (const mx::PortElementPtr& port : PortsReadingNode(instance)) {
+                    if (port->getOutputString() == outputName) {
+                        port->setOutputString(newName);
+                    }
+                }
+            }
+            if (mx::OutputPtr defined = target.nodeDef->getOutput(outputName)) {
+                defined->setName(newName);
             }
         }
         output->setName(newName);
@@ -2862,12 +2922,36 @@ bool Document::renameGraphOutput(const std::string& graphPath, const std::string
 
 bool Document::removeGraphOutput(const std::string& graphPath, const std::string& outputName, std::string& errorMessage) {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
-        mx::NodeGraphPtr graph = GraphWithOwnOutputs(document, graphPath);
+        GraphOutputs target = OutputsOf(document, graphPath);
+        mx::NodeGraphPtr graph = target.graph;
         if (!graph->getOutput(outputName)) {
             throw Refusal(graph->getName() + " has no output " + outputName);
         }
+        if (target.nodeDef && graph->getOutputs().size() == 1) {
+            throw Refusal("A definition needs an output: its nodes would give nothing");
+        }
         for (const mx::PortElementPtr& port : PortsReading(graph, outputName)) {
             Disconnect(port);
+        }
+        // A definition's (M7c): what read the output from its nodes is
+        // disconnected, and with one output left they are of its type
+        // again, read without naming it (MaterialX allows `output` only
+        // on a multi-output node).
+        if (target.nodeDef) {
+            target.nodeDef->removeOutput(outputName);
+            const std::vector<mx::OutputPtr> left = target.nodeDef->getOutputs();
+            for (const mx::NodePtr& instance : InstancesOf(document, target.nodeDef)) {
+                for (const mx::PortElementPtr& port : PortsReadingNode(instance)) {
+                    if (port->getOutputString() == outputName) {
+                        Disconnect(port);
+                    } else if (left.size() == 1) {
+                        port->removeAttribute(mx::PortElement::OUTPUT_ATTRIBUTE);
+                    }
+                }
+                if (left.size() == 1) {
+                    instance->setType(left.front()->getType());
+                }
+            }
         }
         graph->removeOutput(outputName);
     });
@@ -3319,6 +3403,62 @@ bool Document::setNodeDefAttribute(const std::string& graphPath, const std::stri
         if (attribute == "version") {
             nodeDef->setDefaultVersion(true);
         }
+    });
+}
+
+bool Document::renameNodeDefinition(const std::string& graphPath, const std::string& node, std::string& newGraphPath,
+                                    std::string& errorMessage) {
+    return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
+        mx::NodeGraphPtr graph = EditableElement(document, graphPath)->asA<mx::NodeGraph>();
+        mx::NodeDefPtr nodeDef = graph ? LocalNodeDef(graph) : nullptr;
+        if (!nodeDef) {
+            throw Refusal(graphPath + " doesn't implement a node definition in this document");
+        }
+        const std::string old = nodeDef->getNodeString();
+        newGraphPath = graph->getNamePath();
+        if (node == old) {
+            return;
+        }
+        if (node.empty() || mx::createValidName(node) != node) {
+            throw Refusal("\"" + node + "\" is not a valid MaterialX name (letters, digits and _ only)");
+        }
+        // A category shared with another definition would make its nodes
+        // that kind too.
+        bool taken = !document->getMatchingNodeDefs(node).empty();
+        if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
+            taken = taken || !library->getMatchingNodeDefs(node).empty();
+        }
+        if (taken) {
+            throw Refusal("There is already a node called " + node);
+        }
+
+        const std::vector<mx::NodePtr> instances = InstancesOf(document, nodeDef);
+        nodeDef->setNodeString(node);
+        for (const mx::NodePtr& instance : instances) {
+            instance->setCategory(node);
+        }
+        // "ND_<old>_color3" → "ND_<node>_color3", if free; the graph and
+        // the nodes that name it follow.
+        const std::string prefix = "ND_" + old;
+        const std::string name = nodeDef->getName();
+        if (name.rfind(prefix, 0) == 0 && (name.size() == prefix.size() || name[prefix.size()] == '_')) {
+            const std::string newName = "ND_" + node + name.substr(prefix.size());
+            if (!document->getChild(newName)) {
+                nodeDef->setName(newName);
+                graph->setNodeDefString(newName);
+                for (const mx::NodePtr& instance : instances) {
+                    if (instance->hasNodeDefString()) {
+                        instance->setNodeDefString(newName);
+                    }
+                }
+            }
+        }
+        // "NG_<old>" → "NG_<node>", if free.
+        if (graph->getName() == "NG_" + old && !document->getChild("NG_" + node)) {
+            RenameInBackdrops(document, graph->getName(), "NG_" + node);
+            graph->setName("NG_" + node);
+        }
+        newGraphPath = graph->getNamePath();
     });
 }
 

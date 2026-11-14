@@ -229,7 +229,7 @@ struct GraphPanel: View {
                         NodeSearchPopup(catalog: document.catalog, need: searchRequest.flatMap(need(of:))) { match in
                             if let request = searchRequest {
                                 addNode(match.variant.name, atView: request.location, in: level,
-                                        connecting: request.wire, port: match.port)
+                                        connecting: request.wire, port: match.port, from: match.variant.libraryFile)
                             }
                             searchRequest = nil
                             level.controller.endNodeSearch()

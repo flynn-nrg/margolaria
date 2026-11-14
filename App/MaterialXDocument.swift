@@ -22,7 +22,8 @@
 // stored property (M4f); a save panel's accessory view, and a small
 // `NSObject` subclass as a control's target (M5b); a function taking a
 // throwing closure (M5c); `NSPathControl` and its delegate, `UserDefaults`
-// read and written directly (M5d).
+// read and written directly (M5d); overriding a property to add `didSet`
+// (M7c).
 
 import AppKit
 import GraphKit
@@ -103,13 +104,17 @@ final class MaterialXDocument: NSDocument {
 
     /// The nodes this document can add (M2e): the data libraries' and the
     /// document's own nodedefs, for the Library tab, the canvas's node
-    /// search and the inspector's Type menu.
+    /// search and the inspector's Type menu; and, since M7c, those in the
+    /// library folders' files (My Library, the document's folder) that the
+    /// document doesn't include yet, for the node search and the palette.
     private(set) var catalog: MXNodeCatalog = MXNodeCatalog(definitions: [])
 
     /// The names of the document's own nodedefs when `catalog` was built.
     /// The catalog is rebuilt only when they change, not after every edit:
-    /// building it reads all ~800 nodedefs, and a slider drag edits many
-    /// times a second.
+    /// building it reads all ~800 nodedefs and the library files, and a
+    /// slider drag edits many times a second. Also rebuilt when the
+    /// document moves (other folder, other library files) and when a
+    /// library file is saved (`refreshCatalog()`).
     @ObservationIgnored private var catalogKey: [String]? = nil
 
     /// False if the MaterialX data libraries failed to load. Then nothing can
@@ -282,6 +287,27 @@ final class MaterialXDocument: NSDocument {
     /// ContentView) so that Export as USDZ… can put it on the shape.
     var previewMaterial: String? = nil
 
+    /// The viewport's shape (M7a): window state since M7c, so another
+    /// window's choice doesn't change this one's. A new window starts with
+    /// the last chosen in any (`ViewportShape.chosen`), which choosing one
+    /// updates. Export as USDZ… writes it.
+    ///
+    /// SWIFT: `didSet` on a property of an `@Observable` class: the macro
+    /// keeps it, so views still see the change, and the observer runs too.
+    var viewportShape: ViewportShape = .chosen {
+        didSet {
+            UserDefaults.standard.set(viewportShape.rawValue, forKey: ViewportShape.defaultsKey)
+        }
+    }
+
+    /// The viewport's Hydra renderer (M5e), by plugin identifier: window
+    /// state like the shape (M7c), starting from the last chosen.
+    var viewportRendererID: String = ViewportRenderer.chosenID {
+        didSet {
+            UserDefaults.standard.set(viewportRendererID, forKey: ViewportRenderer.defaultsKey)
+        }
+    }
+
     /// The node selected on the canvas (one only), by path: window state,
     /// here so that scripts can read it (`margolaria.selection()`, M6b).
     /// The canvas writes it (ContentView).
@@ -342,7 +368,7 @@ final class MaterialXDocument: NSDocument {
             return
         }
         let material: String? = previewMaterial
-        let shape: ViewportShape = .chosen
+        let shape: ViewportShape = viewportShape
         let panel = NSSavePanel()
         panel.title = "Export as USDZ"
         var message: String = "The viewport's shape (\(shape.title.lowercased())) with the material it shows"
@@ -873,7 +899,7 @@ final class MaterialXDocument: NSDocument {
         elements = document.topLevelElements
         let ownNodeDefs: [String] = elements.filter { $0.category == "nodedef" }.map(\.name)
         if ownNodeDefs != catalogKey {
-            catalog = MXNodeCatalog(document: document)
+            buildCatalog(for: document)
             catalogKey = ownNodeDefs
         }
         // If writing fails, show the error text in place of the XML.
@@ -917,6 +943,31 @@ extension MaterialXDocument: ScriptHost {
 
     var documentFolder: URL? {
         fileURL?.deletingLastPathComponent()
+    }
+
+    /// Builds `catalog` for `document`, with the library folders' files.
+    private func buildCatalog(for document: MXDocument) {
+        let files: [MXLibraryFile] = MXLibraryFolders.libraries(for: fileURL).flatMap(\.files)
+        catalog = MXNodeCatalog(document: document, libraryFiles: files)
+    }
+
+    /// Reads the library folders again (M7c): after Save to Library, or
+    /// when the document is saved somewhere else.
+    func refreshCatalog() {
+        buildCatalog(for: content)
+    }
+
+    /// Saved in another folder (or for the first time): that folder's
+    /// library files are listed now.
+    ///
+    /// SWIFT: Overriding a property only to add `didSet`: the stored value
+    /// stays NSDocument's, and this runs after each change.
+    override var fileURL: URL? {
+        didSet {
+            if fileURL?.deletingLastPathComponent() != oldValue?.deletingLastPathComponent() {
+                refreshCatalog()
+            }
+        }
     }
 }
 

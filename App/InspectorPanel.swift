@@ -304,13 +304,13 @@ private struct NodeHeader: View {
                 WorkingSpaceMenu(document: document, path: node.path,
                                  isReadOnly: node.isIncluded || node.nodeDefName != nil)
                     .padding(.top, 4)
-                // A definition made here (M4c1) has editable inputs; its
-                // outputs are fixed, as its nodes' connections rely on them.
+                // A definition made here (M4c1) has editable inputs, and,
+                // since M7c, outputs: its nodes follow.
                 GraphPortList(document: document, graph: node, kind: .input,
                               isReadOnly: node.isIncluded || (node.nodeDefName != nil && !node.isLocalDefinition))
                     .padding(.top, 4)
                 GraphPortList(document: document, graph: node, kind: .output,
-                              isReadOnly: node.isIncluded || node.nodeDefName != nil)
+                              isReadOnly: node.isIncluded || (node.nodeDefName != nil && !node.isLocalDefinition))
                     .padding(.top, 4)
                 if node.isLocalDefinition {
                     DefinitionSettings(document: document, graph: node, onOpen: onOpen)
@@ -610,9 +610,9 @@ private struct NodeDefinitionSheet: View {
     }
 }
 
-/// A definition made in this document: its name and kind, and its group,
-/// version and description, editable. Its inputs are edited like a
-/// nodegraph's (above); its outputs are fixed.
+/// A definition made in this document: its name and kind, and its node's
+/// name (M7c), group, version and description, editable. Its inputs and
+/// (since M7c) outputs are edited like a nodegraph's (above).
 private struct DefinitionSettings: View {
     let document: MaterialXDocument
     let graph: MXNode
@@ -627,6 +627,7 @@ private struct DefinitionSettings: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            nodeField
             field("Group", .nodeGroup, value: graph.nodeGroup, prompt: "texture2d")
             field("Version", .version, value: graph.nodeDefVersion, prompt: "1.0")
             field("Description", .documentation, value: graph.documentation, prompt: "What the node does")
@@ -698,6 +699,35 @@ private struct DefinitionSettings: View {
         document.edit("Delete Definition \(graph.nodeDefName ?? graph.name)") { content in
             try content.removeNodeDefinition(implementedBy: path)
             onOpen("")
+        }
+    }
+
+    /// The node's name (M7c): its category, which every node of it is
+    /// written as. Renaming it renames those nodes' kind, and the
+    /// definition's and graph's names made from it; the canvas follows
+    /// the graph to its new path.
+    private var nodeField: some View {
+        let current: String = document.catalog.definition(named: graph.nodeDefName ?? "")?.node ?? ""
+        return HStack(spacing: 8) {
+            Text("Node")
+                .frame(width: 90, alignment: .leading)
+                .foregroundStyle(.secondary)
+            CommitTextField(text: current, prompt: "my_node") { newValue in
+                let node: String = newValue.trimmingCharacters(in: .whitespaces)
+                guard !node.isEmpty, node != current else {
+                    return
+                }
+                let path: String = graph.path
+                let onOpen = onOpen
+                document.edit("Rename Node \(current) to \(node)") { content in
+                    let newPath: String = try content.renameNodeDefinition(implementedBy: path, to: node)
+                    if newPath != path {
+                        onOpen(newPath)
+                    }
+                }
+            }
+            .textFieldStyle(.roundedBorder)
+            .help("The kind of node this defines, as the Library lists it and the file writes its nodes")
         }
     }
 
@@ -1097,6 +1127,19 @@ private struct InputList: View {
                 .font(.caption)
             }
         }
+        .paletteCommands(paletteCommands)
+    }
+
+    /// Each input's right-click actions, for the command palette (M7c):
+    /// "Reset Base Color to Default", "Promote in2 to Nodegraph Input".
+    /// From every input, not only the rows built: those in closed folders
+    /// and advanced ones count too.
+    private var paletteCommands: [PaletteCommand] {
+        let document: MaterialXDocument = document
+        let ownerPath: String = ownerPath
+        return InputCommands.paletteCommands(for: inputs, ownerPath: ownerPath, isReadOnly: isReadOnly,
+                                             reset: { InputRow.reset($0, on: ownerPath, in: document) },
+                                             promote: { InputRow.promote($0, on: ownerPath, in: document) })
     }
 
     /// One row per input.
@@ -1136,10 +1179,10 @@ struct InputRow: View {
         input.ui.name ?? input.name
     }
 
-    /// Only inputs from a nodedef have a default to go back to. Removing
-    /// any other input (a nodegraph's own) would delete it.
+    /// Only inputs from a nodedef have a default to go back to (GraphKit's
+    /// InputCommands, which the palette uses too, M7c).
     private var canReset: Bool {
-        input.isAuthored && !isReadOnly && (input.defaultValue != nil || input.ui.defaultGeomProp != nil)
+        InputCommands.canReset(input, isReadOnly: isReadOnly)
     }
 
     var body: some View {
@@ -1201,18 +1244,20 @@ struct InputRow: View {
     }
 
     /// An unconnected input of a node inside a nodegraph can become one of
-    /// the graph's inputs (M4b). Not a nodegraph's own input (its owner is
-    /// the graph, at the top level).
+    /// the graph's inputs (M4b; GraphKit's InputCommands).
     private var canPromote: Bool {
-        !isReadOnly && input.connection == nil && ownerPath.contains("/")
+        InputCommands.canPromote(input, ownerPath: ownerPath, isReadOnly: isReadOnly)
+    }
+
+    private func promote() {
+        Self.promote(input, on: ownerPath, in: document)
     }
 
     /// Makes the input one of its nodegraph's, with its value and
     /// presentation; the node then reads it.
-    private func promote() {
+    static func promote(_ input: MXPort, on ownerPath: String, in document: MaterialXDocument) {
         let name: String = input.name
-        let ownerPath: String = ownerPath
-        document.edit("Promote \(label)") { content in
+        document.edit("Promote \(input.ui.name ?? name)") { content in
             try content.promote(input: name, on: ownerPath)
         }
     }
@@ -1275,9 +1320,13 @@ struct InputRow: View {
         guard canReset else {
             return
         }
+        Self.reset(input, on: ownerPath, in: document)
+    }
+
+    /// Puts the input back to its nodedef's default, as one step.
+    static func reset(_ input: MXPort, on ownerPath: String, in document: MaterialXDocument) {
         let name: String = input.name
-        let ownerPath: String = ownerPath
-        document.edit("Reset \(label)") { content in
+        document.edit("Reset \(input.ui.name ?? name)") { content in
             try content.resetInput(name, on: ownerPath)
         }
     }
