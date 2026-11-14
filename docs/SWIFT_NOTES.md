@@ -135,6 +135,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `&variable` to a pointer parameter | Lends a C API a pointer to a `var` for the length of the call | `&x` in C | `DisplayPass.swift` (`setFragmentBytes`) |
 | `withUnsafeMutableBytes` | Lends a writable raw pointer to an array's storage for the length of a closure | Passing `vec.data()` to a C function that fills it | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
 | `oldValue` in `didSet` | The value before the assignment; observers don't run for assignments in the type's own `init` | Comparing in a custom setter | `ViewportView.swift` (`StormMTKView.environment`) |
+| Overriding a property to observe it | `override var fileURL: URL? { didSet { … } }`: the superclass keeps storing it; the subclass runs code after each change | Overriding a setter and calling `super` | `MaterialXDocument.swift` (`fileURL`, M7c) |
 | Generic functions `func f<Item>(...)` | Work for any type; the body is checked once against what every type allows, not per use | C++ function templates, Go generics | `CommandPalette.swift` (`FuzzyMatch.rank`) |
 | A closure stored in a struct | `let run: @MainActor () -> Void`: code as data, carrying what it captured; such structs can't be `Equatable` | A block property in ObjC | `CommandPalette.swift` (`PaletteCommand`) |
 | `Set.insert(_:).inserted` | `insert` returns whether the element was new: filtering repeats in one line | `std::set::insert(...).second` | `ContentView.swift` (`unique`) |
@@ -276,6 +277,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `.allowsHitTesting(false)` | Clicks go through the view to whatever is under it | `GraphPanel.swift` (empty-canvas hint) |
 | `.keyboardShortcut(.defaultAction)` / `.cancelAction` | Return (or Escape) presses the button; the default one is drawn highlighted | `TemplateSheet.swift` |
 | `.sheet(isPresented:)`, `@Environment(\.dismiss)` | A modal sheet over the window while a binding is true; inside it, `dismiss()` closes it | `-beginSheet:completionHandler:`, `-endSheet:` | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
+| `.hidden()` vs `if` | `.hidden()` keeps a view in the tree (state, preferences, sheets) but doesn't draw it or take clicks; `if` removes it | `isHidden` vs removing the view | `ContentView.swift` (the hidden inspector, M7c) |
 | `Form` | Lays labelled controls out in two columns, labels right-aligned, as in settings windows | An `NSGridView` of labels and fields | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
 | `TextField(axis: .vertical)` with `.lineLimit(2...4)` | A text field that grows to several lines as the text wraps | An `NSTextView` that resizes | `InspectorPanel.swift` (`NodeDefinitionSheet`) |
 | `.buttonStyle(.plain)` | A button without the standard look, drawing only its label: for rows that show their own selection | `TemplateSheet.swift` |

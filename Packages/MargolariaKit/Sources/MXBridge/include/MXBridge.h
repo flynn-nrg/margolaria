@@ -668,18 +668,24 @@ public:
     /// Adds an `<output>` of `type` to the nodegraph at `graphPath`, named
     /// `nameHint` (made unique), connected to nothing. Sets `newName`.
     /// Ports reading the graph's only output without naming it are made to
-    /// name it, since there are now two. Refused for a graph that
-    /// implements a nodedef: its outputs are the nodedef's.
+    /// name it, since there are now two. For a graph implementing a
+    /// nodedef defined in this document (M7c), the nodedef gets the output
+    /// too, and its nodes become multi-output, the ports reading them
+    /// naming the first; refused for one from the libraries or an included
+    /// file.
     bool addGraphOutput(const std::string& graphPath, const std::string& nameHint, const std::string& type,
                         std::string& newName, std::string& errorMessage);
 
     /// Renames the output `outputName` of the nodegraph at `graphPath`,
-    /// and what reads it by name.
+    /// and what reads it by name; for a local definition's graph (M7c),
+    /// the nodedef's output too, and what reads it from its nodes.
     bool renameGraphOutput(const std::string& graphPath, const std::string& outputName, const std::string& newName,
                            std::string& errorMessage);
 
     /// Removes the output `outputName` of the nodegraph at `graphPath`,
-    /// disconnecting what read it.
+    /// disconnecting what read it; for a local definition's graph (M7c),
+    /// the nodedef's output too, disconnecting what read it from its
+    /// nodes. A definition keeps at least one output.
     bool removeGraphOutput(const std::string& graphPath, const std::string& outputName, std::string& errorMessage);
 
     // --- A nodegraph's interface (M4b) ----------------------------------------
@@ -746,6 +752,15 @@ public:
     /// document; "" removes it.
     bool setNodeDefAttribute(const std::string& graphPath, const std::string& attribute, const std::string& value,
                              std::string& errorMessage);
+
+    /// Renames the node (the category) of the nodedef the nodegraph at
+    /// `graphPath` implements, if it is in this document (M7c): every node
+    /// of it becomes a `node`. The nodedef's and the graph's names follow
+    /// where they were made from the old one ("ND_<old>…", "NG_<old>") and
+    /// the new ones are free. Refused for a name another nodedef already
+    /// uses, here or in the libraries. Sets `newGraphPath`.
+    bool renameNodeDefinition(const std::string& graphPath, const std::string& node, std::string& newGraphPath,
+                              std::string& errorMessage);
 
     // --- Libraries (M4c2) -----------------------------------------------------
 

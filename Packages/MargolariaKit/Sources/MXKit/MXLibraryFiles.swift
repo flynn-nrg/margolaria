@@ -31,6 +31,13 @@ public struct MXLibraryFile: Hashable, Sendable, Identifiable {
     }
 }
 
+/// A folder of library files, as the Library tab lists it.
+public struct MXLibraryFolder: Hashable, Sendable {
+    /// "My Library" or "This Document's Folder".
+    public let title: String
+    public let files: [MXLibraryFile]
+}
+
 /// Where Margolaria keeps the user's files: `~/Documents/Margolaria`, with
 /// `Libraries` (definitions saved with Save to Library) and `Materials`
 /// (where saving a new document starts). In Documents rather than
@@ -84,6 +91,21 @@ public enum MXLibraryFolders {
         if ((try? fileManager.contentsOfDirectory(atPath: old.path(percentEncoded: false))) ?? ["?"]).isEmpty {
             try? fileManager.removeItem(at: old)
         }
+    }
+
+    /// The library folders a document can use nodes from, with their files
+    /// (M4c2; shared by the Library tab and the node searches since M7c):
+    /// "My Library", and the folder of `document` (the document's file,
+    /// left out of the list) unless it is My Library.
+    public static func libraries(for document: URL?) -> [MXLibraryFolder] {
+        var found: [MXLibraryFolder] = []
+        if let user {
+            found.append(MXLibraryFolder(title: "My Library", files: files(in: user)))
+        }
+        if let folder = document?.deletingLastPathComponent(), folder.standardizedFileURL != user?.standardizedFileURL {
+            found.append(MXLibraryFolder(title: "This Document's Folder", files: files(in: folder, except: document)))
+        }
+        return found
     }
 
     /// The library files directly in `folder` (not in folders inside it)

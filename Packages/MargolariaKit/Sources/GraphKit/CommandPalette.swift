@@ -12,7 +12,10 @@
 //     without anyone remembering to add it;
 //   - FuzzyMatch: scores a query against a title, as Xcode's Open Quickly
 //     does: the query's letters in order, anywhere, ranked by how well they
-//     line up with the starts of words ("fs" finds "Frame Selection").
+//     line up with the starts of words ("fs" finds "Frame Selection");
+//   - InputCommands (M7c): an input's right-click actions in the
+//     inspector, Reset to Default and Promote, when each applies, and as
+//     palette commands for every input of the selection.
 //
 // Introduces (SWIFT): a stored closure property in a struct (`run`),
 // `@MainActor` on a closure type, recursion with an `inout` array,
@@ -21,6 +24,7 @@
 // generic function (`rank<Item>`), sorting by a tuple with a negated key.
 
 import AppKit
+import MXKit
 
 /// One command the palette can run.
 ///
@@ -286,5 +290,46 @@ public enum FuzzyMatch {
             (a.tier, -a.score, a.length, a.order) < (b.tier, -b.score, b.length, b.order)
         }
         .map(\.item)
+    }
+}
+
+/// The actions on one input that the inspector's rows offer when
+/// right-clicked (M2, M4b), and the palette lists for every input of the
+/// element shown (M7c), whether or not its row is on screen.
+public enum InputCommands {
+    /// Whether the input can go back to its default: one the document
+    /// sets, with a nodedef default (a value or a geometry property).
+    /// Removing any other input (a nodegraph's own) would delete it.
+    public static func canReset(_ input: MXPort, isReadOnly: Bool) -> Bool {
+        input.isAuthored && !isReadOnly && (input.defaultValue != nil || input.ui.defaultGeomProp != nil)
+    }
+
+    /// Whether the input can become its nodegraph's (M4b): an unconnected
+    /// input of a node inside a nodegraph (`ownerPath` has a "/"). Not a
+    /// nodegraph's own input, whose owner is the graph at the top level.
+    public static func canPromote(_ input: MXPort, ownerPath: String, isReadOnly: Bool) -> Bool {
+        !isReadOnly && input.connection == nil && ownerPath.contains("/")
+    }
+
+    /// The palette's commands for `inputs` of the element at `ownerPath`:
+    /// "Reset Base Color to Default" and "Promote in2 to Nodegraph Input"
+    /// where they apply, named by each input's label. Listed once
+    /// something is typed: a shader has dozens.
+    public static func paletteCommands(for inputs: [MXPort], ownerPath: String, isReadOnly: Bool,
+                                       reset: @escaping @MainActor (MXPort) -> Void,
+                                       promote: @escaping @MainActor (MXPort) -> Void) -> [PaletteCommand] {
+        var commands: [PaletteCommand] = []
+        for input in inputs {
+            let label: String = input.ui.name ?? input.name
+            if canReset(input, isReadOnly: isReadOnly) {
+                commands.append(PaletteCommand(title: "Reset \(label) to Default", group: "Inspector",
+                                               listsBeforeTyping: false) { reset(input) })
+            }
+            if canPromote(input, ownerPath: ownerPath, isReadOnly: isReadOnly) {
+                commands.append(PaletteCommand(title: "Promote \(label) to Nodegraph Input", group: "Inspector",
+                                               listsBeforeTyping: false) { promote(input) })
+            }
+        }
+        return commands
     }
 }

@@ -16,7 +16,8 @@
 // bindings (`$selection`), view modifiers, `NavigationSplitView`, `List`,
 // `ForEach`, `ViewBuilder` helpers, private sub-views, enums for view
 // modes, `Picker` in a toolbar; `.overlayPreferenceValue` and
-// `Set.insert(_:).inserted` (M4f); `.interactiveDismissDisabled()` (M6c).
+// `Set.insert(_:).inserted` (M4f); `.interactiveDismissDisabled()` (M6c);
+// `.hidden()` to keep a view without showing it (M7c).
 
 import GraphKit
 import MXKit
@@ -110,6 +111,20 @@ struct ContentView: View {
             columns
             LibraryStatusBar(documentVersion: document.content.documentVersion)
         }
+        // A hidden inspector is still there, unseen, so the command
+        // palette lists its commands (M7c): a view not in the window
+        // offers none.
+        //
+        // SWIFT: `.hidden()` keeps a view in the tree (its state, its
+        // preferences, its sheets) but doesn't draw it or let it be
+        // clicked, unlike leaving it out with `if`.
+        .background {
+            if !showsInspector {
+                inspector
+                    .frame(width: 1, height: 1)
+                    .hidden()
+            }
+        }
         .paletteCommands(viewCommands)
         // The command palette (⌘K, M4f), over the top of the window while
         // open: what the views offer (the inspector's commands, then the
@@ -157,10 +172,23 @@ struct ContentView: View {
         return commands
     }
 
+    /// The inspector for the selection. Clicking a connection, or
+    /// renaming, shows that node on the canvas, selected.
+    private var inspector: some View {
+        InspectorPanel(document: document, selectedPath: document.selectedPath, soloPath: $soloPath,
+                       onShow: { path in focus = path }, levelPath: graphPath,
+                       onOpen: { path in
+                           if viewMode == .text {
+                               viewMode = .split
+                           }
+                           graphPath = path
+                       })
+    }
+
     /// Every node the document can add (the Tab search's, and an empty
     /// nodegraph, as the Library offers), added in the middle of the
-    /// canvas. Not yet the library files' definitions, which the Tab
-    /// search doesn't list either.
+    /// canvas; since M7c, the library files' definitions too, whose file
+    /// adding one includes.
     private var nodeCommands: [PaletteCommand] {
         // Listed once something is typed: before, they would only push
         // the commands down.
@@ -170,11 +198,19 @@ struct ContentView: View {
         // SWIFT: `[emptyGraph] + ...map { }`: an array literal joined to
         // the mapped array.
         return [emptyGraph] + document.catalog.kinds.map { kind in
-            PaletteCommand(title: kind.node, group: kind.group.map { "Add Node · \($0)" } ?? "Add Node",
-                           listsBeforeTyping: false) {
-                add(NodeDefinitionDrag(nodeDef: kind.defaultVariant.name))
+            PaletteCommand(title: kind.node, group: Self.paletteGroup(of: kind), listsBeforeTyping: false) {
+                add(NodeDefinitionDrag(nodeDef: kind.defaultVariant.name, libraryFile: kind.libraryFile))
             }
         }
+    }
+
+    /// The palette's group for adding a node of `kind`: "Add Node · math",
+    /// or, for a library file's, "Add Node · tiles.mtlx" (M7c).
+    private static func paletteGroup(of kind: MXNodeKind) -> String {
+        guard let detail = kind.libraryFile?.lastPathComponent ?? kind.group else {
+            return "Add Node"
+        }
+        return "Add Node · " + detail
     }
 
     /// Adds a node in the middle of the canvas, showing the canvas first.
@@ -279,17 +315,8 @@ struct ContentView: View {
                                 .frame(minHeight: 160, idealHeight: 320, maxHeight: .infinity)
                         }
                         if showsInspector {
-                            // Clicking a connection, or renaming, shows that
-                            // node on the canvas, selected.
-                            InspectorPanel(document: document, selectedPath: document.selectedPath, soloPath: $soloPath,
-                                           onShow: { path in focus = path }, levelPath: graphPath,
-                                           onOpen: { path in
-                                               if viewMode == .text {
-                                                   viewMode = .split
-                                               }
-                                               graphPath = path
-                                           })
-                            .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)
+                            inspector
+                                .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)
                         }
                     }
                     .frame(minWidth: 300, idealWidth: 380, maxWidth: 800)
@@ -339,6 +366,11 @@ struct ContentView: View {
         }
         // A script's `margolaria.select()` (M6b): the element's graph, and
         // the element selected in it.
+        // A library file saved (Save to Library…): the node searches list
+        // its definitions (M7c).
+        .onReceive(NotificationCenter.default.publisher(for: .margolariaLibrariesChanged)) { _ in
+            document.refreshCatalog()
+        }
         .onChange(of: document.selectionRequest) {
             guard let path = document.selectionRequest else {
                 return

@@ -2,7 +2,8 @@
 //
 // Tests for library files (MXLibraryFiles.swift, M4c2): a definition
 // written to a file of its own, listed from a folder, and included in a
-// document by a relative or absolute path. (M4's exit criterion, with
+// document by a relative or absolute path; and, since M7c, listed by the
+// node searches until included. (M4's exit criterion, with
 // Storm, is LibraryRoundTripTests in ViewportKitTests.)
 //
 // Introduces (SWIFT): nothing new.
@@ -57,6 +58,44 @@ struct MXLibraryFilesTests {
         try "not xml".write(to: root.appending(path: "broken.mtlx"), atomically: true, encoding: .utf8)
         #expect(MXLibraryFolders.files(in: root).map(\.name) == ["tint"])
         #expect(MXLibraryFolders.files(in: root, except: root.appending(path: "tint.mtlx")).isEmpty)
+    }
+
+    @Test("The node searches list a library file's definitions, with their file, until it is included (M7c)")
+    func catalogWithLibraryFiles() throws {
+        let (defining, implementation) = try definingDocument()
+        let root: URL = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try defining.libraryText(forDefinitionAt: implementation).write(to: root.appending(path: "tint.mtlx"),
+                                                                        atomically: true, encoding: .utf8)
+        let files: [MXLibraryFile] = MXLibraryFolders.files(in: root)
+        // The file as the folder lists it (the temporary folder's path
+        // through /private/var, not its /var link).
+        let url: URL = try #require(files.first?.url)
+
+        let document = try MXDocument(xml: #"<?xml version="1.0"?><materialx version="1.39" />"#)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        let catalog = MXNodeCatalog(document: document, libraryFiles: files)
+        let tint: MXNodeKind = try #require(catalog.kind(named: "tint"))
+        #expect(tint.libraryFile == url)
+        #expect(!tint.isFromDocument)
+        #expect(catalog.groups.first?.name == "library", "first: the document defines nothing")
+        #expect(catalog.groups.first?.title == "In Library Files")
+        #expect(catalog.definition(named: "ND_tint_color3")?.libraryFile == url)
+        // Found by the Tab search and the palette, with and without a wire.
+        #expect(catalog.search("tint", for: nil).first?.variant.libraryFile == url)
+        #expect(catalog.search("tint", for: .input("color3")).contains { $0.kind.node == "tint" })
+
+        // Added as the app does: the file included, then the node.
+        try document.include(library: url, from: nil)
+        try document.addNode(nodeDef: "ND_tint_color3")
+        let included = MXNodeCatalog(document: document, libraryFiles: files)
+        #expect(included.kind(named: "tint")?.libraryFile == nil, "the document's now")
+        #expect(!included.groups.contains { $0.name == "library" })
+
+        // A document defining it itself lists it once, as its own.
+        let own = MXNodeCatalog(document: defining, libraryFiles: files)
+        #expect(own.kind(named: "tint")?.variants.count == 1)
+        #expect(own.kind(named: "tint")?.libraryFile == nil)
     }
 
     @Test("Included from the document's folder, the include is relative and survives reopening")

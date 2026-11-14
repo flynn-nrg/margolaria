@@ -5,7 +5,10 @@
 // sphere, or since M7a another shape. Drag to orbit, scroll to zoom. The bar
 // picks the material, the shape (M7a), the light around it, the OCIO view
 // transform (M3b), and the Hydra renderer (M5e; only Storm today, so the
-// bar just names it).
+// bar just names it). The shape and the renderer are the window's own
+// (M7c, kept by the document; a new window starts with the last chosen);
+// the light and the view transform are the app's, shared with every
+// window and the swatches.
 //
 // The viewport shows the document as it is in memory (M2c), edits included,
 // saved or not: after each edit it gets the new text (`viewportXML`: the
@@ -49,23 +52,23 @@ struct ViewportPanel: View {
     /// Int raw value, like ViewportEnvironment.
     @AppStorage("viewportEnvironment") private var environment: ViewportEnvironment = .studio
 
-    /// The shape the material is shown on (M7a), kept between launches.
-    /// Export as USDZ… writes the same one (ViewportShape.chosen).
-    @AppStorage(ViewportShape.defaultsKey) private var shape: ViewportShape = .sphere
+    /// The shape the material is shown on (M7a): this window's (M7c),
+    /// kept by the document, which Export as USDZ… writes too.
+    private var shape: ViewportShape {
+        document.viewportShape
+    }
 
     /// The OCIO display and view chosen, kept between launches. Empty until
     /// one is chosen; the config's default is shown until then.
     @AppStorage("viewportDisplay") private var display: String = ""
     @AppStorage("viewportView") private var view: String = ""
 
-    /// The Hydra renderer chosen, by plugin identifier, kept between
-    /// launches (M5e). A String rather than a ViewportRenderer: the
-    /// renderers are found at run time, so there is no enum to store.
-    @AppStorage("viewportRenderer") private var rendererID: String = ViewportRenderer.storm.id
-
-    /// The renderer to use: the one chosen if it is still found, else Storm.
+    /// The renderer to use (M5e): this window's (M7c), kept by the
+    /// document by plugin identifier, if it is still found; else Storm.
+    /// An identifier rather than a ViewportRenderer: the renderers are
+    /// found at run time, so there is no enum to store.
     private var renderer: ViewportRenderer {
-        ViewportRenderer.preferred(id: rendererID)
+        ViewportRenderer.preferred(id: document.viewportRendererID)
     }
 
     /// The view transform to use: the one chosen if the config still
@@ -139,7 +142,7 @@ struct ViewportPanel: View {
                     .disabled(materials.count < 2)
                 }
                 Spacer()
-                Picker("Shape", selection: $shape) {
+                Picker("Shape", selection: Bindable(document).viewportShape) {
                     ForEach(ViewportShape.allCases) { shape in
                         Text(shape.title).tag(shape)
                     }
@@ -213,7 +216,7 @@ struct ViewportPanel: View {
             // stores the chosen one's identifier.
             let selection = Binding<ViewportRenderer>(
                 get: { renderer },
-                set: { rendererID = $0.id }
+                set: { document.viewportRendererID = $0.id }
             )
             Picker("Renderer", selection: selection) {
                 ForEach(renderers) { renderer in

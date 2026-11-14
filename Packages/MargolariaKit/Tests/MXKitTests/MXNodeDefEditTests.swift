@@ -2,7 +2,8 @@
 //
 // Tests for M4c1's edits (MXNodeDefEdit.swift): a nodegraph made into a
 // node definition, its node put where the graph was used, the Library
-// listing it, and the definition edited in its own document. M4c1's exit
+// listing it, and the definition edited in its own document (since M7c,
+// its outputs and its node's name too). M4c1's exit
 // criterion, for the document: every example's nodegraphs made into
 // definitions stay valid. (ViewportKitTests checks that Storm renders the
 // node as it rendered the graph.)
@@ -150,6 +151,94 @@ struct MXNodeDefEditTests {
         let reread = try MXDocument(xml: try document.xmlString())
         reread.setDataLibrary(try MXLibrary.bundled.get())
         #expect(reread.difference(from: document) == nil)
+    }
+
+    @Test("A definition's outputs are added, renamed and removed, and its nodes follow (M7c)")
+    func editOutputs() throws {
+        let document = try document()
+        try document.makeNodeDefinition(from: "NG_tint", as: MXNodeDefSpec(node: "tint", name: "ND_tint_color3"))
+        let graph: String = try #require(document.implementation(of: "ND_tint_color3"))
+        func instance() throws -> MXNode {
+            try #require(try document.graph(at: "").node(named: "NG_tint"))
+        }
+        func shaderReads() throws -> MXConnection? {
+            try document.graph(at: "").node(named: "SR")?.inputs.first(where: { $0.name == "base_color" })?.connection
+        }
+
+        // A second output: the nodes give several, and what read them
+        // names the first.
+        let alpha: String = try document.addOutput(named: "alpha", type: "float", to: graph)
+        let constant: String = try document.addNode(nodeDef: "ND_constant_float", in: graph)
+        try document.connect(input: "", on: graph + "/" + alpha, to: String(constant.split(separator: "/").last!))
+        #expect(try instance().type == "multioutput")
+        #expect(try instance().outputs.map(\.name) == ["out", "alpha"])
+        #expect(try shaderReads() == .node("NG_tint", output: "out"))
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // Renamed: what reads it from the nodes follows.
+        try document.renameOutput("out", of: graph, to: "colour")
+        #expect(try instance().outputs.map(\.name) == ["colour", "alpha"])
+        #expect(try shaderReads() == .node("NG_tint", output: "colour"))
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // Removed: one output again, of its type, read without naming
+        // it; the last one stays.
+        try document.removeOutput("alpha", of: graph)
+        #expect(try instance().type == "color3")
+        #expect(try shaderReads() == .node("NG_tint", output: nil))
+        #expect(throws: MXError.self) {
+            try document.removeOutput("colour", of: graph)
+        }
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // A removed output that was read: disconnected.
+        try document.addOutput(named: "extra", type: "color3", to: graph)
+        try document.connect(input: "base_color", on: "SR", to: "NG_tint", output: "extra")
+        try document.removeOutput("extra", of: graph)
+        #expect(try shaderReads() == nil)
+        // Renaming the only output: nothing names it outside.
+        try document.renameOutput("colour", of: graph, to: "out")
+        #expect(try instance().outputs.map(\.name) == ["out"])
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // Saved and read back.
+        let reread = try MXDocument(xml: try document.xmlString())
+        reread.setDataLibrary(try MXLibrary.bundled.get())
+        #expect(reread.difference(from: document) == nil)
+    }
+
+    @Test("A definition's node is renamed: its nodes, and the names made from it (M7c)")
+    func renameNode() throws {
+        let document = try document()
+        try document.makeNodeDefinition(from: "NG_tint", as: MXNodeDefSpec(node: "tint", name: "ND_tint_color3"))
+        let graph: String = try #require(document.implementation(of: "ND_tint_color3"))
+        // Taken names and bad ones are refused.
+        for taken in ["multiply", "open_pbr_surface", "two words", ""] {
+            #expect(throws: MXError.self, "\(taken)") {
+                try document.renameNodeDefinition(implementedBy: graph, to: taken)
+            }
+        }
+
+        let renamed: String = try document.renameNodeDefinition(implementedBy: graph, to: "shade")
+        let node: MXNode = try #require(try document.graph(at: "").node(named: "NG_tint"))
+        #expect(node.category == "shade")
+        #expect(node.nodeDefName == "ND_shade_color3")
+        #expect(document.implementation(of: "ND_shade_color3") == renamed)
+        // The graph was named after the old node only if that was free.
+        #expect(renamed == (graph == "NG_tint" ? "NG_shade" : graph))
+        let catalog = MXNodeCatalog(document: document)
+        #expect(catalog.kind(named: "shade") != nil)
+        #expect(catalog.kind(named: "tint") == nil)
+        #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
+
+        // A nodedef name not made from the node is kept.
+        let other = try self.document()
+        try other.makeNodeDefinition(from: "NG_tint", as: MXNodeDefSpec(node: "tint", name: "ND_my_tint"))
+        let otherGraph: String = try #require(other.implementation(of: "ND_my_tint"))
+        try other.renameNodeDefinition(implementedBy: otherGraph, to: "shade")
+        #expect(try other.graph(at: "").node(named: "NG_tint")?.nodeDefName == "ND_my_tint")
+        #expect(try other.graph(at: "").node(named: "NG_tint")?.category == "shade")
+        #expect(other.validationIssues().isEmpty, "\(other.validationIssues())")
     }
 
     @Test("An implementation isn't part of the graph: hidden from the level, opened from its nodes, deleted with its definition")

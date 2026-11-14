@@ -7,12 +7,14 @@
 // found and run from the palette", for a menu bar built like the app's
 // (the app's own is built in the app, which has no test target): every
 // enabled item is listed, its title finds it first, and running it sends
-// its action.
+// its action. Since M7c, the inputs' right-click actions, listed for every
+// input of the element shown.
 //
 // Introduces (SWIFT): an `NSObject` subclass in a test, with `@objc`
 // actions, standing in for the responder that would receive them.
 
 import AppKit
+import MXKit
 import Testing
 @testable import GraphKit
 
@@ -185,5 +187,49 @@ struct CommandPaletteTests {
         #expect(MenuCommands.shortcut(key: "\r", modifiers: .command) == "⌘↩")
         #expect(MenuCommands.shortcut(key: "", modifiers: .command) == "")
         #expect(MenuCommands.shortcut(key: ",", modifiers: .command) == "⌘,")
+    }
+
+    // MARK: Inputs' actions (M7c)
+
+    @Test("Each input's Reset to Default and Promote are listed where they apply, and run on that input")
+    func inputCommands() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodegraph name="NG">
+                <multiply name="scale" type="float">
+                  <input name="in1" type="float" value="2" />
+                </multiply>
+                <output name="out" type="float" nodename="scale" />
+              </nodegraph>
+              <multiply name="top" type="float">
+                <input name="in1" type="float" value="3" />
+              </multiply>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        let inner: MXNode = try #require(try document.graph(at: "NG").node(named: "scale"))
+        var ran: [String] = []
+        func commands(_ node: MXNode, readOnly: Bool = false) -> [PaletteCommand] {
+            InputCommands.paletteCommands(for: node.inputs, ownerPath: node.path, isReadOnly: readOnly,
+                                          reset: { ran.append("reset " + $0.name) },
+                                          promote: { ran.append("promote " + $0.name) })
+        }
+
+        // Inside a nodegraph: in1 is set (reset) and both can be promoted.
+        let listed: [PaletteCommand] = commands(inner)
+        #expect(listed.map(\.title) == ["Reset in1 to Default", "Promote in1 to Nodegraph Input",
+                                         "Promote in2 to Nodegraph Input"])
+        #expect(listed.allSatisfy { $0.group == "Inspector" && !$0.listsBeforeTyping })
+        // Found by the palette's search, and run on their input.
+        let found: PaletteCommand = try #require(FuzzyMatch.rank(listed, by: "promote in2") { [$0.title] }.first)
+        found.run()
+        listed[0].run()
+        #expect(ran == ["promote in2", "reset in1"])
+
+        // At the top level, nothing to promote to; read-only, nothing at all.
+        let top: MXNode = try #require(try document.graph(at: "").node(named: "top"))
+        #expect(commands(top).map(\.title) == ["Reset in1 to Default"])
+        #expect(commands(inner, readOnly: true).isEmpty)
     }
 }

@@ -61,7 +61,8 @@ extension MXDocument {
 
     /// Adds an output of `type` (such as "color3") to the nodegraph at
     /// `graph`, named `name` (made unique; "out" if empty), connected to
-    /// nothing. Returns its name.
+    /// nothing. Returns its name. For a definition made in this document
+    /// (M7c), its nodes get the output too, and become multi-output.
     @discardableResult
     public func addOutput(named name: String = "", type: String, to graph: String) throws -> String {
         var newName = std.string()
@@ -72,7 +73,8 @@ extension MXDocument {
     }
 
     /// Renames the output `output` of the nodegraph at `graph`, and what
-    /// reads it by name.
+    /// reads it by name, from the graph or, for a definition (M7c), from
+    /// its nodes.
     public func renameOutput(_ output: String, of graph: String, to name: String) throws {
         try perform { error in
             handle.renameGraphOutput(std.string(graph), std.string(output), std.string(name), &error)
@@ -80,7 +82,8 @@ extension MXDocument {
     }
 
     /// Removes the output `output` of the nodegraph at `graph`,
-    /// disconnecting what read it.
+    /// disconnecting what read it, from the graph or, for a definition
+    /// (M7c), from its nodes. A definition keeps at least one.
     public func removeOutput(_ output: String, of graph: String) throws {
         try perform { error in
             handle.removeGraphOutput(std.string(graph), std.string(output), &error)
