@@ -32,11 +32,16 @@
 // any zoom) make its fill, header, edge and grip; text layers its title
 // and note, sized to the text.
 //
+// Colours come from the palette for the view's appearance, dark or light
+// (M7b, GraphPalette): a change of appearance recolours the layers, and
+// node images are redrawn as they come into view, as after a zoom.
+//
 // Introduces (SWIFT): subclassing `CALayer` and overriding `draw(in:)`,
 // `withObservationTracking`, CoreText from Swift, `CATransaction`,
 // `log2`/`ceil` and `pow`, `@discardableResult`; `nonisolated` on one
 // method of a main-actor type (M3c); `CATextLayer`, `insertSublayer(_:at:)`,
-// `CTFramesetter` to measure wrapped text (M4d).
+// `CTFramesetter` to measure wrapped text (M4d); `viewDidChangeEffectiveAppearance`
+// and `NSAppearance.bestMatch(from:)` (M7b).
 
 import AppKit
 import CoreText
@@ -58,6 +63,8 @@ public final class LayerGraphView: GraphEventView {
     private let marqueeLayer = CAShapeLayer()
     private var nodeLayers: [NodeLayer] = []
     private var backdropLayers: [BackdropLayer] = []
+    /// The colours for the view's appearance, dark or light (M7b).
+    private var palette: GraphPalette = .dark
 
     /// The detail level the node images were last drawn at; see `detail(for:)`.
     private var drawnDetail: NodeLayer.Detail? = nil
@@ -78,8 +85,7 @@ public final class LayerGraphView: GraphEventView {
         // Nodes outside the view must not draw over its neighbours (the
         // breadcrumb bar above it, in the app).
         layer?.masksToBounds = true
-        // Draw the background via the layer, not via `draw(_:)`.
-        layer?.backgroundColor = Self.cgColor(GraphPalette.background)
+        palette = Self.palette(for: effectiveAppearance)
 
         // The content layer's origin is the graph origin; its transform maps
         // graph to view coordinates.
@@ -88,12 +94,10 @@ public final class LayerGraphView: GraphEventView {
         layer?.addSublayer(contentLayer)
 
         wiresLayer.fillColor = nil
-        wiresLayer.strokeColor = Self.cgColor(GraphPalette.wire)
         wiresLayer.lineWidth = 2
         contentLayer.addSublayer(wiresLayer)
 
         cutWiresLayer.fillColor = nil
-        cutWiresLayer.strokeColor = Self.cgColor(GraphPalette.cut)
         cutWiresLayer.lineWidth = 3
         contentLayer.addSublayer(cutWiresLayer)
 
@@ -101,13 +105,13 @@ public final class LayerGraphView: GraphEventView {
         // SWIFT/Core Animation: `insertSublayer(_:at:)` puts a layer at a
         // place in the stack, where `addSublayer` puts it on top.
         for (index, backdrop) in controller.model.backdrops.enumerated() {
-            let backdropLayer = BackdropLayer(backdrop: backdrop)
+            let backdropLayer = BackdropLayer(backdrop: backdrop, palette: palette)
             backdropLayers.append(backdropLayer)
             contentLayer.insertSublayer(backdropLayer, at: UInt32(index))
         }
 
         for node in controller.model.nodes {
-            let nodeLayer = NodeLayer(node: node, thumbnail: thumbnail)
+            let nodeLayer = NodeLayer(node: node, thumbnail: thumbnail, palette: palette)
             nodeLayers.append(nodeLayer)
             contentLayer.addSublayer(nodeLayer)
         }
@@ -117,25 +121,67 @@ public final class LayerGraphView: GraphEventView {
         contentLayer.addSublayer(draggedWireLayer)
 
         targetLayer.fillColor = nil
-        targetLayer.strokeColor = Self.cgColor(GraphPalette.selection)
         targetLayer.lineWidth = 2
         contentLayer.addSublayer(targetLayer)
 
         cutLineLayer.fillColor = nil
-        cutLineLayer.strokeColor = Self.cgColor(GraphPalette.cut)
         contentLayer.addSublayer(cutLineLayer)
 
-        marqueeLayer.fillColor = Self.cgColor(GraphPalette.selection, alpha: 0.15)
-        marqueeLayer.strokeColor = Self.cgColor(GraphPalette.selection)
         marqueeLayer.isHidden = true
         contentLayer.addSublayer(marqueeLayer)
 
+        applyPalette()
         update()
         observeController()
     }
 
     required init?(coder: NSCoder) {
         fatalError("LayerGraphView is not used in nibs or storyboards")
+    }
+
+    /// The palette for `appearance`: light unless it is a dark one (M7b).
+    static func palette(for appearance: NSAppearance) -> GraphPalette {
+        // SWIFT/AppKit: `bestMatch(from:)` says which of the names given
+        // the appearance is closest to, also for its high-contrast
+        // variants.
+        GraphPalette.forDark(appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua)
+    }
+
+    /// The appearance changed (System Settings, or the app's): new colours
+    /// for the layers, and node images redrawn as they come into view.
+    public override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        let new: GraphPalette = Self.palette(for: effectiveAppearance)
+        guard new.isDark != palette.isDark else {
+            return
+        }
+        palette = new
+        applyPalette()
+        update()
+    }
+
+    /// Colours the view's own layers and hands the palette to the nodes
+    /// and backdrops. A node's image is redrawn when next shown.
+    private func applyPalette() {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        defer { CATransaction.commit() }
+        // Draw the background via the layer, not via `draw(_:)`.
+        layer?.backgroundColor = Self.cgColor(palette.background)
+        wiresLayer.strokeColor = Self.cgColor(palette.wire)
+        cutWiresLayer.strokeColor = Self.cgColor(palette.cut)
+        targetLayer.strokeColor = Self.cgColor(palette.selection)
+        cutLineLayer.strokeColor = Self.cgColor(palette.cut)
+        marqueeLayer.fillColor = Self.cgColor(palette.selection, alpha: 0.15)
+        marqueeLayer.strokeColor = Self.cgColor(palette.selection)
+        for nodeLayer in nodeLayers where nodeLayer.palette.isDark != palette.isDark {
+            nodeLayer.palette = palette
+        }
+        for backdropLayer in backdropLayers {
+            backdropLayer.palette = palette
+        }
+        // The visible nodes are redrawn by the next update().
+        drawnDetail = nil
     }
 
     /// Re-renders node images at the new screen's scale (Retina vs not).
@@ -288,7 +334,7 @@ public final class LayerGraphView: GraphEventView {
             let path = CGMutablePath()
             GraphLayout.addWire(from: preview.start, to: preview.end, to: path)
             draggedWireLayer.path = path
-            draggedWireLayer.strokeColor = Self.cgColor(GraphPalette.pin(preview.type))
+            draggedWireLayer.strokeColor = Self.cgColor(palette.pin(preview.type))
         } else {
             draggedWireLayer.path = nil
         }
@@ -382,6 +428,15 @@ final class NodeLayer: CALayer {
     private var node: GraphNode
     /// The node's swatch, or nil while there is none yet.
     private var thumbnail: NodeThumbnail?
+    /// Its colours (M7b). A new palette recolours the outlines at once;
+    /// the image is redrawn when the view next shows the node (its detail
+    /// is reset, so it no longer matches the view's).
+    var palette: GraphPalette {
+        didSet {
+            applyPalette()
+            detail = Detail(scale: 0, showsTitle: false, showsPortLabels: false)
+        }
+    }
     /// The detail the current image was drawn at. Starts at scale 0, which
     /// no real detail has, so every layer is drawn when it first comes into view.
     var detail = Detail(scale: 0, showsTitle: false, showsPortLabels: false)
@@ -412,8 +467,9 @@ final class NodeLayer: CALayer {
 
     /// A layer for `node`, showing `thumbnail` (an image for every node
     /// with a thumbnail, from the M0d spike) until ``show(_:)`` replaces it.
-    init(node: GraphNode, thumbnail: CGImage?) {
+    init(node: GraphNode, thumbnail: CGImage?, palette: GraphPalette) {
         self.node = node
+        self.palette = palette
         super.init()
         frame = Self.layerFrame(for: node)
         // The node's own coordinates: (0, 0) is its top-left corner.
@@ -432,24 +488,29 @@ final class NodeLayer: CALayer {
                 show(.image(thumbnail))
             }
         }
-        dimLayer.fillColor = LayerGraphView.cgColor(GraphPalette.background, alpha: GraphPalette.dimOpacity)
         addSublayer(dimLayer)
         let soloOutline: CGRect = local.insetBy(dx: -3, dy: -3)
         soloLayer.path = CGPath(roundedRect: soloOutline, cornerWidth: GraphLayout.cornerRadius + 3,
                                 cornerHeight: GraphLayout.cornerRadius + 3, transform: nil)
         soloLayer.fillColor = nil
-        soloLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.solo)
         soloLayer.lineWidth = 2
         soloLayer.isHidden = true
         addSublayer(soloLayer)
         selectionLayer.path = GraphLayout.outlinePath(for: local)
         selectionLayer.fillColor = nil
-        selectionLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.selection)
         selectionLayer.lineWidth = 2
         selectionLayer.isHidden = true
         addSublayer(selectionLayer)
+        applyPalette()
         // Don't fade contents in and out when they are redrawn.
         actions = ["contents": NSNull()]
+    }
+
+    /// Colours the dimming and the outlines from the palette.
+    private func applyPalette() {
+        dimLayer.fillColor = LayerGraphView.cgColor(palette.background, alpha: palette.dimOpacity)
+        soloLayer.strokeColor = LayerGraphView.cgColor(palette.solo)
+        selectionLayer.strokeColor = LayerGraphView.cgColor(palette.selection)
     }
 
     /// Shows `thumbnail` as the node's swatch. An image goes into the
@@ -523,6 +584,7 @@ final class NodeLayer: CALayer {
         let other = layer as! NodeLayer
         node = other.node
         thumbnail = other.thumbnail
+        palette = other.palette
         detail = other.detail
         super.init(layer: layer)
     }
@@ -545,21 +607,29 @@ final class NodeLayer: CALayer {
         let frame: CGRect = GraphLayout.frame(of: local)
 
         context.addPath(GraphLayout.bodyPath(for: frame))
-        context.setFillColor(LayerGraphView.cgColor(GraphPalette.nodeBody))
+        context.setFillColor(LayerGraphView.cgColor(palette.nodeBody))
         context.fillPath()
         context.addPath(GraphLayout.headerPath(for: frame))
-        context.setFillColor(LayerGraphView.cgColor(GraphPalette.header(local.category)))
+        context.setFillColor(LayerGraphView.cgColor(palette.header(local.category)))
         context.fillPath()
+        // The light canvas's hairline edge (M7b), just inside the node.
+        if let edge = palette.nodeEdge {
+            context.addPath(CGPath(roundedRect: frame.insetBy(dx: 0.5, dy: 0.5), cornerWidth: GraphLayout.cornerRadius,
+                                   cornerHeight: GraphLayout.cornerRadius, transform: nil))
+            context.setStrokeColor(LayerGraphView.cgColor(edge))
+            context.setLineWidth(1)
+            context.strokePath()
+        }
 
         if local.hasThumbnail {
             drawThumbnailBackground(in: GraphLayout.thumbnailFrame(of: local), context: context)
         }
 
         for (index, port) in local.outputs.enumerated() {
-            Self.drawPin(at: GraphLayout.outputPoint(of: local, index: index), type: port.type, in: context)
+            Self.drawPin(at: GraphLayout.outputPoint(of: local, index: index), color: palette.pin(port.type), in: context)
         }
         for (index, port) in local.inputs.enumerated() {
-            Self.drawPin(at: GraphLayout.inputPoint(of: local, index: index), type: port.type, in: context)
+            Self.drawPin(at: GraphLayout.inputPoint(of: local, index: index), color: palette.pin(port.type), in: context)
         }
 
         if detail.showsTitle {
@@ -567,7 +637,7 @@ final class NodeLayer: CALayer {
             // shortened with "…" if the header is too narrow.
             let left: CGFloat = frame.minX + 8
             let available: CGFloat = frame.width - 16
-            let titleWidth: CGFloat = Self.drawText(local.title, font: Self.titleFont, color: GraphPalette.text,
+            let titleWidth: CGFloat = Self.drawText(local.title, font: Self.titleFont, color: palette.text,
                                                     at: CGPoint(x: left, y: frame.minY + GraphLayout.headerHeight / 2),
                                                     alignRight: false, maxWidth: available, in: context)
             if let subtitle = local.subtitle, subtitle != local.title {
@@ -575,7 +645,7 @@ final class NodeLayer: CALayer {
                 let remaining: CGFloat = available - titleWidth - gap
                 // Not worth drawing two or three letters of it.
                 if remaining > 30 {
-                    Self.drawText(subtitle, font: Self.labelFont, color: GraphPalette.secondaryText,
+                    Self.drawText(subtitle, font: Self.labelFont, color: palette.secondaryText,
                                   at: CGPoint(x: left + titleWidth + gap, y: frame.minY + GraphLayout.headerHeight / 2),
                                   alignRight: false, maxWidth: remaining, in: context)
                 }
@@ -584,18 +654,18 @@ final class NodeLayer: CALayer {
         if detail.showsPortLabels {
             for (index, port) in local.outputs.enumerated() {
                 let point: CGPoint = GraphLayout.outputPoint(of: local, index: index)
-                Self.drawText(port.name, font: Self.labelFont, color: GraphPalette.text,
+                Self.drawText(port.name, font: Self.labelFont, color: palette.text,
                               at: CGPoint(x: point.x - 10, y: point.y), alignRight: true,
                               maxWidth: frame.width - 20, in: context)
             }
             for (index, port) in local.inputs.enumerated() {
                 let point: CGPoint = GraphLayout.inputPoint(of: local, index: index)
                 // The name gets up to 60% of the row; the value what's left.
-                let nameWidth: CGFloat = Self.drawText(port.name, font: Self.labelFont, color: GraphPalette.text,
+                let nameWidth: CGFloat = Self.drawText(port.name, font: Self.labelFont, color: palette.text,
                                                        at: CGPoint(x: point.x + 10, y: point.y), alignRight: false,
                                                        maxWidth: (frame.width - 18) * 0.6, in: context)
                 if let value = port.value {
-                    Self.drawText(value, font: Self.labelFont, color: GraphPalette.secondaryText,
+                    Self.drawText(value, font: Self.labelFont, color: palette.secondaryText,
                                   at: CGPoint(x: frame.maxX - 8, y: point.y), alignRight: true,
                                   maxWidth: frame.width - 18 - nameWidth - 10, in: context)
                 }
@@ -608,7 +678,7 @@ final class NodeLayer: CALayer {
                 } else {
                     text = count == 1 ? "+1 more input" : "+\(count) more inputs"
                 }
-                Self.drawText(text, font: Self.labelFont, color: GraphPalette.secondaryText,
+                Self.drawText(text, font: Self.labelFont, color: palette.secondaryText,
                               at: CGPoint(x: frame.minX + 10, y: GraphLayout.inputToggleRowCentre(of: local)),
                               alignRight: false, maxWidth: frame.width - 20, in: context)
             }
@@ -624,26 +694,26 @@ final class NodeLayer: CALayer {
         let radius: CGFloat = rect.width / 2 * 0.92
         let disc = CGRect(x: rect.midX - radius, y: rect.midY - radius, width: 2 * radius, height: 2 * radius)
         if case .unavailable? = thumbnail {
-            context.setStrokeColor(LayerGraphView.cgColor(GraphPalette.secondaryText, alpha: 0.5))
+            context.setStrokeColor(LayerGraphView.cgColor(palette.secondaryText, alpha: 0.5))
             context.setLineWidth(1)
             context.setLineDash(phase: 0, lengths: [3, 3])
             context.strokeEllipse(in: disc)
             context.setLineDash(phase: 0, lengths: [])
             if detail.showsPortLabels {
                 let width: CGFloat = Self.textWidth("No preview", font: Self.labelFont)
-                Self.drawText("No preview", font: Self.labelFont, color: GraphPalette.secondaryText,
+                Self.drawText("No preview", font: Self.labelFont, color: palette.secondaryText,
                               at: CGPoint(x: rect.midX - width / 2, y: rect.midY), alignRight: false,
                               maxWidth: rect.width, in: context)
             }
         } else {
-            context.setFillColor(LayerGraphView.cgColor(GraphPalette.thumbnailPlaceholder))
+            context.setFillColor(LayerGraphView.cgColor(palette.thumbnailPlaceholder))
             context.fillEllipse(in: disc)
         }
     }
 
-    static func drawPin(at point: CGPoint, type: PortType, in context: CGContext) {
+    static func drawPin(at point: CGPoint, color: GraphPalette.RGB, in context: CGContext) {
         let r: CGFloat = GraphLayout.portRadius
-        context.setFillColor(LayerGraphView.cgColor(GraphPalette.pin(type)))
+        context.setFillColor(LayerGraphView.cgColor(color))
         context.fillEllipse(in: CGRect(x: point.x - r, y: point.y - r, width: 2 * r, height: 2 * r))
     }
 
@@ -674,7 +744,7 @@ final class NodeLayer: CALayer {
     /// SWIFT: `@discardableResult` lets callers ignore the returned width
     /// without a warning; most of them do.
     @discardableResult
-    static func drawText(_ string: String, font: CTFont, color: (CGFloat, CGFloat, CGFloat),
+    static func drawText(_ string: String, font: CTFont, color: GraphPalette.RGB,
                          at point: CGPoint, alignRight: Bool, maxWidth: CGFloat, in context: CGContext) -> CGFloat {
         guard maxWidth > 0 else {
             return 0
@@ -723,26 +793,25 @@ final class BackdropLayer: CALayer {
     private let noteLayer = CATextLayer()
     private let note: String
     private var detail = NodeLayer.Detail(scale: 0, showsTitle: false, showsPortLabels: false)
+    /// Its colours (M7b); a new palette recolours it at once.
+    var palette: GraphPalette {
+        didSet { applyPalette() }
+    }
 
     var isSelected: Bool = false {
         didSet { selectionLayer.isHidden = !isSelected }
     }
 
-    init(backdrop: GraphBackdrop) {
+    init(backdrop: GraphBackdrop, palette: GraphPalette) {
         note = backdrop.note
+        self.palette = palette
         super.init()
-        let tint: (CGFloat, CGFloat, CGFloat) = GraphPalette.backdrop
-        fillLayer.fillColor = LayerGraphView.cgColor(tint, alpha: GraphPalette.backdropOpacity)
-        fillLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.backdropEdge, alpha: 0.5)
         fillLayer.lineWidth = 1
-        headerLayer.fillColor = LayerGraphView.cgColor(tint, alpha: GraphPalette.backdropOpacity * 2)
-        gripLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.backdropEdge, alpha: 0.8)
         gripLayer.lineWidth = 1.5
         gripLayer.fillColor = nil
         // A backdrop from an included file can't be resized.
         gripLayer.isHidden = backdrop.isLocked
         selectionLayer.fillColor = nil
-        selectionLayer.strokeColor = LayerGraphView.cgColor(GraphPalette.selection)
         selectionLayer.lineWidth = 2
         selectionLayer.isHidden = true
 
@@ -752,24 +821,36 @@ final class BackdropLayer: CALayer {
         titleLayer.string = backdrop.isLocked ? backdrop.title + " · included" : backdrop.title
         titleLayer.font = NodeLayer.titleFont
         titleLayer.fontSize = 13
-        titleLayer.foregroundColor = LayerGraphView.cgColor(GraphPalette.backdropTitle)
         titleLayer.truncationMode = .end
         noteLayer.string = backdrop.note
         noteLayer.font = NodeLayer.labelFont
         noteLayer.fontSize = 11
-        noteLayer.foregroundColor = LayerGraphView.cgColor(GraphPalette.text, alpha: 0.85)
         noteLayer.isWrapped = true
         noteLayer.truncationMode = .end
         noteLayer.isHidden = backdrop.note.isEmpty
         for layer in [fillLayer, headerLayer, gripLayer, titleLayer, noteLayer, selectionLayer] as [CALayer] {
             addSublayer(layer)
         }
+        applyPalette()
         place(at: backdrop.frame)
+    }
+
+    /// Colours its parts from the palette.
+    private func applyPalette() {
+        let tint: GraphPalette.RGB = palette.backdrop
+        fillLayer.fillColor = LayerGraphView.cgColor(tint, alpha: palette.backdropOpacity)
+        fillLayer.strokeColor = LayerGraphView.cgColor(palette.backdropEdge, alpha: 0.5)
+        headerLayer.fillColor = LayerGraphView.cgColor(tint, alpha: palette.backdropOpacity * 2)
+        gripLayer.strokeColor = LayerGraphView.cgColor(palette.backdropEdge, alpha: 0.8)
+        selectionLayer.strokeColor = LayerGraphView.cgColor(palette.selection)
+        titleLayer.foregroundColor = LayerGraphView.cgColor(palette.backdropTitle)
+        noteLayer.foregroundColor = LayerGraphView.cgColor(palette.text, alpha: 0.85)
     }
 
     override init(layer: Any) {
         let other = layer as! BackdropLayer
         note = other.note
+        palette = other.palette
         super.init(layer: layer)
     }
 

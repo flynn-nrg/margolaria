@@ -261,7 +261,7 @@ struct ContentView: View {
                     }
                     if viewMode != .graph {
                         BottomPanel(document: document, tab: $bottomTab, xmlDraft: xmlDraft, selectedPath: document.selectedPath,
-                                    onSelectIssue: show)
+                                    onSelectIssue: show, onSelectElement: follow)
                             .frame(minHeight: 120, idealHeight: 260, maxHeight: .infinity)
                     }
                 }
@@ -403,6 +403,26 @@ struct ContentView: View {
                 showBottomTab(.console)
             }
         }
+    }
+
+    /// Selects on the canvas the element the caret is in, in the XML tab
+    /// (M7b): its node (an input's node), on its graph level. Only for
+    /// elements the canvas shows, and only while it is open: the caret
+    /// in a nodedef leaves the canvas where it is.
+    private func follow(_ path: String) {
+        let location = document.content.canvasLocation(of: path)
+        guard viewMode != .text, let node = location.nodePath, node != document.selectedPath,
+              let level = try? document.content.graph(at: location.graphPath) else {
+            return
+        }
+        let name: String = String(node.split(separator: "/").last ?? "")
+        let isShown: Bool = level.nodes.contains { $0.name == name } || level.outputs.contains { $0.name == name }
+            || level.interfaceInputs.contains { $0.name == name } || level.backdrops.contains { $0.name == name }
+        guard isShown else {
+            return
+        }
+        graphPath = location.graphPath
+        focus = node
     }
 
     /// Shows an issue's element: opens its graph level and selects its node.

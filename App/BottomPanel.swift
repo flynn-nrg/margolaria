@@ -1,7 +1,8 @@
 // BottomPanel.swift
 //
 // The panel under the canvas (PLAN.md §4.1, region 6), with tabs:
-//   XML      the document's XML, the canvas selection highlighted;
+//   XML      the document's XML, the canvas selection highlighted, and
+//            the canvas selecting what the caret is in (M7b);
 //            editable, applied with ⌘↩ (M4e, XMLTextView.swift)
 //   Issues   MaterialX's validation and Margolaria's checks; clicking one
 //            shows its node on the canvas
@@ -44,6 +45,9 @@ struct BottomPanel: View {
     let selectedPath: String?
     /// Called when the user picks an issue, to show its element.
     let onSelectIssue: (MXIssue) -> Void
+    /// Called when the caret in the XML tab moves into an element (M7b),
+    /// to select it on the canvas.
+    let onSelectElement: (String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,7 +86,7 @@ struct BottomPanel: View {
     private var content: some View {
         switch tab {
         case .xml:
-            XMLTab(document: document, draft: xmlDraft, highlightedPath: selectedPath)
+            XMLTab(document: document, draft: xmlDraft, highlightedPath: selectedPath, onSelectElement: onSelectElement)
         case .issues:
             IssuesList(issues: document.issues, libraryLoaded: document.libraryLoaded, onSelect: onSelectIssue)
         case .shader:

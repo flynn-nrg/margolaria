@@ -18,7 +18,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `!`, `try!` | Force-unwrap / force-try: crash if nil or if it throws. Only use when failure is impossible. | `assert` + dereference | `MaterialXDocument.swift`, tests |
 | `??` | Use a default if the left side is nil | `p ? *p : d` | `MaterialXDocument.swift` |
 | Tuples | Anonymous fixed group of values; elements can have labels | `std::tuple` | `SwatchGeometry.swift`, `MXCorpusTests.swift` |
-| `typealias` | A second name for a type | `typedef` / `using` | (was in `MaterialXFileDocument.swift`, removed in M1a) |
+| `typealias` | A second name for a type | `typedef` / `using` | `GraphLayout.swift` (`GraphPalette.RGB`, M7b; first in `MaterialXFileDocument.swift`, removed in M1a) |
 | `SIMD3<T>` | A small fixed-size vector value: `a + b`, `a * 2`, `.x/.y/.z` work element by element | GLSL/Metal `double3`; `simd::double3` | `ColorConverter.swift` |
 | Computed properties | A property whose getter runs code, with no storage | ObjC `@property` with a custom getter | `MXError.swift` |
 | `static` / `static let` | Type members; `static let` is initialised lazily, exactly once, thread-safely | C++ static member; function-local static; `dispatch_once` | `MXLibrary.swift` (`bundled`) |
@@ -63,6 +63,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | String indices | Strings are sliced with `String.Index` values (`path[..<slash]`), not integers, because characters vary in size | — | `GraphPanel.swift` (`parent(of:)`) |
 | Regex literals `#/.../#` | Regular expressions checked by the compiler; capture groups become typed fields (`.1`, `.2`) of each match | `std::regex`, but checked at compile time | `MXXMLTextTests.swift` (`Reference`; MXXMLText.swift until M4e) |
 | `popLast()`, `compactMap` | Remove-and-return the last element (nil if empty); `map` that drops nils | `pop_back` with a check | `MXXMLText.swift` |
+| `utf8.distance(from:to:)` | The number of UTF-8 bytes between two `String.Index`es: a position as a byte offset | Subtracting two `char*` | `MXXMLText.swift` (`elementPath`, M7b) |
 | `ArraySlice` | `array[...]`, `array[2...]` or `dropFirst()` on one: a view of part of an array, sharing its storage, without copying | A Go slice, `std::span` | `StartupScripts.swift` (M6d) |
 | `localizedStandardCompare` | Compares strings as Finder sorts names: numbers by value ("2" before "10"), capitals with their lowercase | `-localizedStandardCompare:` | `StartupScripts.swift` (M6d) |
 | `map`/`flatMap` on an optional | Transform the value inside an optional, or get nil | — | `GraphBuilder.swift` |
@@ -75,6 +76,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `FileManager.url(for:in:appropriateFor:create:)` | Finds a standard folder (Application Support, Caches...), creating it if asked | `NSSearchPathForDirectoriesInDomains` | `MXLibraryFiles.swift` |
 | `filter` on a dictionary | Keeps the key-value pairs for which the closure is true, and returns a dictionary | — | `MXGraph.swift` (`MXPort.metadata`) |
 | `switch` as an expression | `let t = switch x { case .a: "A" case .b: "B" }`: the value of the chosen case | A ternary over many cases | `ViewportSettings.swift` |
+| `if` as an expression | `let t = if c { "A" } else { "B" }`: each branch one value; with `if case`, picks out an enum case's value or `nil` | The ternary `?:` | `GraphBuilder.swift` (`readOutputs`, M7b) |
 | `Float.exponent`, `Float(sign:exponent:significand:)` | A float's binary exponent, and building `2^e` exactly | `frexp`, `ldexp` | `StudioEnvironment.swift` (`rgbe`) |
 | `static let x = { ... }()` | A constant computed by a closure, once, on first use | A function-local static initialised by a lambda | `StudioEnvironment.swift` (`fileURL`) |
 | `[T](repeating:count:)` | An array of n copies of a value | `std::vector<T>(n, v)` | `ViewTransformTests.swift` (now `DisplayPassTests.swift`) |
@@ -165,6 +167,8 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `XMLParser` and its delegate | Foundation's event-driven XML parser; a delegate object (an `NSObject` subclass, held weakly) hears about each tag and error | `NSXMLParser`, SAX | `MXXMLEdit.swift` |
 | Overriding an AppKit view's property and actions | `override var undoManager` with a computed one; `@objc func undo(_:)` answers the menu's action before the window does, and `validateUserInterfaceItem` enables and titles the item | An Objective-C subclass | `XMLTextView.swift` (`XMLEditingTextView`) |
 | A coordinator as an AppKit delegate | The `NSViewRepresentable`'s coordinator (an `NSObject`) adopts `NSTextViewDelegate` and hears `textDidChange` | A controller as a view's delegate | `XMLTextView.swift` |
+| `Range(_:in:)` from an `NSRange` | Converts AppKit's UTF-16 offsets back to a range of the string's own indices (nil if they don't fit): the reverse of `NSRange(_:in:)` | — | `XMLTextView.swift` (`textViewDidChangeSelection`, M7b) |
+| Following light and dark mode in AppKit | An NSView's `effectiveAppearance` is its window's (or the system's); `bestMatch(from: [.aqua, .darkAqua])` says which it is, and `viewDidChangeEffectiveAppearance()` is called when it changes. In SwiftUI, `@Environment(\.colorScheme)` | `-viewDidChangeEffectiveAppearance` | `LayerGraphView.swift` (M7b), `InspectorPanel.swift` (`ConnectionChip`) |
 ## Modules and access
 
 | Concept | In one line | First appears |

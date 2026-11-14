@@ -4,7 +4,9 @@
 // with syntax colouring, in an AppKit text view (TextKit 2), and a bar under
 // it that says whether the text reads and validates, and where the first
 // problem is. The element selected on the canvas is highlighted and
-// scrolled into view. ⌘F searches (the standard find bar).
+// scrolled into view; the other way, clicking in the text (or moving the
+// caret) selects the node it is in on the canvas (M7b), while the text is
+// the document's own. ⌘F searches (the standard find bar).
 //
 // The text is MaterialX's own serialisation of the document (what Save
 // would write), not the file's original bytes: identical for files
@@ -26,7 +28,8 @@
 // NSTextView and overriding a property, `@objc` action methods, a
 // coordinator as a delegate
 // (`NSTextViewDelegate`), `.alert(_:isPresented:actions:message:)`,
-// debouncing with `.task(id:)` and `Task.sleep`.
+// debouncing with `.task(id:)` and `Task.sleep`; `Range(_:in:)` from an
+// NSRange (M7b).
 
 import AppKit
 import MXKit
@@ -133,6 +136,8 @@ struct XMLTab: View {
     let draft: XMLDraft
     /// The path of the element to highlight, such as "NG_copper/grain".
     let highlightedPath: String?
+    /// Called with the path of the element the caret moved into (M7b).
+    let onSelectElement: (String) -> Void
 
     /// What the edits last checked would do, and which text that was. Out
     /// of date while the user types: the check runs when typing pauses.
@@ -145,7 +150,7 @@ struct XMLTab: View {
         let text: String = draft.text(for: document.xml)
         VStack(spacing: 0) {
             XMLTextView(xml: document.xml, draft: draft, highlightedPath: highlightedPath,
-                        onEscape: { draft.revert(to: document.xml) })
+                        onEscape: { draft.revert(to: document.xml) }, onSelectElement: onSelectElement)
             Divider()
             bar(for: text)
         }
@@ -415,6 +420,9 @@ struct XMLTextView: NSViewRepresentable {
     let highlightedPath: String?
     /// Called on Escape.
     let onEscape: () -> Void
+    /// Called when the user moves the caret into an element, with its
+    /// path (M7b): an input's, inside a node's input.
+    let onSelectElement: (String) -> Void
 
     /// What the view showed last time, so updates only redo what changed,
     /// and the text view's delegate.
@@ -433,6 +441,9 @@ struct XMLTextView: NSViewRepresentable {
         /// The highlighted element's path and range.
         var highlightedPath: String? = nil
         var highlight: NSRange? = nil
+        /// True while ``updateNSView(_:context:)`` changes the text or the
+        /// caret: that isn't the user moving it.
+        var isUpdating: Bool = false
 
         init(parent: XMLTextView) {
             self.parent = parent
@@ -450,6 +461,27 @@ struct XMLTextView: NSViewRepresentable {
             highlight = XMLTextView.range(of: highlightedPath, in: text)
             XMLTextView.color(storage, highlight: highlight)
             parent.draft.typed(text, documentXML: parent.xml)
+        }
+
+        /// The caret moved (M7b): if the user moved it, in the document's
+        /// own text, say which element it is in. Not in edited text, whose
+        /// elements may not be in the document (yet).
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard !isUpdating, parent.draft.edits == nil,
+                  let textView = notification.object as? NSTextView,
+                  textView.window?.firstResponder === textView else {
+                return
+            }
+            let text: String = textView.string
+            let caret = NSRange(location: textView.selectedRange().location, length: 0)
+            // SWIFT: `Range(_:in:)` converts an NSRange (UTF-16 offsets)
+            // back to the string's own indices: the reverse of
+            // `NSRange(_:in:)`; nil if it doesn't fit the string.
+            guard let position = Range(caret, in: text)?.lowerBound,
+                  let path = MXXMLText.elementPath(at: position, in: text) else {
+                return
+            }
+            parent.onSelectElement(path)
         }
     }
 
@@ -515,6 +547,12 @@ struct XMLTextView: NSViewRepresentable {
         // put it in, keeping the caret where it was as far as possible.
         let text: String = draft.text(for: xml)
         let replaced: Bool = text != coordinator.shown
+        coordinator.isUpdating = true
+        // SWIFT: `defer` runs its block when the scope is left, however it
+        // is left: here, after the text and highlight are updated.
+        defer {
+            coordinator.isUpdating = false
+        }
         if replaced {
             let selection: NSRange = textView.selectedRange()
             storage.setAttributedString(NSAttributedString(string: text, attributes: Self.baseAttributes))
@@ -534,7 +572,12 @@ struct XMLTextView: NSViewRepresentable {
         }
         coordinator.highlight = range
         coordinator.highlightedPath = highlightedPath
-        if let range, replaced || pathChanged {
+        // Not when the user is in the text with the caret in it already:
+        // they put it there (M7b), and the view shouldn't jump.
+        let caret: Int = textView.selectedRange().location
+        let userIsThere: Bool = textView.window?.firstResponder === textView
+            && range.map { caret >= $0.location && caret <= NSMaxRange($0) } == true
+        if let range, replaced || (pathChanged && !userIsThere) {
             // TextKit 2 lays text out lazily and estimates the height of
             // what it hasn't laid out yet, so scrolling to a range in
             // fresh text lands short. Lay it all out first (fine for

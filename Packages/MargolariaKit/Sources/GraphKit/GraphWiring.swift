@@ -15,7 +15,9 @@
 //     node's output;
 //   - a nodegraph's `<output>` can't pass one of the graph's inputs
 //     straight through (MaterialX allows `interfacename` only on inputs);
-//   - locked (included) nodes can't be rewired.
+//   - locked (included) nodes can't be rewired;
+//   - wires from a top-level `<output>` (`output="…"`, M7b) are drawn but
+//     not made or moved here.
 //
 // Introduces (SWIFT): a depth-first search with a `Set` of seen nodes,
 // `Set.insert(_:).inserted`, `popLast()`, closures as parameters choosing a
@@ -170,7 +172,7 @@ extension GraphModel {
         let port: GraphPort = nodes[input.node].inputs[input.index]
         let loops: Set<Int> = downstream(of: input.node)
         for node in nodes where !loops.contains(node.id) {
-            for index in node.outputs.indices {
+            for index in node.outputs.indices where node.outputs[index].startsWires {
                 let output = PortReference(node: node.id, index: index)
                 if accepts(port, on: input.node, from: output) {
                     result.outputs.insert(output)

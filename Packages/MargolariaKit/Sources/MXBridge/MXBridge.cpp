@@ -2587,11 +2587,36 @@ void Ungroup(const mx::NodeGraphPtr& graph, StringVector& newPaths) {
         }
     }
 
+    // The graph's backdrops come out with its nodes (M7b), moved as they
+    // were, framing them by their new names. The graph's own inputs and
+    // outputs are gone, so they are left out.
+    std::vector<mx::ElementPtr> movedBackdrops;
+    for (const mx::BackdropPtr& backdrop : graph->getChildrenOfType<mx::Backdrop>()) {
+        mx::BackdropPtr copy = parent->addBackdrop(parent->createValidChildName(backdrop->getName()));
+        copy->copyContentFrom(backdrop);
+        std::vector<std::string> contents;
+        for (const std::string& name : Contents(backdrop)) {
+            if (auto found = names.find(name); found != names.end()) {
+                contents.push_back(found->second);
+            }
+        }
+        SetContents(copy, contents);
+        if (offset && copy->hasAttribute(mx::Element::XPOS_ATTRIBUTE) && copy->hasAttribute(mx::Element::YPOS_ATTRIBUTE)) {
+            SetPosition(copy, std::stof(copy->getAttribute(mx::Element::XPOS_ATTRIBUTE)) + offsetX,
+                        std::stof(copy->getAttribute(mx::Element::YPOS_ATTRIBUTE)) + offsetY);
+        }
+        movedBackdrops.push_back(copy);
+    }
+
     parent->removeChild(graph->getName());
     newPaths.clear();
     for (size_t i = 0; i < moved.size(); ++i) {
         parent->setChildIndex(moved[i]->getName(), index + static_cast<int>(i));
         newPaths.push_back(moved[i]->getNamePath());
+    }
+    // The backdrops after the nodes, where the graph was.
+    for (size_t i = 0; i < movedBackdrops.size(); ++i) {
+        parent->setChildIndex(movedBackdrops[i]->getName(), index + static_cast<int>(moved.size() + i));
     }
 }
 
@@ -3395,8 +3420,8 @@ bool Document::includeLibrary(const std::string& filePath, const std::string& hr
     });
 }
 
-bool Document::copyNodes(const std::string& parentPath, const StringVector& names, bool keepsInterface,
-                         std::string& xml, std::string& errorMessage) const {
+bool Document::copyNodes(const std::string& parentPath, const StringVector& names, const StringVector& backdropNames,
+                         bool keepsInterface, std::string& xml, std::string& errorMessage) const {
     return Perform(_impl ? _impl->document : nullptr, errorMessage, [&](const mx::DocumentPtr& document) {
         mx::ElementPtr scope = parentPath.empty() ? mx::ElementPtr(document) : document->getDescendant(parentPath);
         mx::GraphElementPtr parent = scope ? scope->asA<mx::GraphElement>() : nullptr;
@@ -3404,6 +3429,7 @@ bool Document::copyNodes(const std::string& parentPath, const StringVector& name
             throw Refusal("No nodegraph at " + parentPath);
         }
         std::set<std::string> selected(names.begin(), names.end());
+        std::set<std::string> framing(backdropNames.begin(), backdropNames.end());
         mx::DocumentPtr copy = mx::createDocument();
         if (mx::ConstDocumentPtr library = document->getDataLibrary()) {
             copy->setDataLibrary(library);
@@ -3413,7 +3439,12 @@ bool Document::copyNodes(const std::string& parentPath, const StringVector& name
             copy->setColorSpace(parent->getActiveColorSpace());
         }
         std::vector<mx::ElementPtr> copied;
+        std::vector<mx::BackdropPtr> backdrops;
         for (const mx::ElementPtr& child : parent->getChildren()) {
+            if (mx::BackdropPtr backdrop = child->asA<mx::Backdrop>(); backdrop && framing.count(child->getName())) {
+                backdrops.push_back(backdrop);
+                continue;
+            }
             if (!selected.count(child->getName())) {
                 continue;
             }
@@ -3422,7 +3453,10 @@ bool Document::copyNodes(const std::string& parentPath, const StringVector& name
             }
             copied.push_back(CopyNode(child, copy, child->getName()));
         }
-        if (copied.empty()) {
+        if (backdrops.size() != framing.size()) {
+            throw Refusal("No backdrop among " + mx::joinStrings(backdropNames, ", "));
+        }
+        if (copied.empty() && backdrops.empty()) {
             throw Refusal("Nothing to copy");
         }
         for (const mx::ElementPtr& element : copied) {
@@ -3448,6 +3482,18 @@ bool Document::copyNodes(const std::string& parentPath, const StringVector& name
                 }
             }
         }
+        // Backdrops after the nodes, framing only what is copied with them.
+        for (const mx::BackdropPtr& backdrop : backdrops) {
+            mx::BackdropPtr backdropCopy = copy->addBackdrop(backdrop->getName());
+            backdropCopy->copyContentFrom(backdrop);
+            std::vector<std::string> contents;
+            for (const std::string& name : Contents(backdrop)) {
+                if (selected.count(name)) {
+                    contents.push_back(name);
+                }
+            }
+            SetContents(backdropCopy, contents);
+        }
         mx::XmlWriteOptions options;
         options.writeXIncludeEnable = false;
         xml = mx::writeToXmlString(copy, &options);
@@ -3462,8 +3508,11 @@ bool Document::pasteNodes(const std::string& parentPath, const std::string& xml,
         mx::readFromXmlString(pasted, xml, mx::FileSearchPath(), nullptr);
 
         std::vector<mx::ElementPtr> sources;
+        std::vector<mx::BackdropPtr> backdrops;
         for (const mx::ElementPtr& child : pasted->getChildren()) {
-            if (child->isA<mx::Node>() || child->isA<mx::NodeGraph>()) {
+            if (mx::BackdropPtr backdrop = child->asA<mx::Backdrop>()) {
+                backdrops.push_back(backdrop);
+            } else if (child->isA<mx::Node>() || child->isA<mx::NodeGraph>()) {
                 if (IsMaterial(child) && !parent->isA<mx::Document>()) {
                     throw Refusal(child->getName() + " is a material: materials go at the top level of the document");
                 }
@@ -3473,8 +3522,8 @@ bool Document::pasteNodes(const std::string& parentPath, const std::string& xml,
                 sources.push_back(child);
             }
         }
-        if (sources.empty()) {
-            throw Refusal("There are no MaterialX nodes to paste");
+        if (sources.empty() && backdrops.empty()) {
+            throw Refusal("There are no MaterialX nodes or backdrops to paste");
         }
         std::map<std::string, std::string> names;
         std::vector<mx::ElementPtr> added;
@@ -3512,6 +3561,21 @@ bool Document::pasteNodes(const std::string& parentPath, const std::string& xml,
                     Disconnect(input);
                 }
             }
+        }
+        // Backdrops last, framing what was pasted with them, by its new
+        // names.
+        for (const mx::BackdropPtr& source : backdrops) {
+            mx::BackdropPtr backdrop = parent->addBackdrop(parent->createValidChildName(source->getName()));
+            backdrop->copyContentFrom(source);
+            backdrop->setSourceUri(document->getSourceUri());
+            std::vector<std::string> contents;
+            for (const std::string& name : Contents(source)) {
+                if (auto found = names.find(name); found != names.end()) {
+                    contents.push_back(found->second);
+                }
+            }
+            SetContents(backdrop, contents);
+            added.push_back(backdrop);
         }
         newPaths.clear();
         for (const mx::ElementPtr& element : added) {

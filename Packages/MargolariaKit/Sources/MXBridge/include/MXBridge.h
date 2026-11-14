@@ -654,8 +654,9 @@ public:
     /// parent (renamed where their names are taken), connects them to what
     /// the graph's inputs read or to their values, connects what read the
     /// graph's outputs to what those read, and removes the graph. Nodes
-    /// keep the graph's working space and file prefix. Refused for a graph
-    /// that implements a nodedef. Sets `newPaths` to the nodes' new paths.
+    /// keep the graph's working space and file prefix, and its backdrops
+    /// come out with them (M7b). Refused for a graph that implements a
+    /// nodedef. Sets `newPaths` to the nodes' new paths.
     bool ungroupNodeGraph(const std::string& path, StringVector& newPaths, std::string& errorMessage);
 
     /// Adds an empty nodegraph to the document (`parentPath` must be "",
@@ -764,21 +765,24 @@ public:
     bool includeLibrary(const std::string& filePath, const std::string& href, StringVector& nodeDefNames,
                         std::string& errorMessage);
 
-    /// The nodes and nodegraphs `names` of the graph at `parentPath`, as a
-    /// small MaterialX document (`xml`), for the pasteboard: connections
-    /// between them are kept, connections to anything else dropped
-    /// (except, with `keepsInterface`, to the graph's own inputs, for
-    /// pasting back in the same graph). File names are made absolute, and
-    /// the document's `colorspace` is the space their colours were in.
-    bool copyNodes(const std::string& parentPath, const StringVector& names, bool keepsInterface, std::string& xml,
-                   std::string& errorMessage) const;
+    /// The nodes and nodegraphs `names` of the graph at `parentPath`, with
+    /// its backdrops `backdropNames` (M7b), as a small MaterialX document
+    /// (`xml`), for the pasteboard: connections between them are kept,
+    /// connections to anything else dropped (except, with
+    /// `keepsInterface`, to the graph's own inputs, for pasting back in
+    /// the same graph), and each backdrop contains only what is copied.
+    /// File names are made absolute, and the document's `colorspace` is
+    /// the space their colours were in.
+    bool copyNodes(const std::string& parentPath, const StringVector& names, const StringVector& backdropNames,
+                   bool keepsInterface, std::string& xml, std::string& errorMessage) const;
 
-    /// Adds the nodes and nodegraphs of the MaterialX document `xml` (as
-    /// copyNodes writes it, or from another tool) to the graph at
-    /// `parentPath`, renamed where their names are taken. Connections to
-    /// anything that wasn't pasted are dropped; colours keep their space.
-    /// Nodegraphs are only pasted at the top level, materials too. Sets
-    /// `newPaths` to their paths, in order.
+    /// Adds the nodes, nodegraphs and backdrops of the MaterialX document
+    /// `xml` (as copyNodes writes it, or from another tool) to the graph
+    /// at `parentPath`, renamed where their names are taken. Connections
+    /// to anything that wasn't pasted are dropped, and backdrops contain
+    /// only what was; colours keep their space. Nodegraphs are only pasted
+    /// at the top level, materials too. Sets `newPaths` to their paths, in
+    /// order: the nodes and nodegraphs, then the backdrops.
     bool pasteNodes(const std::string& parentPath, const std::string& xml, StringVector& newPaths,
                     std::string& errorMessage);
 

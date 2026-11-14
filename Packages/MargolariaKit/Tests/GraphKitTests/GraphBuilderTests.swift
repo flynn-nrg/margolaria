@@ -134,6 +134,59 @@ struct GraphBuilderTests {
             GraphWire(from: PortReference(node: 1, index: 0), to: PortReference(node: 2, index: 0)),
         ])
     }
+
+    @Test("A top-level <output> read by output=\"…\": the wire is drawn, but none starts there")
+    @MainActor
+    func topLevelOutput() throws {
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <constant name="grey" type="color3">
+                <input name="value" type="color3" value="0.5, 0.5, 0.5" />
+              </constant>
+              <output name="base" type="color3" nodename="grey" />
+              <output name="unread" type="color3" nodename="grey" />
+              <standard_surface name="surface" type="surfaceshader">
+                <input name="base_color" type="color3" output="base" />
+              </standard_surface>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        var graph: DocumentGraph = GraphBuilder.build(try document.graph(at: ""))
+        graph.layout()
+        let grey: Int = try #require(graph.nodeIndex(forPath: "grey"))
+        let surface: Int = try #require(graph.nodeIndex(forPath: "surface"))
+        let base: Int = try #require(graph.nodeIndex(forPath: "base"))
+        let unread: Int = try #require(graph.nodeIndex(forPath: "unread"))
+        // The output that is read has an output pin, the other doesn't.
+        #expect(graph.model.nodes[base].outputs.map(\.startsWires) == [false])
+        #expect(graph.model.nodes[unread].outputs.isEmpty)
+        let fromBase = GraphWire(from: PortReference(node: base, index: 0), to: PortReference(node: surface, index: 0))
+        #expect(Set(graph.model.wires) == [
+            GraphWire(from: PortReference(node: grey, index: 0), to: PortReference(node: base, index: 0)),
+            GraphWire(from: PortReference(node: grey, index: 0), to: PortReference(node: unread, index: 0)),
+            fromBase,
+        ])
+
+        // No wire can be dragged into an input from it...
+        #expect(!graph.model.candidates(into: fromBase.to).outputs.contains(fromBase.from))
+        // ...nor from its pin, nor moved off the input it feeds: pressing
+        // the input starts a new wire, leaving this one drawn.
+        let controller = GraphCanvasController(model: graph.model)
+        controller.zoom = 1
+        controller.offset = .zero
+        let pin: CGPoint = GraphLayout.outputPoint(of: graph.model.nodes[base], index: 0)
+        controller.mouseDown(at: pin, extend: false)
+        controller.mouseDragged(to: CGPoint(x: pin.x + 40, y: pin.y))
+        #expect(controller.wireCandidates == nil)
+        controller.mouseUp()
+        let input: CGPoint = GraphLayout.inputPoint(of: graph.model.nodes[surface], index: 0)
+        controller.mouseDown(at: input, extend: false)
+        controller.mouseDragged(to: CGPoint(x: input.x - 40, y: input.y))
+        #expect(controller.wireCandidates?.seeksOutputs == true)
+        #expect(controller.hiddenWires.isEmpty)
+        controller.cancelDrag()
+    }
 }
 
 @Suite("Auto-layout")
