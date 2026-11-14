@@ -2,7 +2,7 @@
 
 *Margolaria* is Basque for "painter". It is a native macOS tool for authoring MaterialX materials.
 
-Status: M0 (spikes), M1 (viewer), M2 (editor), M3 (previews & colour), M4 (authoring power) and M5 (pipeline) done as of 2026-11-07; see `docs/spikes/` and `docs/milestones/`. Open items from the milestones wait for a UX polish pass once the initial milestones are complete.
+Status: M0 (spikes), M1 (viewer), M2 (editor), M3 (previews & colour), M4 (authoring power), M5 (pipeline) and M6 (Python) done as of 2026-11-12; see `docs/spikes/` and `docs/milestones/`. Open items from the milestones are gathered in M7, the polish pass (§8.8).
 
 ![Main window mockup](mockup/margolaria-mockup.png)
 
@@ -210,12 +210,14 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 | **M4: Authoring power** | Nodegraph creation, promote to interface, custom nodedef authoring, backdrops, two-way XML editing, command palette | Can build a custom nodedef from scratch and use it in another document |
 | **M5: Pipeline** | USD/USDZ export, other Hydra delegates, shader export (MSL/GLSL/OSL), image I/O through OIIO (*changed 2026-11-04:* OSL first, compiled to `.oso` for Izpi; no OIIO for now, as OpenEXR already works; other delegates exploratory, §8.6) | USDZ opens correctly in Reality Composer Pro / Quick Look |
 | **M6: Python** | Embedded interpreter, Console tab as a Python REPL, `margolaria` module (document, selection, commands, undo grouping), PyMaterialX and `pxr` on the shared document, startup scripts and user commands in the command palette, a Python CLI (*changed 2026-11-08:* Python 3.13, PyMaterialX but no `pxr`, pure-Python packages only; §8.7) | A script can build a material and appear in the undo history as one step; the signed and notarized build still passes `spctl` |
+| **M7: Polish** | The milestones' open items, keyboard shortcuts (§8.4) and preview geometries (§8.8) | Each PR's own criterion (§8.8); the notarized build still passes `spctl` |
 
 **Ideas to schedule** (the user, 2026-11-06; not planned yet):
 
-- **For 1.0: preview geometries.** The viewport's sphere chosen among others: a sphere, a plane, a cylinder, a shape for fabrics (draped cloth), and Margolaria's own version of a render ball (a shader ball). Swatches stay spheres unless decided otherwise.
+- **For 1.0: preview geometries.** The viewport's sphere chosen among others: a sphere, a plane, a cylinder, a shape for fabrics (draped cloth), and Margolaria's own version of a render ball (a shader ball). Swatches stay spheres unless decided otherwise. *Scheduled 2026-11-14:* in M7 (M7a, §8.8).
 - **After 1.0:**
   - **Imported geometry**: the user's own models (USD, and perhaps OBJ or glTF) in the viewport, to try materials on.
+  - **The rest of §4.1's window design** (2026-11-14, from the M7 plan): the sidebar's Document tab (an outline with issue badges), the canvas's minimap, a status bar, the viewport's render time, the inspector's Docs link.
   - **An MCP server** for AI-assisted material development: tools for an AI assistant to read and edit the open document (nodes, connections, values, validation, renders), each change one undo step, as Python's commands will be (M6).
 
 ### 8.1 M2 plan (editor, done; see `docs/milestones/M2-editor.md`)
@@ -454,6 +456,39 @@ What exists already: every edit goes through `MaterialXDocument.edit(_:continuin
 | **M6e: Command line** | The `margolaria` tool: run a script on a file, export USD, USDZ and shaders | Running a script and each export from the command line gives the same files as the app; the tool works from the notarized build (checked by the user). *Done 2026-11-12* (docs/SCRIPTING.md, The command line): ScriptKit's `CommandLineTool`, asked by `MargolariaApp.main` before AppKit starts; `run SCRIPT [FILE] [-o OUTPUT]` (output to standard output, a traceback to standard error; a script's window calls see no selection), `export usd`, `export usdz [--material NAME]` and `export shader [--language] [--colorspace] [--oslc]`; exit statuses 0, 1 and 2 (usage). The app's exports and the scripts' `export_*` now share ScriptKit's `Export` and MXKit's `MXShaderExport.generate`, so `export_shader` generates from the preview document, as the Generated Shader tab does, and `export_usdz` refuses an unknown material. Criterion automated in `CommandLineToolTests` (USDZ compared by its contents, as zips record times). Fixed on the way: Release builds (whole-module) didn't let ScriptKit see MXDocument's `package init`, in Python.swift since M6b, so archives failed; ScriptKit now calls `MXDocument.sharingFile(with:)`. Checked by the user from the notarized build, through a symbolic link on the PATH: `run brick.py -o` and `export usdz` of the tiled brass. Open for the polish pass: `export usdz` of the tiled brass prints OpenUSD's "Failed to resolve reference @0/brass_color.jpg@" warning (assetLocalization.cpp), though both textures are in the package (as the app's Export as USDZ does, which shares the code); find which path it resolves wrongly, or silence it. Also: `scripts/release.sh` can fail at its start, `rm -rf build/release` saying "Directory not empty" (2026-11-11; running it again worked): something may still be writing into the folder as it is deleted (Spotlight, or the last build's processes). Retry the delete, or move the folder aside first and delete it after |
 
 Left for later: `pxr` (with `usd-core`, or a SwiftUsd built with Python if that becomes possible); native packages; the MCP server (§8, ideas), which will use the `margolaria` module's edits.
+
+### 8.8 M7 plan (polish)
+
+Drafted 2026-11-14. M0 to M6 built the features. M7 is the polish pass decided on 2026-11-03: the open items the milestones left, the keyboard shortcuts (§8.4), and the preview geometries marked "For 1.0" (§8, ideas; added to M7 at the user's request, 2026-11-14). Split into PRs like M6, each with its own exit criterion.
+
+**Inventory.** The write-ups' "Not done / open" lists hold 44 items, M1 8, M2 7, M3 7, M4 9, M5 9 and M6 4, checked against the code on 2026-11-14:
+
+- **Done since:** saved node positions (M2a); the viewport reading the file from disk (M2); expanding "+N more inputs" (M2); the viewport's lighting (M3's studio); the "not in this milestone, as planned" items; `margolaria export` (M6e). Dropped from the list.
+- **Merged:** light mode for the canvas (M1 and M2); keyboard shortcuts (M3 and M4, now M7g); colours outside the gamut (M2), with gamut mapping (M3); preview shapes (M1), now M7a.
+- **Still open,** sorted into the PRs below, or out of M7 with a reason.
+
+Some of §4.1's window design was never built either: the sidebar's Document tab (an outline of materials, nodegraphs and definitions, with issue badges), the canvas's minimap, a status bar (versions, OCIO config, working space, graph statistics), the viewport's render time, and the inspector's Docs link. *Decided 2026-11-14:* all after 1.0 (below, and §8, ideas).
+
+**PRs:**
+
+| PR | Scope | Done when |
+|---|---|---|
+| **M7a: Preview geometries** | The viewport's shape chosen in its bar: sphere, plane, cylinder, a draped cloth, and Margolaria's own shader ball. Built in ViewportBridge as the sphere is (`MGPreviewSphere`), each with texture coordinates, normals and the tangents normal maps need; remembered as a viewer preference (`ViewportSettings`). Swatches stay spheres. *Decided 2026-11-14:* Export as USDZ… uses the viewport's shape, as it binds the viewport's material | Every example renders on each shape, under Metal's validation; switching back to the sphere gives the same image as before; Export as USDZ… writes the viewport's shape, and a USDZ with each passes OpenUSD's validators; checked by the user in Quick Look |
+| **M7b: Canvas** | Light mode for the canvas; connections to a top-level `<output>` (`output="…"`) drawn; selection from the XML tab to the canvas; small graphs framed readably in a narrow canvas; backdrops in copy and paste, and kept when ungrouping | Each has a test in GraphKitTests, or the app's own where it's UI; light mode checked by the user |
+| **M7c: Definitions and the library** | The Tab search and the palette list library files' definitions; a definition's outputs and node name can be changed once made; the palette lists an input's right-click actions (Reset to Default, Promote) and the inspector's commands when it is hidden | MXKit tests for the definition edits; the palette's lists checked in the app's tests |
+| **M7d: Files** | Includes written relative to the document when possible; blank lines between elements kept on save; USD exports warn about (or package) textures outside the file's folder; the USDZ "Failed to resolve reference" warning found and fixed; undo snapshots measured on a large document | The corpus round-trip test byte-equal on the chess set; the export tests check for no warnings; the undo measurement recorded here |
+| **M7e: Colour** | Swatches computed in the working space, as the Generated Shader tab is; inputs at their nodedef default converted when the working space changes | Swatch and colour tests in the working space; a coloured default is the same colour after a change of working space |
+| **M7f: Settings and release** | A Settings window (⌘,) with the oslc path (now in the Export Shader panel); `scripts/release.sh` retrying the delete of `build/release` | The oslc setting read from Settings by the export; a release run by the user |
+| **M7g: Keyboard shortcuts** | §8.4: every command reviewed, single keys for the frequent ones on the canvas, menu shortcuts elsewhere, shown in menus and tooltips, no clashes with macOS or the MaterialX Graph Editor. Last, so it covers the commands M7 adds | A table of every command and its shortcut in docs; a test that no two commands share one |
+
+**Out of M7:**
+
+- **Reports upstream** (M3, M4, M5): minimal reproductions for OpenUSD, MaterialX and Apple. Each has a workaround here, except Hydra's depth copy for CPU renderers. Worth doing, but not polish: a task of its own, whenever convenient.
+- **A hand comparison in Houdini** (M5): the user's, any time.
+- **Not ours to fix:** MSL for 12 swatches (MaterialX's generator); `g18_ap1` (missing from OCIO's built-in ACES config).
+- **On demand:** PyMaterialX's generator bindings (M6), if a script needs them.
+- **After 1.0:** another OCIO config and HDR displays (M3); gamut mapping (M3); choosing other library folders, nodedef versions, namespaces, definitions implemented in code (M4); binding materials to the user's models, MDL and Slang, third-party Hydra renderers, baked textures, Izpi as a renderer (M5); `pxr`, native packages, the MCP server (M6); imported geometry (§8, ideas); §4.1's Document tab, minimap, status bar, render time and Docs link.
+- **Kept as they are:** Cancel in the File > New sheet's Open… leaves no window, as other Mac document apps do (M2).
 
 ## 9. Open questions
 
