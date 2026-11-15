@@ -41,7 +41,18 @@ if [ "${1:-}" = "--no-notarize" ]; then
 fi
 
 cd "$ROOT"
-rm -rf "$OUT"
+# The last run's output goes first. rm -rf can fail with "Directory not
+# empty" when something writes into the folder while it is being emptied
+# (Spotlight or the Finder, indexing the last run's app); running the
+# script again worked (2026-11-11). So it tries a few times, a second apart.
+TRIES=0
+until rm -rf "$OUT" 2>/dev/null; do
+    TRIES=$((TRIES + 1))
+    if [ "$TRIES" -ge 5 ]; then
+        rm -rf "$OUT"   # once more, showing why it failed; set -e stops here
+    fi
+    sleep 1
+done
 mkdir -p "$OUT"
 
 # The project is generated from project.yml; make sure it is current.

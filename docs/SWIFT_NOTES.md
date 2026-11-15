@@ -100,7 +100,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `exit(status)` | C's `exit`, from the system library: ends the process at once, and never returns | `exit` | `MargolariaApp.swift` (M6e) |
 | `Process` and `Pipe` | Runs another program with its arguments, no shell between, and collects what it prints; read the pipe before `waitUntilExit()`, or a chatty program blocks on a full pipe | `posix_spawn` with a pipe; Go's `exec.Command` | `MXShaderExport.swift` (`compileOSL`) |
 | `UserDefaults.standard` directly | What `@AppStorage` wraps, for AppKit code; `object(forKey:)` is nil for a key never set, which `bool(forKey:)` (false) can't tell apart | `NSUserDefaults` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
-| `NSPathControl` and its delegate | A file path as a control; `.popUp` style with `isEditable` adds a "Choose…" menu item, whose open panel the delegate sets up | `NSPathControl` | `MaterialXDocument.swift` (`OSLCompilerAccessory`) |
+| `NSPathControl` and its delegate | A file path as a control; `.popUp` style with `isEditable` adds a "Choose…" menu item, whose open panel the delegate sets up | `NSPathControl` | `MaterialXDocument.swift` (`OSLCompilerAccessory`, until M7f moved oslc to Settings) |
 | `deinit` | Runs when the last reference to a class instance goes, like a C++ destructor or ObjC's `dealloc`: frees what a C API holds for it. Runs on whichever thread drops the reference, so it can't use `@MainActor` state | `~T()`, `-dealloc` | `PythonConsole.swift` (`ConsoleNamespace`, M6c) |
 ## Functions and closures
 
@@ -218,6 +218,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `Thread` | A thread of its own (NSThread), for blocking work such as an interpreter, rather than a task on Swift's shared pool; `stackSize` before `start()` (other threads get 512 KB); like `pthread_create` with `pthread_attr_setstacksize` | `ScriptRun.swift` (M6c) |
 | `NSCondition` | A lock with a condition variable: `lock()`, `wait()` (unlocks, sleeps until `broadcast()`, locks again), `wait(until:)` with a deadline; a `pthread_mutex_t` with a `pthread_cond_t` | `ScriptRun.swift` (`Channel`, M6c) |
 | `DispatchQueue.main.async { }` | Runs a block on the main thread, soon; with `MainActor.assumeIsolated` inside, it may use main-actor state; ObjC's `dispatch_async(dispatch_get_main_queue(), ^{})` | `ScriptRun.swift` (`Channel`, M6c) |
+| A mutable `static var` on a `@MainActor` type | One variable for the type (a C++ static member), allowed because only main-thread code can reach it; holds the one Settings window | A static guarded by "main thread only" | `SettingsWindow.swift` (`SettingsWindowController.shared`) |
 
 ## SwiftUI
 
@@ -304,6 +305,10 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `control(_:textView:doCommandBy:)` | An `NSTextField` delegate's chance to handle a key's command (`insertNewline:` for Return, `moveUp:` for Up) before the field does; `true` means handled (ObjC's `-control:textView:doCommandBySelector:`) | `BottomPanel.swift` (`ConsoleInputField`, M6c) |
 | `NSAttributedString` and `textStorage` | Text with attributes (font, colour) on ranges; a text view's `textStorage` is its mutable one, so `append` adds to what it shows | `BottomPanel.swift` (`ConsoleTranscript`, M6c) |
 | A cell's own field editor | `NSTextFieldCell.fieldEditor(for:)` overridden: the field is edited in that NSTextView, not the window's shared one (here, one without typing undo) | `BottomPanel.swift` (`ConsoleFieldCell`, M6c) |
+| Subclassing `NSWindowController` | A controller that owns one window and shows it with `showWindow`; its `init` makes the window, and `required init?(coder:)` must still be written | The same class in ObjC | `SettingsWindow.swift` |
+| `NSHostingController.sizingOptions` | `.preferredContentSize`: the window takes the SwiftUI view's own size | — | `SettingsWindow.swift` |
+| `LabeledContent` | A label in a Form's left column beside any views, not only a control with its own label | A label cell in an `NSGridView` row | `SettingsWindow.swift` |
+| `.formStyle(.grouped)` | A Form drawn as System Settings' panes, sections in rounded boxes | — | `SettingsWindow.swift` |
 ## Swift ↔ C++
 
 | Concept | In one line | First appears |
