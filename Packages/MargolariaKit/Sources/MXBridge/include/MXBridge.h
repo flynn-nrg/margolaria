@@ -525,6 +525,17 @@ public:
     /// NodeInfo::isIncluded). False for paths that don't exist.
     bool isIncluded(const std::string& path) const;
 
+    /// The files the document includes, one `xi:include` each (M7d): two
+    /// strings per include, its href as written, then the file's absolute
+    /// path ("" when that can't be told: a document read from text, whose
+    /// relative hrefs have nothing to be relative to).
+    StringVector includes() const;
+
+    /// writeToXmlString with other hrefs for the includes (M7d): `hrefs`
+    /// pairs each href, as `includes` gives it, with the one to write.
+    /// Includes not named keep theirs. The document itself doesn't change.
+    std::string writeToXmlStringWithHrefs(const StringVector& hrefs) const;
+
     // --- Edits -------------------------------------------------------------
     //
     // Every edit names the element by path. Each returns false and sets

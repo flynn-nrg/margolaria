@@ -34,7 +34,9 @@ extension StormRendererTests {
 
     /// Writes `document` to `url` and reads it back, as saving and opening do.
     static func saveAndReopen(_ document: MXDocument, at url: URL) throws -> MXDocument {
-        try document.xmlString().write(to: url, atomically: true, encoding: .utf8)
+        // As the app saves (MaterialXDocument's data(ofType:)): includes
+        // relative to where the file goes (M7d).
+        try document.xmlString(savingIn: url.deletingLastPathComponent()).write(to: url, atomically: true, encoding: .utf8)
         let reopened = try MXDocument.read(from: url)
         reopened.setDataLibrary(try MXLibrary.bundled.get())
         return reopened
@@ -93,7 +95,8 @@ extension StormRendererTests {
         let saved: URL = elsewhere.appending(path: "second.mtlx")
         let secondReopened: MXDocument = try Self.saveAndReopen(second, at: saved)
         let text: String = try String(contentsOf: saved, encoding: .utf8)
-        #expect(text.contains(#"<xi:include href="\#(file.standardizedFileURL.path(percentEncoded: false))""#), "\(text)")
+        // Relative: the two folders are side by side (M7d; absolute before).
+        #expect(text.contains(#"<xi:include href="../Libraries/tinted.mtlx""#), "\(text)")
         #expect(!text.contains("<nodedef"), "the definition stays in its file")
         #expect(secondReopened.validationIssues().isEmpty, "\(secondReopened.validationIssues())")
         // The same text again. (Not the same elements: read from a file, the

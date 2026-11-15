@@ -505,10 +505,11 @@ PYBIND11_MODULE(margolaria, module) {
 
     module.def(
         "export_usd",
-        [](const py::object& path) { CallHost("export_usd", {PathText(path)}); },
+        [](const py::object& path) { return CallHost("export_usd", {PathText(path)}); },
         py::arg("path"),
         "Writes the document's materials as USD (.usda, .usdc or .usd), as File > Export as USD. A relative "
-        "path is relative to the document's folder.");
+        "path is relative to the document's folder. Returns the textures outside the file's folder, which it "
+        "refers to by absolute path (empty when every texture is beside the file or inside its folder).");
 
     module.def(
         "export_usdz",

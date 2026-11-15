@@ -18,8 +18,22 @@ enum Export {
                                                         "osl_network": .oslNetwork]
 
     /// The document's materials as USD, at `url` (.usda, .usdc or .usd).
-    static func usd(_ document: MXDocument, to url: URL) throws {
+    /// Returns the textures outside `url`'s folder, which the file refers
+    /// to by absolute path (M7d): it only finds them where they are now.
+    @discardableResult
+    static func usd(_ document: MXDocument, to url: URL) throws -> [String] {
         try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(), to: url)
+    }
+
+    /// The warning about `textures` left absolute by ``usd(_:to:)``, for
+    /// the command line; nil if there are none.
+    static func absoluteTexturesWarning(_ textures: [String]) -> String? {
+        guard !textures.isEmpty else {
+            return nil
+        }
+        return "margolaria: the file refers to \(textures.count == 1 ? "a texture" : "\(textures.count) textures") "
+            + "outside its folder by absolute path, so it only finds them where they are now:\n"
+            + textures.map { "  \($0)\n" }.joined()
     }
 
     /// A USDZ package at `url`: `shape` with `material` (by name; the

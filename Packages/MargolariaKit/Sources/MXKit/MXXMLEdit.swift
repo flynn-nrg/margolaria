@@ -105,6 +105,8 @@ extension MXDocument {
         }
         let result = MXDocument(handle: document, fileURL: fileURL, fileVersion: fileVersion)
         result.hasDataLibrary = hasDataLibrary
+        // The blank lines typed in the XML tab are kept too.
+        result.blankLines = MXXMLText.blankLines(in: text)
         return result
     }
 

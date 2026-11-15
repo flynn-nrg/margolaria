@@ -23,7 +23,8 @@
 // `NSObject` subclass as a control's target (M5b); a function taking a
 // throwing closure (M5c); `NSPathControl` and its delegate, `UserDefaults`
 // read and written directly (M5d); overriding a property to add `didSet`
-// (M7c).
+// (M7c); `String` bridged `as NSString`, an Objective-C method returning
+// an object and taking `error:` seen as `throws` (M7d).
 
 import AppKit
 import GraphKit
@@ -203,7 +204,30 @@ final class MaterialXDocument: NSDocument {
     /// Foundation's byte buffer (NSData). `.utf8` is a view of the String as
     /// UTF-8 code units, with no copy of its own.
     override func data(ofType typeName: String) throws -> Data {
-        Data(try content.xmlString().utf8)
+        // Includes written relative to where the file goes (M7d).
+        Data(try content.xmlString(savingIn: savingFolder ?? documentFolder).utf8)
+    }
+
+    /// The folder the save in progress writes into, for `data(ofType:)`,
+    /// which AppKit doesn't tell; nil between saves, and for an untitled
+    /// document's autosave (in ~/Library/Autosave Information), which
+    /// keeps the includes as they are.
+    @ObservationIgnored private var savingFolder: URL? = nil
+
+    /// Every save comes through here, with the file's real destination
+    /// (AppKit then writes to a temporary file beside it, and moves it
+    /// over the old one). `data(ofType:)` may be called after this returns,
+    /// so the folder is forgotten only once the save has finished.
+    ///
+    /// SWIFT: `@escaping` because AppKit keeps the completion handler, to
+    /// call it later; the closure passed on calls it in turn.
+    override func save(to url: URL, ofType typeName: String, for saveOperation: NSDocument.SaveOperationType,
+                       completionHandler: @escaping (Error?) -> Void) {
+        savingFolder = saveOperation == .autosaveElsewhereOperation ? nil : url.deletingLastPathComponent()
+        super.save(to: url, ofType: typeName, for: saveOperation) { [weak self] error in
+            self?.savingFolder = nil
+            completionHandler(error)
+        }
     }
 
     /// Starts the new document from `template` (the template sheet), in
@@ -344,11 +368,43 @@ final class MaterialXDocument: NSDocument {
         panel.accessoryView = formats.view
         // SWIFT: The closure uses `formats`, so it keeps the accessory (and
         // its popup's target) alive until the panel has closed.
-        runExportPanel(panel) { url in
+        runExportPanel(panel) { [weak self] url in
             _ = formats
-            // SWIFT: The Objective-C method ends in `error:`, so Swift sees
-            // it as `throws`, returning nothing.
-            try MGUSDExporter.exportMaterials(fromMaterialXString: text, to: url)
+            // SWIFT: The Objective-C method ends in `error:` and returns an
+            // object, so Swift sees it as `throws`, returning the object:
+            // nil on the Objective-C side becomes a thrown error.
+            let textures: [String] = try MGUSDExporter.exportMaterials(fromMaterialXString: text, to: url)
+            if !textures.isEmpty {
+                self?.warnAboutAbsoluteTextures(textures, in: url)
+            }
+        }
+    }
+
+    /// After Export as USD… (M7d): the file refers to `textures` outside
+    /// its folder by absolute path, so it only finds them where they are
+    /// now, on this Mac. Says so, and what to do instead.
+    private func warnAboutAbsoluteTextures(_ textures: [String], in url: URL) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = textures.count == 1
+            ? "A texture is outside the exported file's folder"
+            : "\(textures.count) textures are outside the exported file's folder"
+        // SWIFT: `abbreviatingWithTildeInPath` is NSString's; `(path as
+        // NSString)` bridges a Swift String to it, as in Objective-C.
+        let list: String = textures.prefix(8).map { "• " + ($0 as NSString).abbreviatingWithTildeInPath }
+            .joined(separator: "\n") + (textures.count > 8 ? "\n…" : "")
+        alert.informativeText = "\(url.lastPathComponent) refers to "
+            + (textures.count == 1 ? "it" : "them")
+            + " by absolute path, so it finds "
+            + (textures.count == 1 ? "it" : "them")
+            + " only where "
+            + (textures.count == 1 ? "it is" : "they are")
+            + " now. To keep the textures with the file, export into a folder that contains them, "
+            + "or use Export as USDZ…, which packs every texture inside.\n\n" + list
+        if let window = windowControllers.first?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 
@@ -902,10 +958,7 @@ final class MaterialXDocument: NSDocument {
             buildCatalog(for: document)
             catalogKey = ownNodeDefs
         }
-        // If writing fails, show the error text in place of the XML.
-        // SWIFT: `(try? x) ?? y`: `try?` turns a thrown error into `nil`, and
-        // `??` ("nil-coalescing") substitutes `y` when the left side is nil.
-        xml = (try? document.xmlString()) ?? "<!-- MaterialX could not write this document -->"
+        xml = Self.text(of: document, in: documentFolder)
         previewXML = (try? document.previewXMLString()) ?? ""
         viewportXML = (try? document.viewportXMLString()) ?? ""
     }
@@ -945,6 +998,15 @@ extension MaterialXDocument: ScriptHost {
         fileURL?.deletingLastPathComponent()
     }
 
+    /// The XML tab's text for `document`: as saving writes it into
+    /// `folder`, with the includes relative to it (M7d).
+    private static func text(of document: MXDocument, in folder: URL?) -> String {
+        // If writing fails, show the error text in place of the XML.
+        // SWIFT: `(try? x) ?? y`: `try?` turns a thrown error into `nil`, and
+        // `??` ("nil-coalescing") substitutes `y` when the left side is nil.
+        (try? document.xmlString(savingIn: folder)) ?? "<!-- MaterialX could not write this document -->"
+    }
+
     /// Builds `catalog` for `document`, with the library folders' files.
     private func buildCatalog(for document: MXDocument) {
         let files: [MXLibraryFile] = MXLibraryFolders.libraries(for: fileURL).flatMap(\.files)
@@ -958,7 +1020,8 @@ extension MaterialXDocument: ScriptHost {
     }
 
     /// Saved in another folder (or for the first time): that folder's
-    /// library files are listed now.
+    /// library files are listed now, and the XML tab shows the includes
+    /// as they were written there (M7d).
     ///
     /// SWIFT: Overriding a property only to add `didSet`: the stored value
     /// stays NSDocument's, and this runs after each change.
@@ -966,6 +1029,7 @@ extension MaterialXDocument: ScriptHost {
         didSet {
             if fileURL?.deletingLastPathComponent() != oldValue?.deletingLastPathComponent() {
                 refreshCatalog()
+                xml = Self.text(of: content, in: fileURL?.deletingLastPathComponent())
             }
         }
     }

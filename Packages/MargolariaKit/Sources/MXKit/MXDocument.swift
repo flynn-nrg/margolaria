@@ -126,6 +126,12 @@ public final class MXDocument {
     /// ``documentVersion``, saving writes the newer version.
     public let fileVersion: String?
 
+    /// The elements the text had a blank line before, which MaterialX
+    /// forgets (M7d): noted when the text is read, put back when it is
+    /// written (MXXMLText's `blankLines(in:)`). Copies and undo take
+    /// them with the contents.
+    var blankLines: [String: Int] = [:]
+
     /// Parses MaterialX XML.
     ///
     /// Older documents (for example v1.38) are upgraded to the current
@@ -143,6 +149,7 @@ public final class MXDocument {
         self.handle = document
         self.fileURL = nil
         self.fileVersion = nil
+        self.blankLines = MXXMLText.blankLines(in: xml)
     }
 
     /// Wraps a handle that was loaded some other way (`read(from:)`,
@@ -162,7 +169,9 @@ public final class MXDocument {
     /// `fileURL` and `fileVersion`): ScriptKit wraps the copies a script's
     /// undo steps keep with it (M6b).
     package func sharingFile(with handle: mxbridge.Document) -> MXDocument {
-        MXDocument(handle: handle, fileURL: fileURL, fileVersion: fileVersion)
+        let document = MXDocument(handle: handle, fileURL: fileURL, fileVersion: fileVersion)
+        document.blankLines = blankLines
+        return document
     }
 
     /// Reads a .mtlx file from disk.
@@ -180,31 +189,65 @@ public final class MXDocument {
         guard document.isLoaded() else {
             throw MXError.parseFailed(errorMessage.swiftString)
         }
-        return MXDocument(handle: document, fileURL: url, fileVersion: Self.versionWritten(in: url))
+        // The text itself, for what MaterialX's reading doesn't keep.
+        let text: String? = try? String(contentsOf: url, encoding: .utf8)
+        let result = MXDocument(handle: document, fileURL: url, fileVersion: text.flatMap(Self.versionWritten))
+        result.blankLines = text.map(MXXMLText.blankLines) ?? [:]
+        return result
     }
 
-    /// The `version` attribute of the root element as written in the file,
-    /// read straight from the text (MaterialX's own reading upgrades it).
-    private static func versionWritten(in url: URL) -> String? {
-        guard let text = try? String(contentsOf: url, encoding: .utf8),
-              let match = text.firstMatch(of: #/<materialx\b[^>]*\bversion\s*=\s*"([^"]*)"/#) else {
+    /// The `version` attribute of the root element as written in `text`
+    /// (MaterialX's own reading upgrades it).
+    private static func versionWritten(in text: String) -> String? {
+        guard let match = text.firstMatch(of: #/<materialx\b[^>]*\bversion\s*=\s*"([^"]*)"/#) else {
             return nil
         }
         return String(match.1)
     }
 
-    /// The document as MaterialX XML, ready to save.
+    /// The document as MaterialX XML, ready to save in its own folder (or
+    /// the XML tab): ``xmlString(savingIn:)`` with the folder of
+    /// ``fileURL``.
     ///
     /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
     public func xmlString() throws -> String {
-        let xml = handle.writeToXmlString().swiftString
+        try xmlString(savingIn: fileURL?.deletingLastPathComponent())
+    }
+
+    /// The document as MaterialX XML, ready to save in `folder` (M7d):
+    /// each `xi:include` written relative to it when it can be
+    /// (`href(for:from:)`), so Save As into another folder, or an untitled
+    /// document's first save, still finds the included files. Nil keeps
+    /// the hrefs as they are (a document from text, or an untitled
+    /// document's autosave). Includes of files that are gone keep theirs.
+    ///
+    /// - Throws: ``MXError/writeFailed`` if MaterialX could not serialise it.
+    public func xmlString(savingIn folder: URL?) throws -> String {
+        var hrefs: [String] = []
+        if let folder {
+            let includes: [String] = handle.includes().map { $0.swiftString }
+            // SWIFT: `stride(from:to:by:)` counts in steps, like C's
+            // `for (i = 0; i < n; i += 2)`: the includes come in pairs.
+            for index in stride(from: 0, to: includes.count - 1, by: 2) {
+                let (href, path) = (includes[index], includes[index + 1])
+                guard !path.isEmpty, FileManager.default.fileExists(atPath: path) else {
+                    continue
+                }
+                let written: String = Self.href(for: URL(filePath: path), from: folder)
+                if written != href {
+                    hrefs += [href, written]
+                }
+            }
+        }
+        let written = (hrefs.isEmpty ? handle.writeToXmlString()
+                                     : handle.writeToXmlStringWithHrefs(Self.stringVector(hrefs))).swiftString
         // SWIFT: `isEmpty` is a property on every collection, String included.
         // Prefer it over `count == 0`: for String, `count` has to walk the
         // whole string (it counts characters), while `isEmpty` doesn't.
-        guard !xml.isEmpty else {
+        guard !written.isEmpty else {
             throw MXError.writeFailed
         }
-        return xml
+        return MXXMLText.insertingBlankLines(blankLines, in: written)
     }
 
     /// The document as XML for a renderer that reads it from memory, such

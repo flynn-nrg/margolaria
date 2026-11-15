@@ -35,7 +35,9 @@ extension MXDocument {
         guard document.isLoaded() else {
             throw MXError.parseFailed(errorMessage.swiftString)
         }
-        return MXDocument(handle: document, fileURL: nil, fileVersion: nil)
+        let result = MXDocument(handle: document, fileURL: nil, fileVersion: nil)
+        result.blankLines = MXXMLText.blankLines(in: xml)
+        return result
     }
 
     // MARK: Copies, for undo
@@ -46,6 +48,7 @@ extension MXDocument {
     public func copy() -> MXDocument {
         let copy = MXDocument(handle: handle.copy(), fileURL: fileURL, fileVersion: fileVersion)
         copy.hasDataLibrary = hasDataLibrary
+        copy.blankLines = blankLines
         return copy
     }
 
@@ -55,6 +58,7 @@ extension MXDocument {
     /// script's `margolaria.document()` (M6b); undo and redo use this.
     public func restore(from snapshot: MXDocument) {
         handle.restoreContents(snapshot.handle)
+        blankLines = snapshot.blankLines
     }
 
     /// Compares with `other` element by element, ignoring formatting.

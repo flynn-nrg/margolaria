@@ -199,14 +199,24 @@ struct CommandLineToolTests {
         // the viewport shows: the first, until another is picked).
         let document: MXDocument = try open(Self.brass)
         for name in ["brass.usda", "brass.usdc"] {
-            #expect(margolaria("export", "usd", path, folder.appending(path: "cli-\(name)").path).status == 0)
+            let usd = margolaria("export", "usd", path, folder.appending(path: "cli-\(name)").path)
+            #expect(usd.status == 0)
+            // The textures are in MaterialX's resources/Images, not beside
+            // the file: listed, as the app warns about them (M7d).
+            #expect(usd.errors.contains("2 textures outside its folder") && usd.errors.contains("brass_color.jpg"),
+                    "\(usd.errors)")
             try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(),
                                               to: folder.appending(path: "app-\(name)"))
             #expect(try Data(contentsOf: folder.appending(path: "cli-\(name)"))
                     == (try Data(contentsOf: folder.appending(path: "app-\(name)"))), "\(name)")
         }
 
-        #expect(margolaria("export", "usdz", path, folder.appending(path: "cli.usdz").path).status == 0)
+        // No OpenUSD warning either (M7d: it warned "Failed to resolve
+        // reference @0/brass_color.jpg@").
+        let usdz = margolaria("export", "usdz", path, folder.appending(path: "cli.usdz").path)
+        #expect(usdz.status == 0)
+        #expect(usdz.errors.isEmpty, "\(usdz.errors)")
+        #expect(MGUSDExporter.lastExportWarnings.isEmpty, "\(MGUSDExporter.lastExportWarnings)")
         try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(),
                                         to: folder.appending(path: "app.usdz"), materialName: nil, shape: .sphere)
         let packaged: [String: Data] = try zipContents(of: folder.appending(path: "cli.usdz"))

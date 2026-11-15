@@ -3,7 +3,8 @@
 // Working with a document's XML as text, for the XML panel: where the tag
 // names, attribute names, values and comments are (to colour them), and
 // where a given element is (to highlight the node selected on the canvas),
-// and which element a position is in (to select it on the canvas, M7b).
+// which element a position is in (to select it on the canvas, M7b), and
+// where the blank lines between elements are (to keep them on save, M7d).
 //
 // This reads the text MaterialX writes (MXDocument.xmlString), which is
 // regular: one element per tag, attributes in double quotes, no CDATA. It is
@@ -15,7 +16,8 @@
 //
 // Introduces (SWIFT): `Range<String.Index>`, `String.utf8` and its
 // indices, `UInt8(ascii:)`, `elementsEqual`, `popLast()`, `compactMap`;
-// `utf8.distance(from:to:)` (M7b).
+// `utf8.distance(from:to:)` (M7b); `String(decoding:as:)`, `reversed()`,
+// `repeatElement` (M7d).
 
 import Foundation
 
@@ -159,6 +161,59 @@ public enum MXXMLText {
         return names.isEmpty ? nil : names.joined(separator: "/")
     }
 
+    // MARK: Blank lines (M7d)
+
+    /// The blank lines between `xml`'s elements, by the tag after them:
+    /// how many there are before each, keyed by an *anchor*. A named
+    /// element's anchor is its path ("NG_BishopBlack"); its end tag's is
+    /// "end " and the path ("end NG_BishopBlack"); a comment's, or an
+    /// unnamed element's, is the whole tag ("<!-- Bishop Black -->",
+    /// "</materialx>").
+    ///
+    /// MaterialX's parser drops the whitespace between elements, so
+    /// MXDocument notes these when it reads a file and puts the blank lines
+    /// back when it writes (``insertingBlankLines(_:in:)``). Anchors
+    /// rather than line numbers, so the blank lines stay with their
+    /// elements through edits: a node moved keeps its blank line, a node
+    /// renamed loses it.
+    public static func blankLines(in xml: String) -> [String: Int] {
+        let text = Bytes(xml)
+        var blankLines: [String: Int] = [:]
+        text.forEachTag { anchor, gap in
+            // Two line ends make one blank line.
+            let blank: Int = text.newlines(in: gap) - 1
+            if blank > 0 {
+                blankLines[anchor] = blank
+            }
+        }
+        return blankLines
+    }
+
+    /// `xml` with ``blankLines(in:)``'s `blankLines` put back: before each
+    /// tag they name that starts a line, as MaterialX writes every tag.
+    public static func insertingBlankLines(_ blankLines: [String: Int], in xml: String) -> String {
+        guard !blankLines.isEmpty else {
+            return xml
+        }
+        let text = Bytes(xml)
+        // Where each blank line goes, just after the tag before, and how many.
+        var insertions: [(offset: Int, count: Int)] = []
+        text.forEachTag { anchor, gap in
+            if let count = blankLines[anchor], text.newlines(in: gap) == 1 {
+                insertions.append((gap.lowerBound, count))
+            }
+        }
+        var bytes: [UInt8] = text.bytes
+        // SWIFT: `reversed()` walks the insertions from the last: inserting
+        // there doesn't move the earlier ones' offsets.
+        for insertion in insertions.reversed() {
+            bytes.insert(contentsOf: repeatElement(Bytes.newline, count: insertion.count), at: insertion.offset)
+        }
+        // SWIFT: `String(decoding:as:)` makes a String from UTF-8 bytes
+        // (any invalid ones would become "�"; these came from a String).
+        return String(decoding: bytes, as: UTF8.self)
+    }
+
     /// A tag in the text, by byte offsets: from its `<` to just after its
     /// `>`. A comment is one tag, from `<!--` to `-->`.
     struct Tag {
@@ -189,6 +244,7 @@ public enum MXXMLText {
         static let question = UInt8(ascii: "?")
         static let equals = UInt8(ascii: "=")
         static let quote = UInt8(ascii: "\"")
+        static let newline = UInt8(ascii: "\n")
         static let commentStart: [UInt8] = Array("<!--".utf8)
         static let commentEnd: [UInt8] = Array("-->".utf8)
         static let name: [UInt8] = Array("name".utf8)
@@ -293,6 +349,59 @@ public enum MXXMLText {
                 offset = close + 1
             }
             return tags
+        }
+
+        /// Calls `body` for each tag and comment but the `<?xml ?>`
+        /// declaration, in order, with its anchor (see
+        /// ``MXXMLText/blankLines(in:)``) and the gap before it: from the
+        /// end of the tag before (or the start of the text) to its `<`.
+        func forEachTag(_ body: (_ anchor: String, _ gap: Range<Int>) -> Void) {
+            // The open elements' names; nil for those without one.
+            var open: [[UInt8]?] = []
+            var previousEnd: Int = 0
+            /// The path of the open elements, as names joined by "/".
+            func path() -> String {
+                open.compactMap { $0 }.map { String(decoding: $0, as: UTF8.self) }.joined(separator: "/")
+            }
+            for tag in tags() {
+                // SWIFT: `defer` in a loop's body runs at the end of each
+                // pass, `continue` included.
+                defer {
+                    previousEnd = tag.end
+                }
+                let gap: Range<Int> = previousEnd..<tag.start
+                if tag.isComment {
+                    body(text(of: tag), gap)
+                    continue
+                }
+                if byte(at: tag.start + 1) == Bytes.question {
+                    continue
+                }
+                if byte(at: tag.start + 1) == Bytes.slash {
+                    // An end tag: its element is the innermost open one.
+                    let named: Bool = open.last.map { $0 != nil } ?? false
+                    body(named ? "end " + path() : text(of: tag), gap)
+                    _ = open.popLast()
+                    continue
+                }
+                let name: [UInt8]? = nameAttribute(in: tag).map { Array(bytes[$0]) }
+                open.append(name)
+                body(name == nil ? text(of: tag) : path(), gap)
+                let selfClosing: Bool = tag.end - tag.start >= 2 && byte(at: tag.end - 2) == Bytes.slash
+                if selfClosing {
+                    _ = open.popLast()
+                }
+            }
+        }
+
+        /// The whole of `tag`, as a String.
+        func text(of tag: Tag) -> String {
+            String(decoding: bytes[tag.start..<tag.end], as: UTF8.self)
+        }
+
+        /// How many line ends there are in `range`.
+        func newlines(in range: Range<Int>) -> Int {
+            bytes[range].reduce(0) { count, byte in byte == Bytes.newline ? count + 1 : count }
         }
 
         /// The tag's name: `name` in `<name`, `</name`, `<?name`.

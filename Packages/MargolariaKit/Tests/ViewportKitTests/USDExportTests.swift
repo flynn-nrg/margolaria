@@ -24,10 +24,15 @@ import Testing
 import ViewportKit
 
 extension StormRendererTests {
-    /// Exports `document`'s materials as USD to `url`.
-    static func exportUSD(_ document: MXDocument, to url: URL) throws {
+    /// Exports `document`'s materials as USD to `url`, checking OpenUSD
+    /// warned about nothing (M7d). Returns the textures left absolute.
+    @discardableResult
+    static func exportUSD(_ document: MXDocument, to url: URL) throws -> [String] {
         try? FileManager.default.removeItem(at: url)
-        try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(), to: url)
+        let absolute: [String] = try MGUSDExporter.exportMaterials(fromMaterialXString: try document.usdXMLString(),
+                                                                   to: url)
+        #expect(MGUSDExporter.lastExportWarnings.isEmpty, "\(url.lastPathComponent): \(MGUSDExporter.lastExportWarnings)")
+        return absolute
     }
 
     /// Records an issue unless the USD file at `url` stands alone: OpenUSD
@@ -208,7 +213,7 @@ extension StormRendererTests {
         #expect(document.validationIssues().isEmpty, "\(document.validationIssues())")
 
         let usda: URL = folder.appending(path: "bricks.usda")
-        try Self.exportUSD(document, to: usda)
+        #expect(try Self.exportUSD(document, to: usda).isEmpty, "every texture beside the file")
         try Self.expectStandsAlone(usda, defining: ["ND_tint_color3", "ND_tinted_bricks_color3"], "nested")
         // Twice: UsdMtlx writes each nodegraph inside its material and
         // under /MaterialX/NodeGraphs.
@@ -221,7 +226,9 @@ extension StormRendererTests {
         let elsewhere: URL = try Self.exportFolder("USDExportElsewhere")
         defer { try? FileManager.default.removeItem(at: elsewhere) }
         let away: URL = elsewhere.appending(path: "bricks.usda")
-        try Self.exportUSD(document, to: away)
+        // Listed once, for the app to warn about (M7d).
+        let absolute: [String] = try Self.exportUSD(document, to: away)
+        #expect(absolute.count == 1 && absolute.first?.hasSuffix("textures/brick_base_gray.jpg") == true, "\(absolute)")
         let paths: [String] = MGUSDExporter.assetPathsInFile(at: away)
         #expect(!paths.isEmpty && paths.allSatisfy { $0.hasPrefix("/") && $0.hasSuffix("textures/brick_base_gray.jpg") },
                 "\(paths)")

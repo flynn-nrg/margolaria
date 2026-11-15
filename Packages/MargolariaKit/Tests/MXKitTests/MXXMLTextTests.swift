@@ -91,6 +91,48 @@ struct MXXMLTextTests {
         #expect(MXXMLText.elementPath(at: xml.endIndex, in: xml) == nil)
     }
 
+    @Test("Blank lines between elements are kept through edits, undo and the XML tab (M7d)")
+    func blankLines() throws {
+        let xml: String = """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <!-- Constants -->
+              <constant name="a" type="float" />
+
+              <constant name="b" type="float" />
+
+
+              <!-- More -->
+              <nodegraph name="NG">
+
+                <constant name="c" type="float" />
+
+              </nodegraph>
+            </materialx>
+
+            """
+        // Each by its path (an end tag's with "end "), or its whole tag for
+        // a comment; two in a row count two.
+        #expect(MXXMLText.blankLines(in: xml) == ["b": 1, "<!-- More -->": 2, "NG/c": 1, "end NG": 1])
+        let document = try MXDocument(xml: xml)
+        #expect(try document.xmlString() == xml)
+
+        // A node removed takes its blank line with it; the others stay.
+        let original: MXDocument = document.copy()
+        try document.removeNode(at: "b")
+        #expect(try document.xmlString() == xml.replacingOccurrences(of: "\n  <constant name=\"b\" type=\"float\" />\n", with: ""))
+        // A node renamed loses its blank line.
+        _ = try document.renameNode(at: "NG/c", to: "d")
+        #expect(try !document.xmlString().contains("\n\n    <constant name=\"d\""))
+        // Undo puts them back.
+        document.restore(from: original)
+        #expect(try document.xmlString() == xml)
+
+        // Text applied in the XML tab brings its own.
+        try document.replaceContents(withText: xml.replacingOccurrences(of: "\n\n\n  <!-- More -->", with: "\n  <!-- More -->"))
+        #expect(MXXMLText.blankLines(in: try document.xmlString()) == ["b": 1, "NG/c": 1, "end NG": 1])
+    }
+
     @Test("XML comments survive reading and writing, and aren't listed as elements")
     func commentsKept() throws {
         let document = try MXDocument.read(from: Fixtures.url("brushed_copper.mtlx"))

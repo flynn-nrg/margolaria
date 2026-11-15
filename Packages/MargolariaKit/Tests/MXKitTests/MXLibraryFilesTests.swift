@@ -34,12 +34,21 @@ struct MXLibraryFilesTests {
         return url
     }
 
-    @Test("Paths: relative inside the document's folder, absolute elsewhere")
+    @Test("Paths: relative when the folders share one three levels down (M7d), absolute otherwise")
     func hrefs() {
         let folder = URL(filePath: "/Users/me/project/")
         #expect(MXDocument.href(for: URL(filePath: "/Users/me/project/lib/tint.mtlx"), from: folder) == "lib/tint.mtlx")
+        // Sharing only the home folder: absolute.
         #expect(MXDocument.href(for: URL(filePath: "/Users/me/other/tint.mtlx"), from: folder) == "/Users/me/other/tint.mtlx")
         #expect(MXDocument.href(for: URL(filePath: "/Users/me/other/tint.mtlx"), from: nil) == "/Users/me/other/tint.mtlx")
+        // My Library, from the folder new documents are saved in.
+        let materials = URL(filePath: "/Users/me/Documents/Margolaria/Materials/")
+        #expect(MXDocument.href(for: URL(filePath: "/Users/me/Documents/Margolaria/Libraries/tint.mtlx"), from: materials)
+                == "../Libraries/tint.mtlx")
+        #expect(MXDocument.href(for: URL(filePath: "/Users/me/Documents/Shared/lib/tint.mtlx"), from: materials)
+                == "../../Shared/lib/tint.mtlx")
+        #expect(MXDocument.href(for: URL(filePath: "/Volumes/Work/show/lib/tint.mtlx"), from: materials)
+                == "/Volumes/Work/show/lib/tint.mtlx")
     }
 
     @Test("A library file holds the nodedef and its graph; a folder lists it, not the document itself")
@@ -123,6 +132,45 @@ struct MXLibraryFilesTests {
         let included: String = try #require(reopened.implementation(of: "ND_tint_color3"))
         #expect(reopened.isIncluded(included))
         #expect(MXNodeCatalog(document: reopened).kind(named: "tint") != nil)
+    }
+
+    @Test("Saved elsewhere, an include is written relative to where the file goes, and still found (M7d)")
+    func includeFollowsTheFile() throws {
+        let (document, implementation) = try definingDocument()
+        let root: URL = try folder()
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["Libraries", "Materials", "Elsewhere/deeper"] {
+            try FileManager.default.createDirectory(at: root.appending(path: name), withIntermediateDirectories: true)
+        }
+        let file: URL = root.appending(path: "Libraries/tint.mtlx")
+        try document.libraryText(forDefinitionAt: implementation).write(to: file, atomically: true, encoding: .utf8)
+
+        // Untitled: included by absolute path, and written so (no folder).
+        let user = try MXDocument(xml: #"<?xml version="1.0"?><materialx version="1.39" />"#)
+        user.setDataLibrary(try MXLibrary.bundled.get())
+        try user.include(library: file, from: nil)
+        try user.addNode(nodeDef: "ND_tint_color3")
+        let absolute: String = file.standardizedFileURL.path(percentEncoded: false)
+        #expect(try user.xmlString().contains(#"<xi:include href="\#(absolute)" />"#))
+
+        // The first save, beside the library's folder: relative.
+        let first: URL = root.appending(path: "Materials/user.mtlx")
+        try user.xmlString(savingIn: first.deletingLastPathComponent()).write(to: first, atomically: true, encoding: .utf8)
+        #expect(try String(contentsOf: first, encoding: .utf8).contains(#"<xi:include href="../Libraries/tint.mtlx" />"#))
+
+        // Reopened, then saved as somewhere else: relative from there.
+        let reopened = try MXDocument.read(from: first)
+        reopened.setDataLibrary(try MXLibrary.bundled.get())
+        #expect(try reopened.xmlString() == (try String(contentsOf: first, encoding: .utf8)), "saved where it was: the same")
+        let moved: URL = root.appending(path: "Elsewhere/deeper/user.mtlx")
+        try reopened.xmlString(savingIn: moved.deletingLastPathComponent()).write(to: moved, atomically: true, encoding: .utf8)
+        #expect(try String(contentsOf: moved, encoding: .utf8).contains(#"<xi:include href="../../Libraries/tint.mtlx" />"#))
+        // Writing changed nothing in the document itself.
+        #expect(try reopened.xmlString().contains(#"<xi:include href="../Libraries/tint.mtlx" />"#))
+        let movedReopened = try MXDocument.read(from: moved)
+        movedReopened.setDataLibrary(try MXLibrary.bundled.get())
+        #expect(movedReopened.validationIssues().isEmpty, "\(movedReopened.validationIssues())")
+        #expect(movedReopened.isIncluded("ND_tint_color3"))
     }
 
     @Test("Refused: a name the document already uses, and a definition using another made in its document")
