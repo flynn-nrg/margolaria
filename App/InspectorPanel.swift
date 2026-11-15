@@ -286,7 +286,7 @@ private struct NodeHeader: View {
                     toggleSolo()
                 }
                 .controlSize(.small)
-                .help("Solo: show this node's output on the viewport's sphere, on its own (⌥-click its swatch on the canvas, or press S)")
+                .help("Solo: show this node's output on the viewport's sphere, on its own (⌥-click its swatch on the canvas, or press S or P there)")
             }
             // A swatch that couldn't be drawn (M3c) says why here: the
             // canvas only shows "No preview".

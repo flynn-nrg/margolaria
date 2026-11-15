@@ -14,7 +14,8 @@
 //     Space + drag;
 //   - zoom around the pointer: pinch, mouse wheel, or ⌥-scroll.
 // Tab asks the app for its node search (M2e). The keys are actions too,
-// in the Graph menu and the command palette (M4f). The right button is kept
+// in the Graph menu and the command palette (M4f), and all of them are in
+// Shortcuts.swift (M7g). The right button is kept
 // free for a context menu. Copy, Cut, Paste, Duplicate, Collapse into
 // Nodegraph and Ungroup come from the menus, through the responder chain
 // (M4a), and so does Group in Backdrop (M4d).
@@ -22,7 +23,8 @@
 // Introduces (SWIFT): `open class` vs `final class`, `isFlipped` override as
 // a computed property, `convert(_:from:)`, `NSEvent.ModifierFlags` option
 // sets, building an NSMenu in code with `#selector` actions;
-// `NSMenuItemValidation` in an extension (M4a).
+// `NSMenuItemValidation` in an extension (M4a); a `case` matching a value
+// computed elsewhere (M7g).
 
 import AppKit
 
@@ -97,7 +99,12 @@ public class GraphEventView: NSView {
 
     /// Keyboard shortcuts, as in MaterialX's Graph Editor (PLAN.md §4.2):
     /// A frames everything, F the selection, U leaves a nodegraph; Tab adds
-    /// a node (M2e); S solos the selected node, as ⌥-click does (M3d).
+    /// a node (M2e); S solos the selected node, as ⌥-click does (M3d), and
+    /// so does P, the Graph Editor's key (M7g); Return opens the selected
+    /// nodegraph, L arranges the level (M7g). The keys are Shortcuts.swift's.
+    /// While the canvas has focus, the menus have most of them too, and
+    /// take them first; these are for P, which has no menu item, and for a
+    /// canvas without the app's menus (tests, the spikes).
     public override func keyDown(with event: NSEvent) {
         // Only plain keys; ⌘A and friends go to the menus.
         let modifiers: NSEvent.ModifierFlags = event.modifierFlags.intersection([.command, .option, .control])
@@ -110,15 +117,21 @@ public class GraphEventView: NSView {
             // Key repeat sends more key-downs while Space stays down; one
             // is enough.
             spaceHeld = true
-        case "a":
+        // SWIFT: `case Shortcut.frameAll.key:` matches a value computed
+        // elsewhere, not only a literal: Swift compares it with `==`.
+        case Shortcut.frameAll.key:
             frameAll(nil)
-        case "f":
+        case Shortcut.frameSelection.key:
             frameSelection(nil)
-        case "u":
+        case Shortcut.goUp.key:
             goUpOneLevel(nil)
-        case "s":
+        case Shortcut.solo.key, Shortcut.soloPin.key:
             showSelectionAlone(nil)
-        case "\t":
+        case Shortcut.arrange.key:
+            arrange(nil)
+        case Shortcut.openNode.key:
+            openSelectedNode(nil)
+        case Shortcut.addNode.key:
             // Tab: add a node where the pointer is (M2e).
             addNode(nil)
         case "\u{1B}":
@@ -240,22 +253,30 @@ public class GraphEventView: NSView {
         controller.onNavigateUp?()
     }
 
-    /// S: solo the selected node, or stop. Not in the Graph menu: the
-    /// inspector's Show in Viewport Alone does it, from anywhere, and the
-    /// palette lists that one (with S as its key).
+    /// Graph > Show in Viewport Alone (S, or P): solo the selected node,
+    /// or stop.
     @objc public func showSelectionAlone(_ sender: Any?) {
         if !controller.soloSelection() {
             NSSound.beep()
         }
     }
 
-    /// The canvas keys of the actions above, for the palette to show.
-    public static let keys: [Selector: String] = [
-        #selector(addNode(_:)): "⇥",
-        #selector(frameAll(_:)): "A",
-        #selector(frameSelection(_:)): "F",
-        #selector(goUpOneLevel(_:)): "U",
-    ]
+    /// Graph > Open Nodegraph (Return, M7g): opens the selected node, as a
+    /// double-click does.
+    @objc public func openSelectedNode(_ sender: Any?) {
+        if !controller.openSelection() {
+            NSSound.beep()
+        }
+    }
+
+    /// Graph > Arrange (L, M7g): the canvas bar's Arrange button.
+    @objc public func arrange(_ sender: Any?) {
+        guard let onArrange = controller.onArrange else {
+            NSSound.beep()
+            return
+        }
+        onArrange()
+    }
 
     /// Keeps the controller's idea of the view size current, for framing.
     /// AppKit calls this whenever the view's size changes.
@@ -420,6 +441,15 @@ extension GraphEventView: NSMenuItemValidation {
         if menuItem.action == #selector(goUpOneLevel(_:)) {
             // Set only inside a nodegraph (GraphPanel).
             return controller.onNavigateUp != nil
+        }
+        if menuItem.action == #selector(showSelectionAlone(_:)) {
+            return controller.selection.count == 1
+        }
+        if menuItem.action == #selector(openSelectedNode(_:)) {
+            return controller.canOpenSelection
+        }
+        if menuItem.action == #selector(arrange(_:)) {
+            return controller.onArrange != nil && !controller.model.nodes.isEmpty
         }
         if menuItem.action == #selector(delete(_:)) {
             let deletable: GraphDeletion = controller.deletableSelection

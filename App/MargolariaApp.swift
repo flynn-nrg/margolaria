@@ -142,6 +142,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    // MARK: Node previews (M7g)
+
+    /// The user defaults key of the canvas bar's swatch toggle
+    /// (GraphPanel's `@AppStorage`), which every window follows.
+    static let showsNodePreviewsKey: String = "showsNodePreviews"
+
+    /// Graph > Show Node Previews: the canvas bar's toggle, for every
+    /// window. `@AppStorage` sees the change and redraws them.
+    @objc func toggleNodePreviews(_ sender: Any?) {
+        let defaults = UserDefaults.standard
+        let shows: Bool = defaults.object(forKey: Self.showsNodePreviewsKey) as? Bool ?? true
+        defaults.set(!shows, forKey: Self.showsNodePreviewsKey)
+    }
+
     // MARK: Settings (M7f)
 
     /// Margolaria > Settings… (⌘,): shows the Settings window
@@ -190,13 +204,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSMenuItemValidation {
     /// Stop Script while a script runs; Reload Startup Scripts while none
-    /// does (they would be refused).
+    /// does (they would be refused). Show Node Previews checked while
+    /// they are shown.
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
         switch item.action {
         case #selector(stopScript(_:)):
             return ScriptRun.current.map { !$0.isStopping } ?? false
         case #selector(reloadStartupScripts(_:)):
             return ScriptRun.current == nil && !StartupScripts.isRunning
+        case #selector(toggleNodePreviews(_:)):
+            let shows: Bool = UserDefaults.standard.object(forKey: Self.showsNodePreviewsKey) as? Bool ?? true
+            item.state = shows ? .on : .off
+            return true
         default:
             return true
         }

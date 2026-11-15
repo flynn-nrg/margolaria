@@ -22,6 +22,7 @@
 // own field editor (M6c).
 
 import AppKit
+import GraphKit
 import MXKit
 import ScriptKit
 import SwiftUI
@@ -60,6 +61,8 @@ struct BottomPanel: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .fixedSize()
+                .help("XML \(Shortcut.xmlPanel.symbols) · Issues \(Shortcut.issuesPanel.symbols) · "
+                      + "Generated Shader \(Shortcut.shaderPanel.symbols) · Console \(Shortcut.consolePanel.symbols)")
                 Spacer()
             }
             .padding(.horizontal, 10)

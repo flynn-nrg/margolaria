@@ -340,9 +340,18 @@ public final class GraphCanvasController {
     /// bookkeeping that views never display should be ignored like this.
     @ObservationIgnored public var onOpenNode: (@MainActor (Int) -> Void)? = nil
 
+    /// True if the node with this ID opens (``onOpenNode`` does
+    /// something for it), for enabling Graph > Open Nodegraph (M7g). Nil:
+    /// any node may.
+    @ObservationIgnored public var canOpenNode: (@MainActor (Int) -> Bool)? = nil
+
     /// Called when the user asks to leave the current graph (the U key).
     /// Nil at the top level, where there is nowhere to go.
     @ObservationIgnored public var onNavigateUp: (@MainActor () -> Void)? = nil
+
+    /// Called for Graph > Arrange (the L key, M7g): the app lays the level
+    /// out again, as its Arrange button does. Nil when it can't.
+    @ObservationIgnored public var onArrange: (@MainActor () -> Void)? = nil
 
     /// Called when a drag has moved nodes or backdrops, or resized a
     /// backdrop, when the mouse button is released (see ``GraphMove``).
@@ -1265,6 +1274,25 @@ public final class GraphCanvasController {
             return false
         }
         onSoloNode?(id)
+        return true
+    }
+
+    /// True if exactly one node is selected, and it opens (canOpenNode).
+    public var canOpenSelection: Bool {
+        guard selection.count == 1, let id = selection.first else {
+            return false
+        }
+        return canOpenNode?(id) ?? true
+    }
+
+    /// Opens the selected node, as a double-click on it does (the Return
+    /// key, M7g). Returns false, doing nothing, unless canOpenSelection.
+    @discardableResult
+    public func openSelection() -> Bool {
+        guard canOpenSelection, let id = selection.first else {
+            return false
+        }
+        onOpenNode?(id)
         return true
     }
 

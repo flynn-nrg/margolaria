@@ -80,9 +80,10 @@ public enum MenuCommands {
     ///
     /// - Parameters:
     ///   - skipping: actions left out (the palette's own item).
-    ///   - keys: shortcuts to show for actions whose items have none: the
-    ///     canvas's single keys, which can't be menu key equivalents
-    ///     without taking those letters from every text field.
+    ///   - keys: shortcuts to show for actions whose items have none right
+    ///     now. The app passes none since M7g: the canvas's single keys are
+    ///     on their items while the canvas has focus (MainMenu.swift), the
+    ///     only time their commands are enabled and listed.
     public static func commands(in menu: NSMenu, skipping: Set<Selector> = [],
                                 keys: [Selector: String] = [:]) -> [PaletteCommand] {
         var commands: [PaletteCommand] = []
@@ -138,7 +139,10 @@ public enum MenuCommands {
     }
 
     /// See ``shortcut(of:)``.
-    public static func shortcut(key: String, modifiers: NSEvent.ModifierFlags) -> String {
+    ///
+    /// `nonisolated`: it only formats its arguments, so Shortcuts.swift's
+    /// table may call it from any thread (M7g).
+    public nonisolated static func shortcut(key: String, modifiers: NSEvent.ModifierFlags) -> String {
         guard !key.isEmpty else {
             return ""
         }

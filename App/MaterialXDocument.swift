@@ -766,8 +766,7 @@ final class MaterialXDocument: NSDocument {
             focus = field
         }
         focusBeforePalette = focus
-        paletteCommands = MenuCommands.commands(in: menuBar, skipping: [#selector(showCommandPalette(_:))],
-                                                keys: GraphEventView.keys)
+        paletteCommands = MenuCommands.commands(in: menuBar, skipping: [#selector(showCommandPalette(_:))])
     }
 
     /// Closes the command palette, and puts the focus back where it was.
@@ -777,6 +776,80 @@ final class MaterialXDocument: NSDocument {
             windowControllers.first?.window?.makeFirstResponder(focus)
         }
         focusBeforePalette = nil
+    }
+
+    // MARK: The window's layout (M7g)
+
+    // What the window shows, here rather than in ContentView's state so
+    // the View menu's items (MainMenu.swift) can change it and show it.
+
+    /// The main area: Graph, Split or Text.
+    var viewMode: ViewMode = .split
+    /// The bottom panel's tab.
+    var bottomTab: BottomTab = .xml
+    /// The sidebar's tab.
+    var sidebarTab: SidebarTab = .document
+    /// Whether the viewport is shown, at the top of the right-hand column.
+    var showsViewport: Bool = true
+    /// Whether the inspector is shown, under the viewport.
+    var showsInspector: Bool = true
+
+    /// Shows a tab of the bottom panel, and the panel.
+    func showPanel(_ tab: BottomTab) {
+        if viewMode == .graph {
+            viewMode = .split
+        }
+        bottomTab = tab
+    }
+
+    @objc func showGraphView(_ sender: Any?) { viewMode = .graph }
+    @objc func showSplitView(_ sender: Any?) { viewMode = .split }
+    @objc func showTextView(_ sender: Any?) { viewMode = .text }
+    @objc func showXMLPanel(_ sender: Any?) { showPanel(.xml) }
+    @objc func showIssuesPanel(_ sender: Any?) { showPanel(.issues) }
+    @objc func showShaderPanel(_ sender: Any?) { showPanel(.shader) }
+    @objc func showConsolePanel(_ sender: Any?) { showPanel(.console) }
+    @objc func showDocumentSidebar(_ sender: Any?) { sidebarTab = .document }
+    @objc func showLibrarySidebar(_ sender: Any?) { sidebarTab = .library }
+    @objc func toggleViewport(_ sender: Any?) { showsViewport.toggle() }
+    @objc func toggleInspector(_ sender: Any?) { showsInspector.toggle() }
+
+    /// The View menu's items show what the window shows: a checkmark on
+    /// the view mode and the tabs shown, Show or Hide for the panels.
+    ///
+    /// SWIFT: NSDocument enables its menu items through this method of
+    /// NSUserInterfaceValidations; the item is a menu item when `as?`
+    /// says so (a toolbar item could ask too).
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        guard let menuItem = item as? NSMenuItem, let action = item.action else {
+            return super.validateUserInterfaceItem(item)
+        }
+        let panelShown: Bool = viewMode != .graph
+        let checks: [Selector: Bool] = [
+            #selector(showGraphView(_:)): viewMode == .graph,
+            #selector(showSplitView(_:)): viewMode == .split,
+            #selector(showTextView(_:)): viewMode == .text,
+            #selector(showXMLPanel(_:)): panelShown && bottomTab == .xml,
+            #selector(showIssuesPanel(_:)): panelShown && bottomTab == .issues,
+            #selector(showShaderPanel(_:)): panelShown && bottomTab == .shader,
+            #selector(showConsolePanel(_:)): panelShown && bottomTab == .console,
+            #selector(showDocumentSidebar(_:)): sidebarTab == .document,
+            #selector(showLibrarySidebar(_:)): sidebarTab == .library,
+        ]
+        if let checked = checks[action] {
+            menuItem.state = checked ? .on : .off
+            return true
+        }
+        switch action {
+        case #selector(toggleViewport(_:)):
+            menuItem.title = showsViewport ? "Hide Viewport" : "Show Viewport"
+            return true
+        case #selector(toggleInspector(_:)):
+            menuItem.title = showsInspector ? "Hide Inspector" : "Show Inspector"
+            return true
+        default:
+            return super.validateUserInterfaceItem(item)
+        }
     }
 
     // MARK: Editing
