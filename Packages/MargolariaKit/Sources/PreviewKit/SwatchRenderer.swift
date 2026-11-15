@@ -157,7 +157,12 @@ public final class SwatchRenderer {
     public let commandQueue: any MTLCommandQueue
 
     private let geometry: SwatchGeometry
-    private var environment: SwatchEnvironment
+    /// The environment, by the colour space of its values (M7e): the
+    /// image's own (lin_rec709) first, the others made when a shader
+    /// computing in them is first drawn.
+    private var environments: [String: SwatchEnvironment]
+    /// The image the swatches are lit by.
+    public private(set) var environmentURL: URL
     /// Samples environment maps: linear filtering between pixels and mips,
     /// wrapping horizontally (longitude), clamped vertically (latitude).
     private let environmentSampler: any MTLSamplerState
@@ -178,8 +183,9 @@ public final class SwatchRenderer {
 
     /// The view transform swatches are shown with, or nil for plain sRGB.
     public private(set) var viewTransform: ViewTransform?
-    /// Turns the linear render into the display's encoding.
-    private var displayPass: DisplayPass
+    /// Turn the linear render into the display's encoding, one for each
+    /// colour space renders are in (M7e), made when first needed.
+    private var displayPasses: [String: DisplayPass] = [:]
     /// The same for data swatches (M3d): the display's Raw view, which
     /// shows values unconverted (see ViewTransform.raw).
     private var dataPass: DisplayPass
@@ -210,11 +216,13 @@ public final class SwatchRenderer {
         self.device = device
         self.commandQueue = queue
         self.geometry = try SwatchGeometry(device: device)
-        self.environment = try SwatchEnvironment(imageURL: try environmentURL ?? SwatchEnvironment.defaultImageURL(),
-                                                 queue: queue)
+        let imageURL: URL = try environmentURL ?? SwatchEnvironment.defaultImageURL()
+        let environment = try SwatchEnvironment(imageURL: imageURL, queue: queue)
+        self.environments = [environment.colorSpace: environment]
+        self.environmentURL = imageURL
         self.textureLoader = MTKTextureLoader(device: device)
         self.viewTransform = viewTransform
-        self.displayPass = try Self.makeDisplayPass(for: viewTransform, device: device)
+        self.displayPasses = [ViewTransform.sceneSpace: try Self.makeDisplayPass(for: viewTransform, device: device)]
         self.dataPass = try Self.makeDisplayPass(for: viewTransform?.raw ?? viewTransform, device: device)
 
         let samplerDescriptor = MTLSamplerDescriptor()
@@ -258,19 +266,26 @@ public final class SwatchRenderer {
 
     // MARK: Settings
 
-    /// The image the swatches are lit by.
-    public var environmentURL: URL {
-        environment.imageURL
-    }
-
     /// Lights the swatches with the image at `url` (nil: StinsonBeach.hdr).
     /// Does nothing if that is the image already in use.
     public func setEnvironment(_ url: URL?) throws {
         let imageURL: URL = try url ?? SwatchEnvironment.defaultImageURL()
-        guard imageURL != environment.imageURL else {
+        guard imageURL != environmentURL else {
             return
         }
-        environment = try SwatchEnvironment(imageURL: imageURL, queue: commandQueue)
+        let environment = try SwatchEnvironment(imageURL: imageURL, queue: commandQueue)
+        environments = [environment.colorSpace: environment]
+        environmentURL = imageURL
+    }
+
+    /// The environment with its values in `space`, made the first time.
+    private func environment(in space: String) throws -> SwatchEnvironment {
+        if let environment = environments[space] {
+            return environment
+        }
+        let environment = try SwatchEnvironment(imageURL: environmentURL, colorSpace: space, queue: commandQueue)
+        environments[space] = environment
+        return environment
     }
 
     /// Shows the swatches with `transform` (nil: plain sRGB).
@@ -278,17 +293,29 @@ public final class SwatchRenderer {
         guard transform != viewTransform else {
             return
         }
-        displayPass = try Self.makeDisplayPass(for: transform, device: device)
+        displayPasses = [ViewTransform.sceneSpace: try Self.makeDisplayPass(for: transform, device: device)]
         dataPass = try Self.makeDisplayPass(for: transform?.raw ?? transform, device: device)
         viewTransform = transform
     }
 
     /// The pass for `transform`, writing 8-bit display values: the
     /// transform's output is already encoded for the display, so 8 bits
-    /// lose nothing a screen shows.
-    private static func makeDisplayPass(for transform: ViewTransform?, device: any MTLDevice) throws -> DisplayPass {
+    /// lose nothing a screen shows. From renders in `space`; the Raw view
+    /// of data swatches converts nothing, whatever the space.
+    private static func makeDisplayPass(for transform: ViewTransform?, from space: String = ViewTransform.sceneSpace,
+                                        device: any MTLDevice) throws -> DisplayPass {
         try DisplayPass(device: device, pixelFormat: .rgba8Unorm, encoding: .linearPremultiplied,
-                        transform: transform?.shader())
+                        transform: transform?.shader(from: space))
+    }
+
+    /// The display pass for renders in `space`, made the first time.
+    private func displayPass(from space: String) throws -> DisplayPass {
+        if let pass = displayPasses[space] {
+            return pass
+        }
+        let pass: DisplayPass = try Self.makeDisplayPass(for: viewTransform, from: space, device: device)
+        displayPasses[space] = pass
+        return pass
     }
 
     // MARK: Pipelines
@@ -334,8 +361,9 @@ public final class SwatchRenderer {
 
     // MARK: Rendering
 
-    /// Renders `shader` on the sphere and returns the image (linear colour,
-    /// premultiplied by alpha, RGBA16Float, `size` × `size` pixels).
+    /// Renders `shader` on the sphere and returns the image (linear colour
+    /// in the shader's colour space, premultiplied by alpha, RGBA16Float,
+    /// `size` × `size` pixels).
     public func render(_ shader: MXGeneratedShader, size: Int) throws -> any MTLTexture {
         let commandBuffer: any MTLCommandBuffer = try makeCommandBuffer()
         let target: any MTLTexture = try encodeRender(shader, size: size, in: commandBuffer)
@@ -359,7 +387,9 @@ public final class SwatchRenderer {
         guard let display = device.makeTexture(descriptor: descriptor) else {
             throw PreviewError.metal("Could not create a \(size)×\(size) texture")
         }
-        (showsData ? dataPass : displayPass).encode(from: linear, to: display, in: commandBuffer)
+        // Through the transform from the space the shader computed in.
+        (showsData ? dataPass : try displayPass(from: shader.colorSpace)).encode(from: linear, to: display,
+                                                                                 in: commandBuffer)
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         if let error = commandBuffer.error {
@@ -425,12 +455,16 @@ public final class SwatchRenderer {
         encoder.setDepthStencilState(depthState)
         encoder.setVertexBuffer(geometry.vertexBuffer, offset: 0, index: SwatchGeometry.bufferIndex)
 
-        let values: [String: [Float]] = uniformValues(for: shader)
+        // Lit by the environment in the shader's colour space (M7e).
+        let environment: SwatchEnvironment = try environment(in: shader.colorSpace)
+        let values: [String: [Float]] = uniformValues(for: shader, environment: environment)
         let files: [String: String] = Dictionary(
             shader.uniforms.filter { $0.type == "filename" }.map { ($0.name, $0.stringValue) },
             uniquingKeysWith: { first, _ in first })
-        try bind(pipeline.reflection.vertexBindings, values: values, files: files, encoder: encoder, stage: .vertex)
-        try bind(pipeline.reflection.fragmentBindings, values: values, files: files, encoder: encoder, stage: .fragment)
+        try bind(pipeline.reflection.vertexBindings, values: values, files: files, environment: environment,
+                 encoder: encoder, stage: .vertex)
+        try bind(pipeline.reflection.fragmentBindings, values: values, files: files, environment: environment,
+                 encoder: encoder, stage: .fragment)
 
         encoder.drawIndexedPrimitives(type: .triangle, indexCount: geometry.indexCount,
                                       indexType: .uint32, indexBuffer: geometry.indexBuffer,
@@ -497,7 +531,7 @@ public final class SwatchRenderer {
 
     /// Every value we know, by uniform name: the shader's defaults, then the
     /// values the renderer is responsible for (camera, environment, lights).
-    private func uniformValues(for shader: MXGeneratedShader) -> [String: [Float]] {
+    private func uniformValues(for shader: MXGeneratedShader, environment: SwatchEnvironment) -> [String: [Float]] {
         var values: [String: [Float]] = [:]
         for uniform in shader.uniforms where !uniform.value.isEmpty {
             if uniform.type == "matrix44" && uniform.value.count == 16 {
@@ -561,7 +595,7 @@ public final class SwatchRenderer {
     /// members by name), and binds textures and samplers by name.
     /// `files` gives the path of each file texture, by uniform name.
     private func bind(_ bindings: [any MTLBinding], values: [String: [Float]], files: [String: String],
-                      encoder: any MTLRenderCommandEncoder, stage: Stage) throws {
+                      environment: SwatchEnvironment, encoder: any MTLRenderCommandEncoder, stage: Stage) throws {
         for binding in bindings where binding.isUsed {
             switch binding.type {
             case .buffer:

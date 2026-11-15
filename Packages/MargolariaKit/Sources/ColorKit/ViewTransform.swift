@@ -30,9 +30,10 @@ public struct ViewTransform: Hashable, Sendable {
         self.view = view
     }
 
-    /// The colour space renders are in: MaterialX's default working space,
-    /// which Storm's MaterialX shaders and the swatches' generated ones
-    /// convert every input to.
+    /// The colour space renders are in by default: MaterialX's default
+    /// working space, which Storm's MaterialX shaders convert every input
+    /// to. Since M7e, a swatch is in its document's working space, which
+    /// may be another (``shader(from:)``).
     public static let sceneSpace: String = "lin_rec709"
 
     /// The Core Graphics colour space of each display offered: what the
@@ -111,10 +112,12 @@ public struct ViewTransform: Hashable, Sendable {
         Self.displayColorSpaces[display].flatMap { CGColorSpace(name: $0 as CFString) }
     }
 
-    /// The transform as Metal code, for PreviewKit's DisplayPass.
+    /// The transform as Metal code, for PreviewKit's DisplayPass: from
+    /// renders in `space` (M7e: the swatches compute in the document's
+    /// working space; Storm, always in ``sceneSpace``).
     ///
     /// - Throws: ColorKit's error if OCIO is unavailable or a name unknown.
-    public func shader() throws -> GPUShader {
-        try ColorConfiguration.studio.get().displayShader(from: Self.sceneSpace, display: display, view: view)
+    public func shader(from space: String = sceneSpace) throws -> GPUShader {
+        try ColorConfiguration.studio.get().displayShader(from: space, display: display, view: view)
     }
 }

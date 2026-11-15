@@ -90,6 +90,9 @@ struct GeneratedShader {
     std::string outputType;
     /// Every uniform of both stages, with default values where known.
     std::vector<ShaderUniform> uniforms;
+    /// The colour space the shader computes in, and its colours are in
+    /// (M7e): "lin_rec709" or "acescg".
+    std::string colorSpace;
 };
 
 /// The languages Document::generateCode() writes (M5d).
@@ -824,8 +827,10 @@ public:
     /// colour values and colour images without a `colorspace` of their own
     /// or on any element in between. Included elements, nodedefs and
     /// nodegraphs that implement a nodedef are left out: they aren't
-    /// edited here.
-    std::vector<ColorUse> colorsInWorkingSpace(const std::string& path) const;
+    /// edited here. With `defaults` (M7e), instead, the colour inputs nodes
+    /// leave at their nodedef's default, whose numbers are read in the
+    /// working space too.
+    std::vector<ColorUse> colorsInWorkingSpace(const std::string& path, bool defaults = false) const;
 
     /// Sets the `colorspace` of the document (`path` "") or of the
     /// nodegraph at `path`; "" removes it. Values are left as they are.
@@ -834,9 +839,11 @@ public:
     /// Generates a Metal shader for the element at `elementPath`: a node, a
     /// node's output or a material, for example "NG_copper/grain" or
     /// "M_BrushedCopper". The library provides the node implementations and
-    /// must be the one set with setDataLibrary().
+    /// must be the one set with setDataLibrary(). The shader computes in
+    /// `colorSpace` as generateCode's does (M7e: the swatches, in the
+    /// document's working space); `shader.colorSpace` says which.
     /// Returns false and sets `errorMessage` if generation fails.
-    bool generateMsl(const std::string& elementPath, const Library& library,
+    bool generateMsl(const std::string& elementPath, const Library& library, const std::string& colorSpace,
                      GeneratedShader& shader, std::string& errorMessage) const;
 
     /// Generates `language`'s code for the element at `elementPath`, as

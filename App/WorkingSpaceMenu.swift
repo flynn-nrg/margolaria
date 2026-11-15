@@ -9,12 +9,14 @@
 // menu asks first:
 //
 //   Convert Colours   they keep their look: values are converted to the
-//                     new space, images tagged with the old one
+//                     new space (coloured defaults too, set on their
+//                     nodes, M7e), images tagged with the old one
 //   Keep Numbers      the same numbers, now meaning colours in the new space
 //
 // Either way it is one undo step.
 //
-// Introduces (SWIFT): `.confirmationDialog(_:isPresented:presenting:)`.
+// Introduces (SWIFT): `.confirmationDialog(_:isPresented:presenting:)`; a
+// static method used as a function value (M7e).
 
 import ColorKit
 import MXKit
@@ -33,6 +35,8 @@ struct WorkingSpaceMenu: View {
         let title: String
         let values: Int
         let images: Int
+        /// How many of `values` are inputs left at their default (M7e).
+        let defaults: Int
     }
 
     @State private var pending: PendingChange? = nil
@@ -74,7 +78,7 @@ struct WorkingSpaceMenu: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { change in
-            Text(Self.message(values: change.values, images: change.images))
+            Text(Self.message(values: change.values, images: change.images, defaults: change.defaults))
         }
     }
 
@@ -93,38 +97,60 @@ struct WorkingSpaceMenu: View {
             return
         }
         let title: String = space ?? current.inheritedOrDefault
-        let uses: [MXColorUse] = document.content.colorsInWorkingSpace(of: path)
+        // The colours set, and the coloured defaults (M7e): those whose
+        // numbers converting would change. If OCIO can't say, only the
+        // colours set count.
+        let uses: [MXColorUse] = (try? document.content.colorsToConvert(of: path, to: space,
+                                                                         convert: Self.convert(_:from:to:)))
+            ?? document.content.colorsInWorkingSpace(of: path)
         if uses.isEmpty || (space ?? current.inheritedOrDefault) == current.active {
             apply(space, title: title, converting: false)
             return
         }
         let images: Int = uses.filter(\.isFile).count
-        pending = PendingChange(space: space, title: title, values: uses.count - images, images: images)
+        pending = PendingChange(space: space, title: title, values: uses.count - images, images: images,
+                                defaults: uses.filter(\.isDefault).count)
     }
 
-    /// "3 colour values and 1 image are in the current working space…"
-    private static func message(values: Int, images: Int) -> String {
+    /// "3 colour values (2 of them defaults) and 1 image are in the
+    /// current working space…"
+    private static func message(values: Int, images: Int, defaults: Int) -> String {
         var parts: [String] = []
         if values > 0 {
-            parts.append(values == 1 ? "1 colour value" : "\(values) colour values")
+            var part: String = values == 1 ? "1 colour value" : "\(values) colour values"
+            if defaults > 0 {
+                part += defaults == values
+                    ? (values == 1 ? " (a node's default)" : " (nodes' defaults)")
+                    : " (\(defaults) of them nodes' defaults)"
+            }
+            parts.append(part)
         }
         if images > 0 {
             parts.append(images == 1 ? "1 image" : "\(images) images")
         }
         let verb: String = values + images == 1 ? "is" : "are"
         return "\(parts.joined(separator: " and ")) \(verb) in the current working space. "
-            + "Convert Colours keeps their look: values are converted, and images are tagged with the current space. "
+            + "Convert Colours keeps their look: values are converted (defaults set on their nodes), "
+            + "and images are tagged with the current space. "
             + "Keep Numbers leaves them as they are, so they mean colours in the new space."
+    }
+
+    /// ColorKit's conversion, passed to MXKit, which doesn't know about
+    /// OCIO.
+    private static func convert(_ numbers: [Double], from: String, to: String) throws -> [Double] {
+        try InputColorSpace.convert(numbers, from: from, to: to)
     }
 
     /// Makes the change, as one undo step.
     private func apply(_ space: String?, title: String, converting: Bool) {
         let path: String = path
-        // SWIFT: A function value: ColorKit's conversion, passed to MXKit,
-        // which doesn't know about OCIO.
-        let convert: (([Double], String, String) throws -> [Double])? = converting
-            ? { numbers, from, to in try InputColorSpace.convert(numbers, from: from, to: to) }
-            : nil
+        // SWIFT: A function value: `Self.convert(_:from:to:)`, a static
+        // method named (with its labels) without calling it, is a value of
+        // its function type, whose parameters have no labels.
+        var convert: (([Double], String, String) throws -> [Double])? = nil
+        if converting {
+            convert = Self.convert(_:from:to:)
+        }
         document.edit("Set Working Space to \(title)") { content in
             try content.setWorkingSpace(space, of: path, convert: convert)
         }

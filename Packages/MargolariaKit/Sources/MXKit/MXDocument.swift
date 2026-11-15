@@ -466,13 +466,20 @@ public final class MXDocument {
     /// "NG_copper/grain" (a node in a nodegraph) or "M_BrushedCopper" (a
     /// material). `library` must be the one set with ``setDataLibrary(_:)``.
     ///
+    /// The shader computes in `colorSpace`, as ``generateCode(for:in:library:colorSpace:)``'s
+    /// do: lin_rec709 (the default) or acescg; the swatches pass the
+    /// document's working space (M7e). ``MXGeneratedShader/colorSpace``
+    /// says which it is.
+    ///
     /// - Throws: ``MXError/shaderGenerationFailed(_:)`` with MaterialX's message.
-    public func generateMSL(for path: String, library: MXLibrary) throws -> MXGeneratedShader {
+    public func generateMSL(for path: String, library: MXLibrary,
+                            colorSpace: String = MXWorkingSpace.documentDefault) throws -> MXGeneratedShader {
         // SWIFT: The C++ function fills in a struct passed by reference. In
         // Swift that is an `inout` argument: a `var`, passed with `&`.
         var shader = mxbridge.GeneratedShader()
         var errorMessage = std.string()
-        guard handle.generateMsl(std.string(path), library.handle, &shader, &errorMessage) else {
+        guard handle.generateMsl(std.string(path), library.handle, std.string(colorSpace), &shader,
+                                 &errorMessage) else {
             throw MXError.shaderGenerationFailed(errorMessage.swiftString)
         }
         return MXGeneratedShader(shader)
