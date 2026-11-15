@@ -35,10 +35,12 @@ NS_ASSUME_NONNULL_BEGIN
 /// relative to the file (`./textures/brick.jpg`), so the folder can be
 /// moved; others keep their absolute paths.
 ///
-/// Returns NO, with OpenUSD's messages in `error`, if anything failed.
-+ (BOOL)exportMaterialsFromMaterialXString:(NSString *)xml
-                                     toURL:(NSURL *)url
-                                     error:(NSError **)error;
+/// Returns the textures left absolute, by path, so the caller can warn
+/// that the file depends on them where they are (M7d); empty if none.
+/// Returns nil, with OpenUSD's messages in `error`, if anything failed.
++ (nullable NSArray<NSString *> *)exportMaterialsFromMaterialXString:(NSString *)xml
+                                                              toURL:(NSURL *)url
+                                                              error:(NSError **)error;
 
 /// Writes the MaterialX document `xml` to `url` as a USDZ package (M5c),
 /// for Quick Look and Reality Composer Pro. The text must stand on its
@@ -49,7 +51,8 @@ NS_ASSUME_NONNULL_BEGIN
 /// bound to the material named `materialName` (the first if nil or not
 /// found), and every material under `/World/MaterialX/Materials`, for
 /// binding in Reality Composer Pro. Every texture is copied into the
-/// package, by relative path, with UsdUtils' ARKit packaging (one layer,
+/// package, by relative path ("0/brick.jpg", a number for each folder the
+/// textures came from), with UsdUtils' ARKit packaging (one layer,
 /// checked against what ARKit accepts). Inputs without a value are left
 /// out: RealityKit draws nothing for a material that has one.
 ///
@@ -59,6 +62,11 @@ NS_ASSUME_NONNULL_BEGIN
                             materialName:(nullable NSString *)materialName
                                    shape:(MGPreviewShape)shape
                                    error:(NSError **)error;
+
+/// The warnings OpenUSD posted during the last export, of either kind
+/// (M7d). They don't stop an export, but each is a problem with the
+/// file or with how it was made: the tests expect none.
+@property (class, readonly) NSArray<NSString *> *lastExportWarnings;
 
 /// Every problem OpenUSD's validators (all of those registered) find in
 /// the file at `url`, one message each, prefixed by the validator's name.

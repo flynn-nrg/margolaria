@@ -170,6 +170,17 @@ struct MXCorpusTests {
         print("Differing: \(differing.prefix(8).joined(separator: ", "))\(differing.count > 8 ? ", ..." : "")")
     }
 
+    /// M7d's exit criterion: the chess set, whose elements are separated by
+    /// blank lines, is written back exactly as it was. MaterialX drops the
+    /// blank lines; MXDocument puts them back.
+    @Test("The chess set is written back byte for byte, blank lines included (M7d)")
+    func chessSetByteForByte() throws {
+        let url: URL = Corpus.examplesFolder.appending(path: "StandardSurface/standard_surface_chess_set.mtlx")
+        let text: String = try String(contentsOf: url, encoding: .utf8)
+        let written: String = try MXDocument.read(from: url).xmlString()
+        #expect(written == text)
+    }
+
     /// M2b's exit criterion, for MXKit: every input the inspector can edit,
     /// in every example, takes a new value, which then reads back; putting
     /// back the copy taken before (what undo does) restores the document.

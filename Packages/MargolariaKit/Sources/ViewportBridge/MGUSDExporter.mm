@@ -15,11 +15,15 @@
 #import "MGUSDExporter.h"
 #import "MGPreviewShapes.h"
 
+#include <cstdio>
 #include <functional>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include <pxr/pxr.h>
+#include <pxr/base/tf/diagnosticMgr.h>
 #include <pxr/base/tf/errorMark.h>
 #include <pxr/base/tf/pathUtils.h>
 #include <pxr/base/tf/stringUtils.h>
@@ -45,6 +49,81 @@ NSError *MakeError(const std::string &message) {
     return [NSError errorWithDomain:@"MGUSDExporterErrorDomain"
                                code:1
                            userInfo:@{NSLocalizedDescriptionKey : @(message.c_str())}];
+}
+
+/// Collects the warnings OpenUSD posts while it exists (M7d): an export
+/// keeps one, and its warnings are the next `lastExportWarnings`, so the
+/// tests can check an export warns about nothing.
+///
+/// With a delegate, OpenUSD stops printing diagnostics itself, for every
+/// thread, so this prints them as it would: the app's log and the command
+/// line's standard error still show them.
+class WarningCollector : public TfDiagnosticMgr::Delegate {
+public:
+    WarningCollector() {
+        TfDiagnosticMgr::GetInstance().AddDelegate(this);
+    }
+
+    ~WarningCollector() override {
+        TfDiagnosticMgr::GetInstance().RemoveDelegate(this);
+    }
+
+    void IssueWarning(const TfWarning &warning) override {
+        Print("Warning", warning.GetCommentary());
+        // A delegate hears every thread's warnings, including those of a
+        // renderer drawing meanwhile (the viewport, swatches; other tests).
+        // Exports don't use Hydra, so warnings from OpenUSD's imaging code
+        // (pxr/imaging: Hydra, Storm) aren't theirs. The export's own come
+        // from pxr/usd (Sdf, Usd, UsdMtlx, UsdUtils) and pxr/base.
+        if (warning.GetContext().GetFile() && std::string(warning.GetContext().GetFile()).find("/imaging/")
+                                                  != std::string::npos) {
+            return;
+        }
+        // Warnings come from OpenUSD's worker threads too.
+        std::lock_guard<std::mutex> lock(_mutex);
+        _warnings.push_back(warning.GetCommentary());
+    }
+
+    void IssueStatus(const TfStatus &status) override {
+        Print("Status", status.GetCommentary());
+    }
+
+    void IssueError(const TfError &error) override {
+        Print("Error", error.GetCommentary());
+    }
+
+    void IssueFatalError(const TfCallContext &, const std::string &message) override {
+        Print("Fatal error", message);
+    }
+
+    /// The warnings so far, as an array for Swift.
+    NSArray<NSString *> *Warnings() {
+        std::lock_guard<std::mutex> lock(_mutex);
+        NSMutableArray<NSString *> *warnings = [NSMutableArray array];
+        for (const std::string &warning : _warnings) {
+            [warnings addObject:@(warning.c_str())];
+        }
+        return warnings;
+    }
+
+private:
+    static void Print(const char *kind, const std::string &message) {
+        fprintf(stderr, "%s: %s\n", kind, message.c_str());
+    }
+
+    std::mutex _mutex;
+    std::vector<std::string> _warnings;
+};
+
+/// The last export's warnings (`lastExportWarnings`).
+NSArray<NSString *> *LastExportWarnings = @[];
+
+/// Keeps `collector`'s warnings as the last export's.
+void KeepWarnings(WarningCollector &collector) {
+    NSArray<NSString *> *warnings = collector.Warnings();
+    @synchronized([MGUSDExporter class]) {
+        LastExportWarnings = warnings;
+    }
 }
 
 /// The messages of the errors posted since `mark`, one per line; cleared so
@@ -107,8 +186,10 @@ std::string RealPath(const std::string &path) {
 /// Rewrites the absolute asset paths of `layer` (the textures' files) that
 /// lie in `folder` or below as relative ones, "./" and the rest: OpenUSD
 /// reads those relative to the layer's own file, wherever it is moved.
-void MakeAssetPathsRelative(const SdfLayerRefPtr &layer, const std::string &folder) {
+/// Returns the paths left absolute (M7d: the app warns about them).
+NSArray<NSString *> *MakeAssetPathsRelative(const SdfLayerRefPtr &layer, const std::string &folder) {
     const std::string prefix = RealPath(folder) + "/";
+    NSMutableOrderedSet<NSString *> *absolute = [NSMutableOrderedSet orderedSet];
     ForEachAttribute(layer, [&](const SdfAttributeSpecHandle &attribute) {
         const VtValue value = attribute->GetDefaultValue();
         if (!value.IsHolding<SdfAssetPath>()) {
@@ -119,8 +200,56 @@ void MakeAssetPathsRelative(const SdfLayerRefPtr &layer, const std::string &fold
             const std::string real = RealPath(path);
             if (TfStringStartsWith(real, prefix)) {
                 attribute->SetDefaultValue(VtValue(SdfAssetPath("./" + real.substr(prefix.size()))));
+            } else {
+                [absolute addObject:@(path.c_str())];
             }
         }
+    });
+    return absolute.array;
+}
+
+/// Copies the textures `layer` refers to by absolute path into `folder`,
+/// the folder the layer is packaged from, each source folder becoming a
+/// numbered one ("0/brass_color.jpg"), and refers to the copies by
+/// relative path (M7d).
+///
+/// UsdUtils' packaging renames them the same way itself, but then warns
+/// "Failed to resolve reference @0/brass_color.jpg@" for every texture
+/// after the first from a folder: it remembers only the first path it
+/// renamed into each numbered folder, and looks for the others at their
+/// new paths, which don't exist outside the package
+/// (UsdUtils_DirectoryRemapper, OpenUSD 26.08). The package was right; the
+/// warning wasn't. Paths already relative to the layer need no renaming.
+/// A file that can't be copied keeps its path, for OpenUSD to package or
+/// report.
+void CopyTexturesBeside(const SdfLayerRefPtr &layer, NSString *folder) {
+    std::map<std::string, std::string> folders; // source folder -> "0"
+    std::map<std::string, std::string> copies;  // source file -> "0/name"
+    NSFileManager *files = NSFileManager.defaultManager;
+    ForEachAttribute(layer, [&](const SdfAttributeSpecHandle &attribute) {
+        const VtValue value = attribute->GetDefaultValue();
+        if (!value.IsHolding<SdfAssetPath>()) {
+            return;
+        }
+        const std::string path = value.UncheckedGet<SdfAssetPath>().GetAssetPath();
+        if (path.empty() || TfIsRelativePath(path)) {
+            return;
+        }
+        auto copy = copies.find(path);
+        if (copy == copies.end()) {
+            const std::string number = std::to_string(folders.size());
+            const std::string numbered = folders.insert({TfGetPathName(path), number}).first->second;
+            const std::string relative = numbered + "/" + TfGetBaseName(path);
+            NSString *destination = [folder stringByAppendingPathComponent:@(relative.c_str())];
+            [files createDirectoryAtPath:destination.stringByDeletingLastPathComponent
+                withIntermediateDirectories:YES attributes:nil error:nil];
+            // A copy on APFS is a clone: no bytes are copied.
+            if (![files copyItemAtPath:@(path.c_str()) toPath:destination error:nil]) {
+                return;
+            }
+            copy = copies.insert({path, relative}).first;
+        }
+        attribute->SetDefaultValue(VtValue(SdfAssetPath(copy->second)));
     });
 }
 
@@ -218,14 +347,18 @@ std::string Describe(const VtValue &value) {
 
 @implementation MGUSDExporter
 
-+ (BOOL)exportMaterialsFromMaterialXString:(NSString *)xml toURL:(NSURL *)url error:(NSError **)error {
++ (nullable NSArray<NSString *> *)exportMaterialsFromMaterialXString:(NSString *)xml
+                                                              toURL:(NSURL *)url
+                                                              error:(NSError **)error {
     NSString *folder = NewTemporaryFolder();
+    WarningCollector warnings;
     TfErrorMark mark;
     bool written = false;
+    NSArray<NSString *> *absolute = @[];
     // A C++ exception must never reach Swift.
     try {
         if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, false, MGPreviewShapeSphere, nil, mark, error)) {
-            MakeAssetPathsRelative(flat, url.URLByDeletingLastPathComponent.path.fileSystemRepresentation);
+            absolute = MakeAssetPathsRelative(flat, url.URLByDeletingLastPathComponent.path.fileSystemRepresentation);
             written = flat->Export(url.path.fileSystemRepresentation);
             if (!written && error) {
                 const std::string messages = Messages(mark);
@@ -241,7 +374,8 @@ std::string Describe(const VtValue &value) {
     [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
     // Warnings (posted as TfWarning, not errors) don't stop the export.
     mark.Clear();
-    return written;
+    KeepWarnings(warnings);
+    return written ? absolute : nil;
 }
 
 + (BOOL)exportPreviewFromMaterialXString:(NSString *)xml
@@ -252,11 +386,13 @@ std::string Describe(const VtValue &value) {
     // A folder of our own for the .mtlx and the flattened layer the USDZ
     // is packaged from.
     NSString *folder = NewTemporaryFolder();
+    WarningCollector warnings;
     TfErrorMark mark;
     bool written = false;
     // A C++ exception must never reach Swift.
     try {
         if (SdfLayerRefPtr flat = FlattenedMaterials(xml, folder, true, shape, materialName, mark, error)) {
+            CopyTexturesBeside(flat, folder);
             NSString *rootPath = [folder stringByAppendingPathComponent:@"root.usdc"];
             if (flat->Export(rootPath.fileSystemRepresentation)) {
                 // The ARKit variant also checks the package against what
@@ -278,7 +414,14 @@ std::string Describe(const VtValue &value) {
     [NSFileManager.defaultManager removeItemAtPath:folder error:nil];
     // Warnings (posted as TfWarning, not errors) don't stop the export.
     mark.Clear();
+    KeepWarnings(warnings);
     return written;
+}
+
++ (NSArray<NSString *> *)lastExportWarnings {
+    @synchronized(self) {
+        return LastExportWarnings;
+    }
 }
 
 + (NSArray<NSString *> *)validationMessagesForFileAtURL:(NSURL *)url {

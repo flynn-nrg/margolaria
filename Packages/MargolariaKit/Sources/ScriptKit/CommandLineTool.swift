@@ -95,7 +95,7 @@ public enum CommandLineTool {
                 guard let kind = words.first else {
                     throw UsageError("export what? usd, usdz or shader.")
                 }
-                return try export(kind, Array(words.dropFirst()))
+                return try export(kind, Array(words.dropFirst()), errors: errors)
             default:
                 output(usage + "\n")
                 return succeeded
@@ -170,14 +170,18 @@ public enum CommandLineTool {
     }
 
     /// `margolaria export KIND ...`.
-    private static func export(_ kind: String, _ words: [String]) throws -> Int32 {
+    private static func export(_ kind: String, _ words: [String], errors: Writer) throws -> Int32 {
         switch kind {
         case "usd":
             let options = try Options(words, values: [])
             guard options.positional.count == 2 else {
                 throw UsageError("export usd takes a .mtlx file and the USD file to write.")
             }
-            try Export.usd(try open(file(options.positional[0])), to: file(options.positional[1]))
+            let textures: [String] = try Export.usd(try open(file(options.positional[0])),
+                                                    to: file(options.positional[1]))
+            if let warning = Export.absoluteTexturesWarning(textures) {
+                errors(warning)
+            }
         case "usdz":
             let options = try Options(words, values: ["--material", "--shape"])
             guard options.positional.count == 2 else {

@@ -1509,6 +1509,60 @@ bool Document::isIncluded(const std::string& path) const {
     return element && IsIncluded(element);
 }
 
+StringVector Document::includes() const {
+    StringVector includes;
+    if (!_impl) {
+        return includes;
+    }
+    // Included elements are the document's children that record another
+    // source than the document's, each include's href; MaterialX writes
+    // one include for each href (writeToXmlString).
+    const mx::DocumentPtr& document = _impl->document;
+    std::set<std::string> seen;
+    for (const mx::ElementPtr& child : document->getChildren()) {
+        if (!child->hasSourceUri() || child->getSourceUri() == document->getSourceUri()
+            || !seen.insert(child->getSourceUri()).second) {
+            continue;
+        }
+        const mx::FilePath file(ResolvedSourceUri(child));
+        includes.push_back(child->getSourceUri());
+        includes.push_back(file.isAbsolute() ? file.asString() : "");
+    }
+    return includes;
+}
+
+std::string Document::writeToXmlStringWithHrefs(const StringVector& hrefs) const {
+    if (!_impl) {
+        return {};
+    }
+    std::map<std::string, std::string> renamed;
+    for (size_t i = 0; i + 1 < hrefs.size(); i += 2) {
+        renamed[hrefs[i]] = hrefs[i + 1];
+    }
+    // MaterialX writes an include's href from its elements' source, so
+    // each is given the new href while the text is written, then its own
+    // back. (A copy of the document would be simpler, and copy every
+    // element.)
+    const mx::DocumentPtr& document = _impl->document;
+    std::vector<std::pair<mx::ElementPtr, std::string>> changed;
+    for (const mx::ElementPtr& child : document->getChildren()) {
+        if (!child->hasSourceUri() || child->getSourceUri() == document->getSourceUri()) {
+            continue;
+        }
+        auto href = renamed.find(child->getSourceUri());
+        if (href != renamed.end()) {
+            changed.emplace_back(child, child->getSourceUri());
+            child->setSourceUri(href->second);
+        }
+    }
+    // Doesn't throw: writeToXmlString catches MaterialX's exceptions.
+    const std::string xml = writeToXmlString();
+    for (const auto& [element, source] : changed) {
+        element->setSourceUri(source);
+    }
+    return xml;
+}
+
 // --- Edits -------------------------------------------------------------------
 
 namespace {

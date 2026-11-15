@@ -11,7 +11,8 @@
 // reach it.
 //
 // Introduces (SWIFT): `FileManager.url(for:in:appropriateFor:create:)`,
-// `pathComponents` and `starts(with:)` for paths, `compactMap` with `try?`.
+// `pathComponents` and `starts(with:)` for paths, `compactMap` with `try?`;
+// `prefix(while:)` (M7d).
 
 import Foundation
 import MXBridge
@@ -146,8 +147,9 @@ extension MXDocument {
 
     /// Includes the library `file` in the document (`xi:include`): its
     /// definitions can then be used, and are read-only here. The include
-    /// is written relative to `folder` (the document's) when the file is
-    /// inside it, and by absolute path otherwise. Returns the file's
+    /// is written relative to `folder` (the document's) when it can be
+    /// (``href(for:from:)``), and by absolute path otherwise; saving
+    /// writes it relative to wherever the document is saved (M7d). Returns the file's
     /// nodedef names. Nothing changes if it is already included.
     @discardableResult
     public func include(library file: URL, from folder: URL?) throws -> [String] {
@@ -159,17 +161,31 @@ extension MXDocument {
         return names.map { $0.swiftString }
     }
 
-    /// `file`'s path relative to `folder` if it is inside it ("lib/tiles.mtlx"),
-    /// else its absolute path.
+    /// `file`'s path from `folder`, the document's (M4c2; "when possible",
+    /// M7d): relative when the two share a folder at least three levels
+    /// down from the top of the disk, such as ~/Documents
+    /// ("lib/tint.mtlx", "../Libraries/tint.mtlx"); otherwise, or without
+    /// a folder (an untitled document), absolute. A relative path climbing
+    /// up to the home folder or the top of the disk would break whenever
+    /// either file moves, as an absolute one does on another Mac: it gains
+    /// nothing.
     ///
     /// SWIFT: `pathComponents` splits a URL's path into its parts ("/",
-    /// "Users", ...); `starts(with:)` checks one array begins with another.
+    /// "Users", ...). `zip` pairs two sequences' elements, and
+    /// `prefix(while:)` keeps the leading pairs that are equal: the folders
+    /// the two paths share.
     static func href(for file: URL, from folder: URL?) -> String {
         let fileParts: [String] = file.standardizedFileURL.pathComponents
-        guard let folderParts = folder?.standardizedFileURL.pathComponents,
-              fileParts.count > folderParts.count, fileParts.starts(with: folderParts) else {
-            return file.standardizedFileURL.path(percentEncoded: false)
+        let absolute: String = file.standardizedFileURL.path(percentEncoded: false)
+        guard let folderParts = folder?.standardizedFileURL.pathComponents else {
+            return absolute
         }
-        return fileParts.dropFirst(folderParts.count).joined(separator: "/")
+        let shared: Int = zip(fileParts, folderParts).prefix(while: { $0 == $1 }).count
+        // Three folders down is four parts, the first being "/".
+        guard shared >= 4, shared < fileParts.count else {
+            return absolute
+        }
+        let up: [String] = Array(repeating: "..", count: folderParts.count - shared)
+        return (up + fileParts.dropFirst(shared)).joined(separator: "/")
     }
 }

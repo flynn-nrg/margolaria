@@ -92,8 +92,7 @@ final class HostCalls {
                                 converting: arguments[2] == "convert")
             return []
         case "export_usd":
-            try Export.usd(document, to: try url(arguments[0]))
-            return []
+            return try Export.usd(document, to: try url(arguments[0]))
         case "export_usdz":
             guard let shape = ViewportShape(rawValue: arguments[2]) else {
                 throw ScriptError.unknownShape(arguments[2])

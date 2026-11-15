@@ -137,13 +137,16 @@ struct USDZExportTests {
     }
 
     /// Exports `document` as a USDZ at `url`, with `material` on `shape`,
-    /// and checks the package: OpenUSD's validators find nothing, and
-    /// every texture it refers to is inside it, by relative path.
+    /// and checks the package: OpenUSD's validators find nothing, it
+    /// posted no warning while exporting (M7d: no "Failed to resolve
+    /// reference"), and every texture it refers to is inside it, by
+    /// relative path.
     static func exportAndCheck(_ document: MXDocument, material: String, to url: URL, _ label: String,
                                shape: ViewportShape = .sphere) throws {
         try? FileManager.default.removeItem(at: url)
         try MGUSDExporter.exportPreview(fromMaterialXString: try document.usdzXMLString(), to: url,
                                         materialName: material, shape: shape.bridged)
+        #expect(MGUSDExporter.lastExportWarnings.isEmpty, "\(label): \(MGUSDExporter.lastExportWarnings)")
         let problems: [String] = MGUSDExporter.validationMessagesForFile(at: url)
         #expect(problems.isEmpty, "\(label): \(problems)")
         let packaged: Set<String> = Set(MGUSDExporter.filesInPackage(at: url))
