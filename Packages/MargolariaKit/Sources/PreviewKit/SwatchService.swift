@@ -144,6 +144,7 @@ public actor SwatchService {
             return
         }
         document.setDataLibrary(library)
+        let workingSpace: String = document.workingSpace(of: "").active
 
         // 1. Generate every shader; draw at once those already compiled.
         var toCompile: [(request: SwatchRequest, shader: MXGeneratedShader)] = []
@@ -156,7 +157,11 @@ public actor SwatchService {
             }
             let shader: MXGeneratedShader
             do {
-                shader = try document.generateMSL(for: request.shaderPath, library: library)
+                // In the document's working space (M7e), as the Generated
+                // Shader tab computes: a colour multiplied in ACEScg isn't
+                // the same as in lin_rec709.
+                shader = try document.generateMSL(for: request.shaderPath, library: library,
+                                                  colorSpace: workingSpace)
             } catch {
                 await deliver(request, .failed(String(describing: error)))
                 continue

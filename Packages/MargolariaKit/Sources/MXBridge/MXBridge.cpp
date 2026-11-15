@@ -3784,13 +3784,75 @@ std::string Document::documentVersion() const {
 
 namespace {
 
+/// True if `node`'s input `name` is a choice from a list (`enum` on its
+/// nodedef's input), not a colour (M7e): `lumacoeffs` is a colour3 holding
+/// one of several spaces' luma weights, picked by name, which converting
+/// would turn into no choice at all.
+bool IsChoice(const mx::InterfaceElementPtr& owner, const std::string& name) {
+    mx::NodePtr node = owner->asA<mx::Node>();
+    mx::NodeDefPtr nodeDef = node ? node->getNodeDef() : nullptr;
+    mx::InputPtr input = nodeDef ? nodeDef->getActiveInput(name) : nullptr;
+    return input && input->hasAttribute(mx::ValueElement::ENUM_ATTRIBUTE);
+}
+
+/// The inputs of MaterialX's libraries that are physical quantities typed
+/// color3, by node and input name: a conductor's complex index of
+/// refraction, and the distances light scatters under a surface, one per
+/// red, green and blue wavelength (and the translation nodes' copies).
+const std::set<std::pair<std::string, std::string>> PhysicalInputs = {
+    {"conductor_bsdf", "ior"},
+    {"conductor_bsdf", "extinction"},
+    {"subsurface_bsdf", "radius"},
+    {"standard_surface", "subsurface_radius"},
+    {"standard_surface_to_open_pbr_surface", "subsurface_radius"},
+    {"open_pbr_surface", "subsurface_radius_scale"},
+    {"open_pbr_surface_to_standard_surface", "subsurface_radius_scale"},
+    {"disney_principled", "subsurfaceDistance"},
+    {"LamaSSS", "sssRadius"},
+};
+
+/// True if `owner`'s input `name` is a physical quantity typed color3, not
+/// a colour (M7e): one of PhysicalInputs, which no colour space changes.
+/// Also an input of a nodegraph, or of a node whose definition is a
+/// nodegraph, that is passed on (`interfacename`) to one of these.
+bool IsPhysical(const mx::InterfaceElementPtr& owner, const std::string& name) {
+    if (PhysicalInputs.count({owner->getCategory(), name})) {
+        return true;
+    }
+    mx::NodeGraphPtr graph = owner->asA<mx::NodeGraph>();
+    if (mx::NodePtr node = owner->asA<mx::Node>()) {
+        mx::NodeDefPtr nodeDef = node->getNodeDef();
+        mx::InterfaceElementPtr implementation = nodeDef ? nodeDef->getImplementation() : nullptr;
+        graph = implementation ? implementation->asA<mx::NodeGraph>() : nullptr;
+    }
+    if (!graph) {
+        return false;
+    }
+    for (const mx::NodePtr& inner : graph->getNodes()) {
+        for (const mx::InputPtr& input : inner->getInputs()) {
+            if (input->getInterfaceName() == name && IsPhysical(inner, input->getName())) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/// True if `owner`'s input `name` keeps its numbers whatever the working
+/// space: a choice (IsChoice) or a physical quantity (IsPhysical).
+bool KeepsNumbers(const mx::InterfaceElementPtr& owner, const std::string& name) {
+    return IsChoice(owner, name) || IsPhysical(owner, name);
+}
+
 /// Adds the colours of `owner`'s inputs that have no `colorspace`: colour
-/// values, and the file of an image node with a colour output.
+/// values, and the file of an image node with a colour output. Not the
+/// color3 inputs that keep their numbers (KeepsNumbers).
 void AddColorUses(const mx::InterfaceElementPtr& owner, std::vector<ColorUse>& uses) {
     const std::string ownerType = owner->getType();
     const bool colorImage = owner->isA<mx::Node>() && (ownerType == "color3" || ownerType == "color4");
     for (const mx::InputPtr& input : owner->getInputs()) {
-        if (input->hasColorSpace() || !input->hasValueString() || input->getValueString().empty()) {
+        if (input->hasColorSpace() || !input->hasValueString() || input->getValueString().empty()
+            || KeepsNumbers(owner, input->getName())) {
             continue;
         }
         const std::string type = input->getType();
@@ -3800,21 +3862,49 @@ void AddColorUses(const mx::InterfaceElementPtr& owner, std::vector<ColorUse>& u
     }
 }
 
+/// Adds the colour inputs `node` leaves at its nodedef's default (M7e):
+/// the nodedef's color3 and color4 inputs with a value and no
+/// `colorspace`, that keep no numbers of their own (KeepsNumbers), and
+/// that the node doesn't set. Their numbers are read in the node's working
+/// space, as its own values are.
+void AddDefaultColorUses(const mx::NodePtr& node, std::vector<ColorUse>& uses) {
+    mx::NodeDefPtr nodeDef = node->getNodeDef();
+    if (!nodeDef) {
+        return;
+    }
+    for (const mx::InputPtr& input : nodeDef->getActiveInputs()) {
+        const std::string type = input->getType();
+        if ((type != "color3" && type != "color4") || node->getInput(input->getName()) || input->hasColorSpace()
+            || !input->hasValueString() || input->getValueString().empty()
+            || KeepsNumbers(node, input->getName())) {
+            continue;
+        }
+        uses.push_back({node->getNamePath(), input->getName(), type, input->getValueString()});
+    }
+}
+
 /// Adds the colours in the working space of `graph` (the document or a
-/// nodegraph), going down into nodegraphs that don't set their own.
-void CollectColorUses(const mx::ElementPtr& graph, std::vector<ColorUse>& uses) {
+/// nodegraph), going down into nodegraphs that don't set their own: the
+/// values set, or with `defaults`, those left at their nodedef's default.
+void CollectColorUses(const mx::ElementPtr& graph, bool defaults, std::vector<ColorUse>& uses) {
     for (const mx::ElementPtr& child : graph->getChildren()) {
         if (child->hasColorSpace() || IsIncluded(child)) {
             continue;
         }
         if (mx::NodePtr node = child->asA<mx::Node>()) {
-            AddColorUses(node, uses);
+            if (defaults) {
+                AddDefaultColorUses(node, uses);
+            } else {
+                AddColorUses(node, uses);
+            }
         } else if (mx::NodeGraphPtr nodeGraph = child->asA<mx::NodeGraph>()) {
             if (nodeGraph->hasNodeDefString()) {
                 continue;
             }
-            AddColorUses(nodeGraph, uses);
-            CollectColorUses(nodeGraph, uses);
+            if (!defaults) {
+                AddColorUses(nodeGraph, uses);
+            }
+            CollectColorUses(nodeGraph, defaults, uses);
         }
     }
 }
@@ -3843,7 +3933,7 @@ WorkingSpaceInfo Document::workingSpace(const std::string& path) const {
     return info;
 }
 
-std::vector<ColorUse> Document::colorsInWorkingSpace(const std::string& path) const {
+std::vector<ColorUse> Document::colorsInWorkingSpace(const std::string& path, bool defaults) const {
     std::vector<ColorUse> uses;
     mx::ElementPtr owner = _impl ? WorkingSpaceOwner(_impl->document, path) : nullptr;
     if (!owner) {
@@ -3853,9 +3943,11 @@ std::vector<ColorUse> Document::colorsInWorkingSpace(const std::string& path) co
         if (nodeGraph->hasNodeDefString() || IsIncluded(nodeGraph)) {
             return uses;
         }
-        AddColorUses(nodeGraph, uses);
+        if (!defaults) {
+            AddColorUses(nodeGraph, uses);
+        }
     }
-    CollectColorUses(owner, uses);
+    CollectColorUses(owner, defaults, uses);
     return uses;
 }
 
@@ -3917,7 +4009,7 @@ void CollectUniforms(const mx::ShaderStage& stage, std::vector<ShaderUniform>& u
 
 } // namespace
 
-bool Document::generateMsl(const std::string& elementPath, const Library& library,
+bool Document::generateMsl(const std::string& elementPath, const Library& library, const std::string& colorSpace,
                            GeneratedShader& shader, std::string& errorMessage) const {
     if (!_impl || !library._impl) {
         errorMessage = "No document or library loaded";
@@ -3933,18 +4025,23 @@ bool Document::generateMsl(const std::string& elementPath, const Library& librar
         mx::ShaderGeneratorPtr generator = mx::MslShaderGenerator::create();
 
         // Colour management: converts colours and textures tagged with a
-        // colour space (such as srgb_texture) to the working space, using the
-        // conversion nodes defined in the standard library.
+        // colour space (such as srgb_texture) to the space the shader
+        // computes in, with the conversion nodes of MaterialX's colour
+        // library and Margolaria's (to acescg). Into `colorSpace` if there
+        // are transforms to it, otherwise lin_rec709, as generateCode().
+        // Until M7e, always lin_rec709.
+        mx::DocumentPtr transforms = library._impl->colorTransforms;
+        const std::string target =
+            transforms->getNodeDef("ND_lin_rec709_to_" + colorSpace + "_color3") ? colorSpace : "lin_rec709";
         mx::DefaultColorManagementSystemPtr colorManagement =
             mx::DefaultColorManagementSystem::create(generator->getTarget());
-        colorManagement->loadLibrary(library._impl->definitions);
+        colorManagement->loadLibrary(transforms);
         generator->setColorManagementSystem(colorManagement);
 
         mx::GenContext context(generator);
         // Where the per-node MSL snippets live (libraries/stdlib/genmsl/...).
         context.registerSourceCodeSearchPath(mx::FilePath(library._impl->librariesRoot));
-        // Shade in linear Rec.709, the documents' usual working space.
-        context.getOptions().targetColorSpaceOverride = "lin_rec709";
+        context.getOptions().targetColorSpaceOverride = target;
 
         mx::ShaderPtr generated = generator->generate(element->getName(), element, context);
         if (!generated) {
@@ -3954,6 +4051,7 @@ bool Document::generateMsl(const std::string& elementPath, const Library& librar
 
         shader.vertexSource = generated->getSourceCode(mx::Stage::VERTEX);
         shader.pixelSource = generated->getSourceCode(mx::Stage::PIXEL);
+        shader.colorSpace = target;
 
         // The shaded output's type: the element's own type for an output or
         // node, "material" for a material node.
@@ -4098,9 +4196,7 @@ bool Document::generateCode(const std::string& elementPath, const Library& libra
             break;
         }
 
-        // Colour management, as in generateMsl(), into `colorSpace` if
-        // there are transforms to it (MaterialX's to lin_rec709, ours to
-        // acescg), otherwise lin_rec709.
+        // Colour management, as in generateMsl().
         mx::DocumentPtr transforms = library._impl->colorTransforms;
         const std::string target =
             transforms->getNodeDef("ND_lin_rec709_to_" + colorSpace + "_color3") ? colorSpace : "lin_rec709";

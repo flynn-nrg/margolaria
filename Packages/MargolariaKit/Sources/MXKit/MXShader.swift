@@ -36,6 +36,10 @@ public struct MXGeneratedShader: Sendable {
     public let outputType: String
     /// The parameters of both stages.
     public let uniforms: [MXShaderUniform]
+    /// The colour space the shader computes in, and its result is in
+    /// (M7e): "lin_rec709" or "acescg". What draws it lights it and shows
+    /// it in this space.
+    public let colorSpace: String
 
     /// The uniform called `name`, or nil.
     ///
@@ -54,6 +58,7 @@ public struct MXGeneratedShader: Sendable {
         vertexSource = shader.vertexSource.swiftString
         pixelSource = shader.pixelSource.swiftString
         outputType = shader.outputType.swiftString
+        colorSpace = shader.colorSpace.swiftString
 
         var uniforms: [MXShaderUniform] = []
         for uniform in shader.uniforms {

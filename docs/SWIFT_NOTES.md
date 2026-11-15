@@ -204,6 +204,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `@MainActor` on a type | Every property and method runs on the main thread; callers from elsewhere must `await` | "Main thread only" in the docs, but checked | `GraphCanvasController.swift`, `GraphCanvasControllerTests.swift` (suite) |
 | `@MainActor` in a function type | `@MainActor (T) -> Void`: the closure runs on the main actor, so it may touch main-actor state | — | `GraphBenchmark.swift` (`Scenario`) |
 | Function types as parameters | `(([Double], String, String) throws -> [Double])?`: an optional function; function types have no argument labels, so calls are `convert(a, b, c)` | A C function pointer or a C++ `std::function` | `MXWorkingSpace.swift` (`setWorkingSpace`) |
+| A method as a function value | `Self.convert(_:from:to:)`, named with its labels but not called, is a value of its function type, to pass or store like a closure | A C function pointer; `@selector` with a target | `WorkingSpaceMenu.swift` (`apply`, M7e) |
 | `MainActor.assumeIsolated { }` | "I know I'm on the main thread" (e.g. in a main-run-loop Timer); checked at run time, traps if wrong | `assert([NSThread isMainThread])` | `GraphBenchmark.swift` |
 | `@ObservationIgnored` | Excludes a property of an `@Observable` class from observation (callbacks, bookkeeping) | — | `GraphCanvasController.swift` |
 | `nonisolated(unsafe)` | Turns off the concurrency check for one declaration (a thread-safe but non-`Sendable` value). Always explain why. | — | `LayerGraphView.swift` (`NodeLayer.titleFont`) |

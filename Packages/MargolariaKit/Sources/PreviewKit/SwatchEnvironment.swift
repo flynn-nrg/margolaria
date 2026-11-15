@@ -15,7 +15,9 @@
 //
 // The image is the viewport's (M3c): the studio by default
 // (StudioEnvironment), or OpenUSD's outdoor StinsonBeach.hdr, so a node's
-// swatch and the viewport see the same light.
+// swatch and the viewport see the same light. Since M7e it is converted to
+// the colour space the swatches compute in (the document's working space),
+// one set of textures for each space.
 //
 // Orientation. MaterialX's shaders look a direction up in a lat-long image
 // with their own convention (mx_latlong_projection: the first texture row
@@ -27,12 +29,14 @@
 // Introduces (SWIFT): `static let` caching in a type, Core Image filters
 // (M0c); `Float16` (M3c).
 
+import ColorKit
 import CoreImage
 import Foundation
 import Metal
 import simd
 
-/// The radiance and irradiance textures, created once per environment.
+/// The radiance and irradiance textures, created once per environment
+/// and colour space.
 struct SwatchEnvironment {
     /// Lat-long radiance, RGBA16Float, mipmapped.
     let radiance: any MTLTexture
@@ -40,6 +44,10 @@ struct SwatchEnvironment {
     let irradiance: any MTLTexture
     /// The image both were made from.
     let imageURL: URL
+    /// The colour space of their values (M7e): the image's light, lin_rec709
+    /// as Storm reads it, converted to the space the swatch shaders compute
+    /// in, so the light is the same colour whatever the space.
+    let colorSpace: String
 
     /// What the shaders apply to a direction before looking it up
     /// (u_envMatrix), so that the image lights the swatch as Storm's dome
@@ -78,10 +86,11 @@ struct SwatchEnvironment {
     static let convolutionSize: (width: Int, height: Int) = (64, 32)
 
     /// Loads `imageURL` (any format ImageIO reads, including Radiance .hdr)
-    /// and builds both textures on `queue`'s device.
-    init(imageURL: URL, queue: any MTLCommandQueue) throws {
+    /// and builds both textures on `queue`'s device, in `colorSpace`.
+    init(imageURL: URL, colorSpace: String = ViewTransform.sceneSpace, queue: any MTLCommandQueue) throws {
         let device: any MTLDevice = queue.device
         self.imageURL = imageURL
+        self.colorSpace = colorSpace
 
         // Keep the pixel values linear and unclamped: they are light
         // intensities, many of them far above 1.0.
@@ -90,8 +99,9 @@ struct SwatchEnvironment {
             throw PreviewError.resourceNotFound(imageURL.path)
         }
         // Core Image's origin is bottom-left, Metal's is top-left. Flip, so
-        // texture row 0 is the image's first stored row.
-        let image: CIImage = loaded.oriented(.downMirrored)
+        // texture row 0 is the image's first stored row. Then into the
+        // swatches' space, if it isn't the image's.
+        let image: CIImage = try Self.converting(loaded.oriented(.downMirrored), to: colorSpace)
 
         let context = CIContext(mtlCommandQueue: queue, options: [.workingColorSpace: linear])
 
@@ -112,6 +122,29 @@ struct SwatchEnvironment {
                                                            device: device)
         let texels: [SIMD4<Float>] = Self.read(smallTexture)
         irradiance = try Self.upload(Self.convolve(texels, width: width, height: height), device: device)
+    }
+
+    /// `image`, lin_rec709 light, converted to `space` (M7e). Between
+    /// linear spaces a conversion is a 3 × 3 matrix, which Core Image's
+    /// colour matrix filter applies to every pixel; its columns are what
+    /// OCIO makes of pure red, green and blue.
+    static func converting(_ image: CIImage, to space: String) throws -> CIImage {
+        guard space != ViewTransform.sceneSpace else {
+            return image
+        }
+        let converter: ColorConverter = try ColorConfiguration.studio.get()
+            .converter(from: ViewTransform.sceneSpace, to: space)
+        let red: SIMD3<Double> = converter.convert(SIMD3(1, 0, 0))
+        let green: SIMD3<Double> = converter.convert(SIMD3(0, 1, 0))
+        let blue: SIMD3<Double> = converter.convert(SIMD3(0, 0, 1))
+        // CIColorMatrix's vectors are the output's rows: new red is
+        // r·inputRVector.x + g·inputRVector.y + b·inputRVector.z.
+        return image.applyingFilter("CIColorMatrix", parameters: [
+            "inputRVector": CIVector(x: red.x, y: green.x, z: blue.x, w: 0),
+            "inputGVector": CIVector(x: red.y, y: green.y, z: blue.y, w: 0),
+            "inputBVector": CIVector(x: red.z, y: green.z, z: blue.z, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+        ])
     }
 
     // MARK: Irradiance

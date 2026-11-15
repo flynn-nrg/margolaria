@@ -48,6 +48,9 @@ public struct MXColorUse: Equatable, Sendable {
     public let type: String
     /// The numbers, or the file name.
     public let value: String
+    /// True for an input left at its nodedef's default (M7e): `value` is
+    /// the default, and converting it sets the input.
+    public var isDefault: Bool = false
 
     /// True for an image file, which can only be tagged.
     public var isFile: Bool {
@@ -68,19 +71,66 @@ extension MXDocument {
     /// own or on anything in between. Included elements, and nodegraphs
     /// implementing a nodedef, are left out.
     public func colorsInWorkingSpace(of path: String) -> [MXColorUse] {
-        handle.colorsInWorkingSpace(std.string(path)).map { use in
+        colorUses(of: path, defaults: false)
+    }
+
+    /// The colour inputs left at their nodedef's default in the working
+    /// space of the document (`path` "") or of the nodegraph at `path`
+    /// (M7e): their numbers are read in that space too, so a coloured
+    /// default changes colour with it. Each has ``MXColorUse/isDefault``.
+    public func defaultColorsInWorkingSpace(of path: String) -> [MXColorUse] {
+        colorUses(of: path, defaults: true)
+    }
+
+    private func colorUses(of path: String, defaults: Bool) -> [MXColorUse] {
+        handle.colorsInWorkingSpace(std.string(path), defaults).map { use in
             MXColorUse(ownerPath: use.ownerPath.swiftString, inputName: use.inputName.swiftString,
-                       type: use.type.swiftString, value: use.value.swiftString)
+                       type: use.type.swiftString, value: use.value.swiftString, isDefault: defaults)
         }
     }
+
+    /// What converting from the working space of `path` to `space` (nil:
+    /// the one it would inherit) changes, to keep the colours' look: the
+    /// colours set (``colorsInWorkingSpace(of:)``), and the defaults whose
+    /// numbers the conversion changes (M7e). Greys are the same in every
+    /// space, so most defaults (a surface's white specular colour) aren't
+    /// listed. Empty when the space doesn't change.
+    public func colorsToConvert(of path: String, to space: String?,
+                                convert: ([Double], String, String) throws -> [Double]) throws -> [MXColorUse] {
+        let before: MXWorkingSpace = workingSpace(of: path)
+        let from: String = before.active
+        let to: String = space ?? before.inheritedOrDefault
+        guard from != to else {
+            return []
+        }
+        var uses: [MXColorUse] = colorsInWorkingSpace(of: path)
+        for use in defaultColorsInWorkingSpace(of: path) {
+            guard let numbers = MXValueText.numbers(use.value) else {
+                continue
+            }
+            let converted: [Double] = try convert(numbers, from, to)
+            // SWIFT: `zip` pairs the numbers before and after; `contains`
+            // asks whether any pair moved by more than the tolerance.
+            if zip(numbers, converted).contains(where: { abs($0 - $1) > Self.unchangedTolerance }) {
+                uses.append(use)
+            }
+        }
+        return uses
+    }
+
+    /// How far a converted number may be from the original and still count
+    /// as unchanged: a grey converted between spaces comes back off by
+    /// rounding (0.79999995 for 0.8), and a default isn't set for that.
+    static let unchangedTolerance: Double = 1e-4
 
     /// Sets the working space of the document (`path` "") or of the
     /// nodegraph at `path`; nil removes its `colorspace`, so it inherits.
     ///
     /// With `convert` (numbers, from space, to space → numbers), the
-    /// colours keep their look: each value in ``colorsInWorkingSpace(of:)``
-    /// is converted to the new space, and each image is tagged with the old
-    /// one. Without, the numbers stay and mean colours in the new space.
+    /// colours keep their look: each value in ``colorsToConvert(of:to:convert:)``
+    /// is converted to the new space (a default is set on its node,
+    /// converted, M7e), and each image is tagged with the old one.
+    /// Without, the numbers stay and mean colours in the new space.
     ///
     /// SWIFT: `convert` is an optional function. Its type,
     /// `([Double], String, String) throws -> [Double]`, has no argument
@@ -95,7 +145,7 @@ extension MXDocument {
         let from: String = before.active
         let to: String = space ?? before.inheritedOrDefault
         if let convert, from != to {
-            for use in colorsInWorkingSpace(of: path) {
+            for use in try colorsToConvert(of: path, to: space, convert: convert) {
                 if use.isFile {
                     try setColorSpace(from, ofInput: use.inputName, on: use.ownerPath)
                 } else if let numbers = MXValueText.numbers(use.value) {

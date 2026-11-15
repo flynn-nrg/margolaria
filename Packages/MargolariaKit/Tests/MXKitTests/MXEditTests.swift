@@ -203,6 +203,112 @@ struct MXEditTests {
         }
     }
 
+    @Test("Coloured defaults are converted with the colours set; greys are left alone (M7e)")
+    func convertDefaults() throws {
+        // A stand-in for OCIO that keeps greys and changes colours, as a
+        // change of primaries does: it rotates the components.
+        let rotate: ([Double], String, String) throws -> [Double] = { numbers, _, _ in
+            [numbers[1], numbers[2], numbers[0]] + numbers.dropFirst(3)
+        }
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <nodedef name="ND_paint_color3" node="paint">
+                <input name="tint" type="color3" value="0.9, 0.3, 0.1" />
+                <input name="grey" type="color3" value="0.5, 0.5, 0.5" />
+                <input name="tagged" type="color3" value="0.9, 0.3, 0.1" colorspace="srgb_texture" />
+                <input name="set" type="color3" value="0.2, 0.4, 0.6" />
+                <input name="weights" type="color3" value="0.2722287, 0.6740818, 0.0536895" enum="acescg, rec709"
+                       enumvalues="0.2722287,0.6740818,0.0536895, 0.2126,0.7152,0.0722" />
+                <input name="chosen" type="color3" value="0.2722287, 0.6740818, 0.0536895" enum="acescg, rec709"
+                       enumvalues="0.2722287,0.6740818,0.0536895, 0.2126,0.7152,0.0722" />
+                <output name="out" type="color3" />
+              </nodedef>
+              <paint name="p" type="color3">
+                <input name="set" type="color3" value="0.1, 0.2, 0.3" />
+                <input name="chosen" type="color3" value="0.2126, 0.7152, 0.0722" />
+              </paint>
+              <nodegraph name="Own" colorspace="acescg">
+                <paint name="inner" type="color3" />
+                <output name="out" type="color3" nodename="inner" />
+              </nodegraph>
+            </materialx>
+            """)
+        // Listed: the untagged colour defaults the nodes leave alone, not
+        // the one set, nor those of a graph with its own space, nor a
+        // choice from a list (as `lumacoeffs`), set or not.
+        #expect(document.defaultColorsInWorkingSpace(of: "").map { "\($0.ownerPath).\($0.inputName)" }
+                == ["p.tint", "p.grey"])
+        #expect(document.defaultColorsInWorkingSpace(of: "").allSatisfy { $0.isDefault })
+        // To convert: the colour set, and the default the conversion changes.
+        let uses: [MXColorUse] = try document.colorsToConvert(of: "", to: "acescg", convert: rotate)
+        #expect(uses.map { "\($0.ownerPath).\($0.inputName)" } == ["p.set", "p.tint"])
+        #expect(try document.colorsToConvert(of: "", to: nil, convert: rotate).isEmpty, "no change of space")
+
+        try document.setWorkingSpace("acescg", of: "", convert: rotate)
+        let tint: MXPort = try input("tint", of: "p", in: document)
+        #expect(tint.value == "0.3, 0.1, 0.9" && tint.isAuthored)
+        #expect(try !input("grey", of: "p", in: document).isAuthored)
+        #expect(try input("set", of: "p", in: document).value == "0.2, 0.3, 0.1")
+        #expect(try input("chosen", of: "p", in: document).value == "0.2126, 0.7152, 0.0722")
+        #expect(try !input("tint", of: "Own/inner", in: document).isAuthored)
+    }
+
+    @Test("Physical quantities keep their numbers, set, default, or passed on by a graph (M7e)")
+    func physicalQuantitiesKept() throws {
+        let rotate: ([Double], String, String) throws -> [Double] = { numbers, _, _ in
+            [numbers[1], numbers[2], numbers[0]] + numbers.dropFirst(3)
+        }
+        let document = try MXDocument(xml: """
+            <?xml version="1.0"?>
+            <materialx version="1.39">
+              <conductor_bsdf name="set" type="BSDF">
+                <input name="ior" type="color3" value="0.2, 0.4, 1.3" />
+                <input name="extinction" type="color3" value="3.4, 2.3, 1.7" />
+              </conductor_bsdf>
+              <conductor_bsdf name="unset" type="BSDF" />
+              <open_pbr_surface name="skin" type="surfaceshader" />
+              <standard_surface name="wax" type="surfaceshader">
+                <input name="subsurface_radius" type="color3" value="1, 0.35, 0.2" />
+              </standard_surface>
+              <nodedef name="ND_metal_BSDF" node="metal">
+                <input name="metal_ior" type="color3" value="0.2, 0.4, 1.3" />
+                <input name="shine" type="color3" value="0.9, 0.3, 0.1" />
+                <output name="out" type="BSDF" />
+              </nodedef>
+              <nodegraph name="NG_metal_BSDF" nodedef="ND_metal_BSDF">
+                <conductor_bsdf name="c" type="BSDF">
+                  <input name="ior" type="color3" interfacename="metal_ior" />
+                  <input name="extinction" type="color3" interfacename="shine" />
+                </conductor_bsdf>
+                <output name="out" type="BSDF" nodename="c" />
+              </nodegraph>
+              <metal name="m" type="BSDF" />
+              <nodegraph name="Graph">
+                <input name="graph_ior" type="color3" value="0.2, 0.4, 1.3" />
+                <input name="paint" type="color3" value="0.9, 0.3, 0.1" />
+                <conductor_bsdf name="c" type="BSDF">
+                  <input name="ior" type="color3" interfacename="graph_ior" />
+                </conductor_bsdf>
+                <output name="out" type="BSDF" nodename="c" />
+              </nodegraph>
+            </materialx>
+            """)
+        document.setDataLibrary(try MXLibrary.bundled.get())
+        // Only the graph's `paint`: `metal_ior` and `shine` feed the
+        // conductor's ior and extinction, so whatever their names say,
+        // they keep their numbers too.
+        let uses: [MXColorUse] = try document.colorsToConvert(of: "", to: "acescg", convert: rotate)
+        #expect(uses.map { "\($0.ownerPath).\($0.inputName)" } == ["Graph.paint"])
+        try document.setWorkingSpace("acescg", of: "", convert: rotate)
+        #expect(try input("ior", of: "set", in: document).value == "0.2, 0.4, 1.3")
+        #expect(try !input("ior", of: "unset", in: document).isAuthored)
+        #expect(try !input("subsurface_radius_scale", of: "skin", in: document).isAuthored)
+        #expect(try input("subsurface_radius", of: "wax", in: document).value == "1, 0.35, 0.2")
+        #expect(try !input("metal_ior", of: "m", in: document).isAuthored)
+        #expect(try input("graph_ior", of: "Graph", in: document).value == "0.2, 0.4, 1.3")
+    }
+
     @Test("Templates are written in the working space chosen")
     func templateWorkingSpace() throws {
         for template in MXDocumentTemplate.allCases {
