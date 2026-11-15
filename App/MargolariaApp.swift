@@ -13,7 +13,7 @@
 // is in docs/PLAN.md §3.
 //
 // The app delegate also runs the user's startup scripts at launch (M6d),
-// and handles the Scripts menu's own items.
+// and handles the Scripts menu's own items, and Settings… (M7f).
 //
 // The same executable is the `margolaria` command line (M6e): started with
 // a subcommand (`margolaria run ...`, `margolaria export ...`), it runs it
@@ -140,6 +140,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSApp.presentError(error)
         }
+    }
+
+    // MARK: Settings (M7f)
+
+    /// Margolaria > Settings… (⌘,): shows the Settings window
+    /// (SettingsWindow.swift).
+    @objc func showSettings(_ sender: Any?) {
+        SettingsWindowController.show()
     }
 
     /// Scripts > Stop Script: stops the script running, wherever it was

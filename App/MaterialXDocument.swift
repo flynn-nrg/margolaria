@@ -21,8 +21,7 @@
 // tuples, `Optional.map`; an `@objc` action on the document, a `weak`
 // stored property (M4f); a save panel's accessory view, and a small
 // `NSObject` subclass as a control's target (M5b); a function taking a
-// throwing closure (M5c); `NSPathControl` and its delegate, `UserDefaults`
-// read and written directly (M5d); overriding a property to add `didSet`
+// throwing closure (M5c); `UserDefaults` read and written directly (M5d); overriding a property to add `didSet`
 // (M7c); `String` bridged `as NSString`, an Objective-C method returning
 // an object and taking `error:` seen as `throws` (M7d).
 
@@ -469,7 +468,7 @@ final class MaterialXDocument: NSDocument {
     /// The Generated Shader tab's Export…: writes `code` into a folder
     /// chosen in a Save panel, as MXShaderExport lays it out (the files
     /// named after `name`). For OSL, the panel offers to compile it to
-    /// .oso with an oslc the user picks, remembered for next time.
+    /// .oso with the oslc set in Settings (M7f).
     func exportShader(_ code: MXShaderCode, named name: String) {
         let panel = NSSavePanel()
         panel.title = "Export Shader"
@@ -482,7 +481,7 @@ final class MaterialXDocument: NSDocument {
                 + "the vertex and fragment stages, as MaterialX generates them."
         case .osl:
             panel.message = "A folder with \(name)'s OSL shader, the whole graph in one .osl, "
-                + "and the .oso compiled from it if oslc is set below."
+                + "and the .oso compiled from it if asked below."
         case .oslNetwork:
             panel.message = "A folder with \(name)'s OSL shader group (.oslgroup) and every compiled "
                 + "shader (.oso) it names. Give the folder to the renderer as its shader search path."
@@ -1090,66 +1089,76 @@ final class USDFormatAccessory: NSObject {
 }
 
 /// The Export Shader panel's accessory for OSL (M5d): whether to compile
-/// the shader to .oso, and with which oslc. Both are remembered in the
-/// user defaults. The first time, oslc is looked for where Homebrew and
-/// other installers put it; the path control's menu picks another
-/// (scripts/build-osl.sh's, for one).
+/// the shader to .oso, remembered in the user defaults. Which oslc is set
+/// in Settings (M7f, SettingsWindow.swift); the accessory says which, and
+/// its Settings… button opens the window. It follows a change made there
+/// while the panel is open.
 ///
-/// SWIFT: An `NSObject` subclass, as the path control's delegate must be.
-final class OSLCompilerAccessory: NSObject, NSPathControlDelegate {
-    /// The user defaults keys.
-    private static let compilerKey: String = "oslcPath"
+/// SWIFT: An `NSObject` subclass, for the selector-based target-action of
+/// its button and its notification observer.
+@MainActor
+final class OSLCompilerAccessory: NSObject {
+    /// The user defaults key of whether to compile.
     private static let compilesKey: String = "compilesOSL"
-
-    /// Where oslc is looked for when none has been chosen.
-    private static let usualPlaces: [String] = ["/opt/homebrew/bin/oslc", "/usr/local/bin/oslc"]
 
     /// The view the panel shows under its file browser.
     let view: NSView
     private let checkbox: NSButton
-    private let pathControl: NSPathControl
+    private let compilerLabel: NSTextField
 
     override init() {
-        checkbox = NSButton(checkboxWithTitle: "Compile to .oso with:", target: nil, action: nil)
-        pathControl = NSPathControl()
-        pathControl.pathStyle = .popUp
-        // Editable: its menu has "Choose…", which opens a panel.
-        pathControl.isEditable = true
-        pathControl.placeholderString = "Choose oslc"
-        let stack = NSStackView(views: [checkbox, pathControl])
+        checkbox = NSButton(checkboxWithTitle: "Compile to .oso", target: nil, action: nil)
+        compilerLabel = NSTextField(labelWithString: "")
+        compilerLabel.textColor = .secondaryLabelColor
+        compilerLabel.lineBreakMode = .byTruncatingMiddle
+        let settingsButton = NSButton(title: "Settings…", target: nil, action: nil)
+        let stack = NSStackView(views: [checkbox, compilerLabel, settingsButton])
         stack.edgeInsets = NSEdgeInsets(top: 8, left: 16, bottom: 8, right: 16)
         view = stack
         super.init()
-        pathControl.delegate = self
+        settingsButton.target = self
+        settingsButton.action = #selector(openSettings(_:))
 
-        // SWIFT: `UserDefaults.standard` is what `@AppStorage` reads and
-        // writes, here used directly, as AppKit code does. `string(forKey:)`
-        // is nil for a key never set; `object(forKey:)` tells "never set"
-        // from false, which `bool(forKey:)` can't.
-        let defaults = UserDefaults.standard
-        let saved: String? = defaults.string(forKey: Self.compilerKey)
-        let path: String? = saved ?? Self.usualPlaces.first { FileManager.default.isExecutableFile(atPath: $0) }
-        pathControl.url = path.map { URL(filePath: $0) }
-        let compiles: Bool = defaults.object(forKey: Self.compilesKey) as? Bool ?? (path != nil)
-        checkbox.state = compiles ? .on : .off
+        // SWIFT: `object(forKey:)` tells "never set" from false, which
+        // `bool(forKey:)` can't: the first time, compile if there is an oslc.
+        let saved: Bool? = UserDefaults.standard.object(forKey: Self.compilesKey) as? Bool
+        checkbox.state = (saved ?? (OSLCompiler.url != nil)) ? .on : .off
+        showCompiler()
+        NotificationCenter.default.addObserver(self, selector: #selector(defaultsChanged(_:)),
+                                               name: UserDefaults.didChangeNotification, object: nil)
     }
 
-    /// The oslc to compile with, or nil not to compile; remembers the
-    /// choice.
+    /// The oslc to compile with (Settings'), or nil not to compile;
+    /// remembers whether to.
     func chosenCompiler() -> URL? {
-        let defaults = UserDefaults.standard
         let compiles: Bool = checkbox.state == .on
-        defaults.set(compiles, forKey: Self.compilesKey)
-        if let url = pathControl.url {
-            defaults.set(url.path(percentEncoded: false), forKey: Self.compilerKey)
-        }
-        return compiles ? pathControl.url : nil
+        UserDefaults.standard.set(compiles, forKey: Self.compilesKey)
+        return compiles ? OSLCompiler.url : nil
     }
 
-    /// The path control's "Choose…" panel picks a file (oslc), not a folder.
-    func pathControl(_ pathControl: NSPathControl, willDisplay openPanel: NSOpenPanel) {
-        openPanel.canChooseFiles = true
-        openPanel.canChooseDirectories = false
-        openPanel.message = "Choose oslc, OSL's compiler."
+    /// Shows which oslc compiles, and allows compiling only if there is one.
+    private func showCompiler() {
+        if let url = OSLCompiler.url {
+            compilerLabel.stringValue = "with " + url.path(percentEncoded: false)
+            checkbox.isEnabled = true
+        } else {
+            compilerLabel.stringValue = "needs oslc, chosen in Settings"
+            checkbox.isEnabled = false
+        }
+    }
+
+    @objc private func openSettings(_ sender: Any?) {
+        SettingsWindowController.show()
+    }
+
+    /// Settings changed oslc (or any other default): shown again.
+    ///
+    /// SWIFT: `nonisolated`: the notification comes on the thread that
+    /// changed the default, which needn't be the main one, so this method
+    /// may not touch the controls itself; the Task does, on the main actor.
+    @objc nonisolated private func defaultsChanged(_ notification: Notification) {
+        Task { @MainActor [weak self] in
+            self?.showCompiler()
+        }
     }
 }
