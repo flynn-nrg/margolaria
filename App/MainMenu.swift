@@ -16,11 +16,19 @@
 // every item of this menu bar that is enabled when it opens, so a new item
 // here is in the palette too.
 //
-// ⌘G is shared (M4d): Graph > Group in Backdrop while the canvas has
-// keyboard focus, Edit > Find Next everywhere else (the XML tab). AppKit
-// lets only one item of the menu bar have a key equivalent (it clears it
-// from any other item it is given to), so the key moves between the two
-// items as the focus does, and each menu shows ⌘G where it applies.
+// Every item's key comes from GraphKit's Shortcuts.swift (M7g), the one
+// table of the app's shortcuts, which docs/SHORTCUTS.md lists and tests
+// check for clashes.
+//
+// Some keys apply only on the canvas, while it has keyboard focus: its
+// single keys (A, F, U…, M7g) and ⌘G, which is Graph > Group in Backdrop
+// there and Edit > Find Next everywhere else (M4d). Their items have the
+// key only while it applies; the menu bar gives and takes it as the focus
+// moves (giveScopedKeys). A menu item's key equivalent is looked for
+// before the focused view sees the key, so a plain "a" kept in the menu
+// would take the letter from every text field; and AppKit lets only one
+// item have a key (it clears it from any other it is given to), so ⌘G
+// moves between its two items.
 //
 // The Scripts menu (M6d) lists the commands scripts registered
 // (`@margolaria.command`), rebuilt whenever they change, so the palette
@@ -46,14 +54,21 @@ enum MainMenu {
     struct Item {
         let title: String
         let action: Selector?
-        let key: String
-        let modifiers: NSEvent.ModifierFlags
+        /// Its shortcut, from Shortcuts.swift; nil for none.
+        let shortcut: Shortcut?
+        /// For items that share an action, told apart by it (Find's).
+        let tag: Int
 
-        init(_ title: String, _ action: Selector?, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command) {
+        init(_ title: String, _ action: Selector?, _ shortcut: Shortcut? = nil, tag: Int = 0) {
             self.title = title
             self.action = action
-            self.key = key
-            self.modifiers = modifiers
+            self.shortcut = shortcut
+            self.tag = tag
+        }
+
+        /// The item for `shortcut`, titled as the table names it.
+        init(_ shortcut: Shortcut, _ action: Selector) {
+            self.init(shortcut.title, action, shortcut)
         }
 
         static let separator = Item("", nil)
@@ -73,16 +88,16 @@ enum MainMenu {
         let appMenu: NSMenu = menu(appName,
                                    Item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
                                    .separator,
-                                   Item("Settings…", #selector(AppDelegate.showSettings(_:)), ","),
+                                   Item("Settings…", #selector(AppDelegate.showSettings(_:)), .settings),
                                    .separator)
         appMenu.addItem(submenu: servicesMenu)
         add(to: appMenu,
             .separator,
-            Item("Hide \(appName)", #selector(NSApplication.hide(_:)), "h"),
-            Item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),
+            Item("Hide \(appName)", #selector(NSApplication.hide(_:)), .hide),
+            Item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), .hideOthers),
             Item("Show All", #selector(NSApplication.unhideAllApplications(_:))),
             .separator,
-            Item("Quit \(appName)", #selector(NSApplication.terminate(_:)), "q"))
+            Item("Quit \(appName)", #selector(NSApplication.terminate(_:)), .quit))
         NSApp.servicesMenu = servicesMenu
         bar.addItem(submenu: appMenu)
 
@@ -90,17 +105,17 @@ enum MainMenu {
         // except Export as USD… and USDZ…, and Run Script…,
         // MaterialXDocument's own.
         let fileMenu: NSMenu = menu("File",
-                                    Item("New", #selector(NSDocumentController.newDocument(_:)), "n"),
-                                    Item("Open…", #selector(NSDocumentController.openDocument(_:)), "o"))
+                                    Item(.new, #selector(NSDocumentController.newDocument(_:))),
+                                    Item(.open, #selector(NSDocumentController.openDocument(_:))))
         // No "Open Recent" here: NSDocumentController inserts its own after
         // "Open…" and keeps it filled. It recognises its menu by a private
         // marker, so one built here would only be a second, empty copy.
         // (AppKit also adds "Share", and retitles Save as needed.)
         add(to: fileMenu,
             .separator,
-            Item("Close", #selector(NSWindow.performClose(_:)), "w"),
-            Item("Save", #selector(NSDocument.save(_:)), "s"),
-            Item("Duplicate", #selector(NSDocument.duplicate(_:)), "s", [.command, .shift]),
+            Item(.close, #selector(NSWindow.performClose(_:))),
+            Item(.save, #selector(NSDocument.save(_:))),
+            Item(.duplicateDocument, #selector(NSDocument.duplicate(_:))),
             Item("Rename…", #selector(NSDocument.rename(_:))),
             Item("Move To…", #selector(NSDocument.move(_:))),
             // AppKit turns this item into the "Revert To" submenu, with
@@ -109,11 +124,11 @@ enum MainMenu {
             .separator,
             // The document's materials as a USD file (M5b), and as a
             // USDZ for Quick Look and Reality Composer Pro (M5c).
-            Item("Export as USD…", #selector(MaterialXDocument.exportAsUSD(_:))),
-            Item("Export as USDZ…", #selector(MaterialXDocument.exportAsUSDZ(_:))),
+            Item(.exportUSD, #selector(MaterialXDocument.exportAsUSD(_:))),
+            Item(.exportUSDZ, #selector(MaterialXDocument.exportAsUSDZ(_:))),
             .separator,
             // A Python script run on the document, as one undo step (M6).
-            Item("Run Script…", #selector(MaterialXDocument.runScript(_:))))
+            Item(.runScript, #selector(MaterialXDocument.runScript(_:))))
         bar.addItem(submenu: fileMenu)
 
         // Edit. Undo and redo go to the window's undo manager.
@@ -122,80 +137,89 @@ enum MainMenu {
         // is built from its name. The double parentheses tell the compiler
         // that this unchecked form is intended.
         bar.addItem(submenu: menu("Edit",
-                                  Item("Undo", Selector(("undo:")), "z"),
-                                  Item("Redo", Selector(("redo:")), "z", [.command, .shift]),
+                                  Item(.undo, Selector(("undo:"))),
+                                  Item(.redo, Selector(("redo:"))),
                                   .separator,
-                                  Item("Cut", #selector(NSText.cut(_:)), "x"),
-                                  Item("Copy", #selector(NSText.copy(_:)), "c"),
-                                  Item("Paste", #selector(NSText.paste(_:)), "v"),
+                                  Item(.cut, #selector(NSText.cut(_:))),
+                                  Item(.copy, #selector(NSText.copy(_:))),
+                                  Item(.paste, #selector(NSText.paste(_:))),
                                   // On the canvas: copies the selected nodes
                                   // next to themselves (M4a).
-                                  Item("Duplicate", #selector(GraphEventView.duplicateNodes(_:)), "d"),
+                                  Item(.duplicateNodes, #selector(GraphEventView.duplicateNodes(_:))),
                                   // On the canvas: deletes the selected nodes
-                                  // (GraphEventView.delete(_:)).
-                                  Item("Delete", #selector(NSText.delete(_:))),
-                                  Item("Select All", #selector(NSText.selectAll(_:)), "a")))
-        // Find, for the XML panel. Text views handle these through one action,
-        // performTextFinderAction:, told which command by the item's tag.
-        if let editMenu = bar.items.last?.submenu {
-            editMenu.addItem(.separator())
-            let finds: [(String, String, NSTextFinder.Action)] = [
-                ("Find…", "f", .showFindInterface),
-                ("Find Next", "g", .nextMatch),
-                ("Find Previous", "G", .previousMatch),
-            ]
-            for (title, key, action) in finds {
-                let item = NSMenuItem(title: title, action: #selector(NSTextView.performTextFinderAction(_:)), keyEquivalent: key)
-                // SWIFT: `rawValue` is the enum case's underlying Int.
-                item.tag = action.rawValue
-                editMenu.addItem(item)
-                if action == .nextMatch {
-                    findNextItem = item
-                }
-            }
-        }
+                                  // (GraphEventView.delete(_:)); ⌫ only there.
+                                  Item(.delete, #selector(NSText.delete(_:))),
+                                  Item(.selectAll, #selector(NSText.selectAll(_:))),
+                                  // Find, for the XML panel. Text views
+                                  // handle these through one action,
+                                  // performTextFinderAction:, told which
+                                  // command by the item's tag.
+                                  // SWIFT: `rawValue` is the enum case's
+                                  // underlying Int.
+                                  .separator,
+                                  Item("Find…", #selector(NSTextView.performTextFinderAction(_:)), .find,
+                                       tag: NSTextFinder.Action.showFindInterface.rawValue),
+                                  Item("Find Next", #selector(NSTextView.performTextFinderAction(_:)), .findNext,
+                                       tag: NSTextFinder.Action.nextMatch.rawValue),
+                                  Item("Find Previous", #selector(NSTextView.performTextFinderAction(_:)), .findPrevious,
+                                       tag: NSTextFinder.Action.previousMatch.rawValue)))
 
         // View.
         // The command palette (M4f) is the document's: it lists this menu
         // bar's commands, read when ⌘K is pressed (MaterialXDocument).
+        // The main area, the bottom panel's tabs, the sidebar's tabs and the
+        // right-hand panels (M7g) are the window's (MaterialXDocument),
+        // checked or retitled as they are shown.
         bar.addItem(submenu: menu("View",
-                                  Item("Command Palette…", #selector(MaterialXDocument.showCommandPalette(_:)), "k"),
+                                  Item(.commandPalette, #selector(MaterialXDocument.showCommandPalette(_:))),
                                   .separator,
-                                  Item("Show Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
+                                  Item(.graphView, #selector(MaterialXDocument.showGraphView(_:))),
+                                  Item(.splitView, #selector(MaterialXDocument.showSplitView(_:))),
+                                  Item(.textView, #selector(MaterialXDocument.showTextView(_:))),
                                   .separator,
-                                  Item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control])))
+                                  Item(.xmlPanel, #selector(MaterialXDocument.showXMLPanel(_:))),
+                                  Item(.issuesPanel, #selector(MaterialXDocument.showIssuesPanel(_:))),
+                                  Item(.shaderPanel, #selector(MaterialXDocument.showShaderPanel(_:))),
+                                  Item(.consolePanel, #selector(MaterialXDocument.showConsolePanel(_:))),
+                                  .separator,
+                                  Item(.documentSidebar, #selector(MaterialXDocument.showDocumentSidebar(_:))),
+                                  Item(.librarySidebar, #selector(MaterialXDocument.showLibrarySidebar(_:))),
+                                  .separator,
+                                  Item(.sidebar, #selector(NSSplitViewController.toggleSidebar(_:))),
+                                  Item(.viewport, #selector(MaterialXDocument.toggleViewport(_:))),
+                                  Item(.inspector, #selector(MaterialXDocument.toggleInspector(_:))),
+                                  .separator,
+                                  Item(.fullScreen, #selector(NSWindow.toggleFullScreen(_:)))))
 
         // Graph: canvas commands (M4a), handled by the canvas view
         // (GraphEventView) when it has keyboard focus, and greyed out
-        // otherwise. "G" in capitals adds Shift. Group in Backdrop gets ⌘G
-        // while the canvas has focus (see the file comment).
-        //
-        // The first four are the canvas's single keys (Tab, A, F, U; M4f).
-        // They have no key equivalents here: AppKit looks for a menu item's
-        // key equivalent before the focused view gets the key, so a plain
-        // "a" would be taken from every text field. The command palette
-        // shows the keys (GraphEventView.keys).
+        // otherwise. The single keys (Tab, A, F…; M4f, M7g) and Group in
+        // Backdrop's ⌘G are the canvas's only (see the file comment).
+        // Show Node Previews is the canvas bar's toggle, for every window
+        // (AppDelegate).
         let graphMenu: NSMenu = menu("Graph",
-                                     Item("Add Node…", #selector(GraphEventView.addNode(_:))),
-                                     Item("Frame All", #selector(GraphEventView.frameAll(_:))),
-                                     Item("Frame Selection", #selector(GraphEventView.frameSelection(_:))),
-                                     Item("Go Up One Level", #selector(GraphEventView.goUpOneLevel(_:))),
+                                     Item(.addNode, #selector(GraphEventView.addNode(_:))),
+                                     Item(.frameAll, #selector(GraphEventView.frameAll(_:))),
+                                     Item(.frameSelection, #selector(GraphEventView.frameSelection(_:))),
                                      .separator,
-                                     Item("Group in Backdrop", #selector(GraphEventView.groupInBackdrop(_:))),
+                                     Item(.openNode, #selector(GraphEventView.openSelectedNode(_:))),
+                                     Item(.goUp, #selector(GraphEventView.goUpOneLevel(_:))),
                                      .separator,
-                                     Item("Collapse into Nodegraph", #selector(GraphEventView.collapseIntoNodeGraph(_:)),
-                                          "g", [.command, .option]),
-                                     Item("Ungroup Nodegraph", #selector(GraphEventView.ungroupNodeGraph(_:)),
-                                          "G", [.command, .option]))
-        backdropItem = graphMenu.items.first { $0.action == #selector(GraphEventView.groupInBackdrop(_:)) }
+                                     Item(.solo, #selector(GraphEventView.showSelectionAlone(_:))),
+                                     Item("Show Node Previews", #selector(AppDelegate.toggleNodePreviews(_:))),
+                                     .separator,
+                                     Item(.arrange, #selector(GraphEventView.arrange(_:))),
+                                     Item(.groupInBackdrop, #selector(GraphEventView.groupInBackdrop(_:))),
+                                     .separator,
+                                     Item(.collapse, #selector(GraphEventView.collapseIntoNodeGraph(_:))),
+                                     Item(.ungroup, #selector(GraphEventView.ungroupNodeGraph(_:))))
         bar.addItem(submenu: graphMenu)
-        shareCommandG()
 
         // Scripts (M6d): the commands, first (updateScriptCommands), then
         // the startup scripts' own items, AppDelegate's.
         let scriptsMenu: NSMenu = menu("Scripts",
                                        .separator,
-                                       Item("Stop Script", #selector(AppDelegate.stopScript(_:))),
+                                       Item(.stopScript, #selector(AppDelegate.stopScript(_:))),
                                        .separator,
                                        Item("Reload Startup Scripts", #selector(AppDelegate.reloadStartupScripts(_:))),
                                        Item("Open Scripts Folder", #selector(AppDelegate.openScriptsFolder(_:))))
@@ -212,7 +236,7 @@ enum MainMenu {
         // Window. Registering it as the windows menu makes AppKit list the
         // open windows at its end.
         let windowMenu: NSMenu = menu("Window",
-                                      Item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),
+                                      Item(.minimize, #selector(NSWindow.performMiniaturize(_:))),
                                       Item("Zoom", #selector(NSWindow.performZoom(_:))),
                                       .separator,
                                       Item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))))
@@ -224,53 +248,55 @@ enum MainMenu {
         NSApp.helpMenu = helpMenu
         bar.addItem(submenu: helpMenu)
 
+        shareScopedKeys()
         return bar
     }
 
-    // MARK: ⌘G (M4d)
+    // MARK: Keys that apply only on the canvas, or only outside it (M4d, M7g)
 
-    /// Edit > Find Next and Graph > Group in Backdrop, which share ⌘G.
+    /// The items whose key applies only on the canvas or only outside it,
+    /// with their shortcut: given the key when it applies, and only then.
     ///
     /// SWIFT: `static var` on a `@MainActor` type: shared state, only used
     /// on the main thread, which the compiler checks.
-    private static var findNextItem: NSMenuItem? = nil
-    private static var backdropItem: NSMenuItem? = nil
+    private static var scopedItems: [(NSMenuItem, Shortcut)] = []
     /// The registration for window updates, kept so it lasts.
     private static var focusObserver: (any NSObjectProtocol)? = nil
 
-    /// Gives ⌘G to the item that applies now, and again whenever a window
-    /// updates: after every event, so after every change of focus too.
+    /// Gives the scoped items their keys for the focus now, and again
+    /// whenever a window updates: after every event, so after every change
+    /// of focus too.
     ///
     /// SWIFT: The observer's closure may be called from any thread as far
     /// as the compiler knows; `queue: .main` makes it the main thread, and
     /// `MainActor.assumeIsolated` tells the compiler so (it checks, at run
     /// time, and stops the app if it isn't).
-    private static func shareCommandG() {
-        giveCommandG()
+    private static func shareScopedKeys() {
+        giveScopedKeys()
         focusObserver = NotificationCenter.default.addObserver(forName: NSWindow.didUpdateNotification, object: nil,
                                                                queue: .main) { _ in
             MainActor.assumeIsolated {
-                giveCommandG()
+                giveScopedKeys()
             }
         }
     }
 
-    /// ⌘G to Group in Backdrop if the key window's focus is a canvas, to
-    /// Find Next otherwise. Nothing changes if it already has it.
-    private static func giveCommandG() {
-        guard let findNextItem, let backdropItem else {
-            return
-        }
+    /// The canvas's keys if the key window's focus is a canvas, the others
+    /// otherwise. Items are only changed when their key must change.
+    private static func giveScopedKeys() {
         let onCanvas: Bool = NSApp.keyWindow?.firstResponder is GraphEventView
-        let (owner, other): (NSMenuItem, NSMenuItem) = onCanvas ? (backdropItem, findNextItem) : (findNextItem, backdropItem)
-        guard owner.keyEquivalent != "g" else {
-            return
+        let applies: (Shortcut) -> Bool = { shortcut in
+            shortcut.scope == .canvas ? onCanvas : !onCanvas
         }
-        // The other one's first: AppKit wouldn't give a key equivalent
-        // another item has.
-        other.keyEquivalent = ""
-        owner.keyEquivalent = "g"
-        owner.keyEquivalentModifierMask = .command
+        // Keys taken first: AppKit wouldn't give an item a key another has
+        // (⌘G, moving between Find Next and Group in Backdrop).
+        for (item, shortcut) in scopedItems where !applies(shortcut) && !item.keyEquivalent.isEmpty {
+            item.keyEquivalent = ""
+        }
+        for (item, shortcut) in scopedItems where applies(shortcut) && item.keyEquivalent != shortcut.key {
+            item.keyEquivalent = shortcut.key
+            item.keyEquivalentModifierMask = shortcut.modifiers
+        }
     }
 
     // MARK: Scripts (M6d)
@@ -327,8 +353,17 @@ enum MainMenu {
                 menu.addItem(NSMenuItem.separator())
                 continue
             }
-            let menuItem = NSMenuItem(title: item.title, action: action, keyEquivalent: item.key)
-            menuItem.keyEquivalentModifierMask = item.modifiers
+            let menuItem = NSMenuItem(title: item.title, action: action, keyEquivalent: "")
+            menuItem.tag = item.tag
+            if let shortcut = item.shortcut {
+                if shortcut.scope == .anywhere {
+                    menuItem.keyEquivalent = shortcut.key
+                    menuItem.keyEquivalentModifierMask = shortcut.modifiers
+                } else {
+                    // Given its key by giveScopedKeys, when it applies.
+                    scopedItems.append((menuItem, shortcut))
+                }
+            }
             menu.addItem(menuItem)
         }
     }

@@ -12,6 +12,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `final class` | Can't be subclassed; methods are called directly | C++ `final` | `MXLibrary.swift` |
 | `let` / `var` | Constant / variable. Prefer `let`. | `const` locals | `Package.swift` |
 | `enum` with associated values | Each case can carry its own data; `switch` must cover every case | `std::variant` with names | `MXError.swift` |
+| `case` with a computed value | `case Shortcut.frameAll.key:` compares with `==` (the `~=` operator), not only literals, so a switch can match constants defined elsewhere | A C `switch` can't; an `if`/`else if` chain | `GraphEventView.swift` (`keyDown`) |
 | Enum with no cases | A namespace for static helpers | C++ `namespace` | `MXDocumentTests.swift` (`Fixtures`) |
 | Optionals `T?` | A value or `nil`. Non-optional types can never be nil | Nullable pointer vs reference; Go's `v, ok` | `MXLibrary.swift` |
 | `if let` / `guard let` | Unwrap an optional; `guard` exits early if it's nil | `if (p) {...}` / `if (!p) return` | `MXLibrary.swift` |
@@ -22,6 +23,7 @@ Entries are added as new concepts appear (docs/PLAN.md §6).
 | `SIMD3<T>` | A small fixed-size vector value: `a + b`, `a * 2`, `.x/.y/.z` work element by element | GLSL/Metal `double3`; `simd::double3` | `ColorConverter.swift` |
 | Computed properties | A property whose getter runs code, with no storage | ObjC `@property` with a custom getter | `MXError.swift` |
 | `static` / `static let` | Type members; `static let` is initialised lazily, exactly once, thread-safely | C++ static member; function-local static; `dispatch_once` | `MXLibrary.swift` (`bundled`) |
+| `static let`s of a type's own type | `Shortcut.frameAll`: named values of the type, kept on it, so `.frameAll` works wherever a Shortcut is expected | C++ `static const Foo kBar;` in `Foo` | `Shortcuts.swift` |
 | `Self` | "This type", inside its own declaration | — | `MXGraph.swift` (`Self.resolveFile`) |
 | `Result<T, E>` | Stores either a success value or an error | `std::expected` | `MXLibrary.swift` |
 | Number types | `Int`, `Int32`, `Double`… never convert implicitly; use `Int(x)` | Stricter than C | `MXLibrary.swift` |

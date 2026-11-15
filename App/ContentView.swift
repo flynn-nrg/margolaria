@@ -68,12 +68,6 @@ struct ContentView: View {
     /// and it's optional because nothing may be selected.
     @State private var selection: MXElementSummary.ID?
 
-    /// Graph, Split or Text.
-    @State private var viewMode: ViewMode = .split
-
-    /// The bottom panel's tab.
-    @State private var bottomTab: BottomTab = .xml
-
     /// The XML tab's edits not applied yet (M4e). Here, not in the tab,
     /// so they stay when the tab or the panel is hidden.
     @State private var xmlDraft = XMLDraft()
@@ -89,18 +83,9 @@ struct ContentView: View {
     /// M3d), by path; nil when the viewport shows a material.
     @State private var soloPath: String? = nil
 
-    /// The sidebar's tab.
-    @State private var sidebarTab: SidebarTab = .document
-
     /// A node to add in the middle of the canvas (its nodedef's name),
     /// from the Library tab; GraphPanel adds it and clears this.
     @State private var nodeToAdd: NodeDefinitionDrag? = nil
-
-    /// Whether the viewport is shown, at the top of the right-hand column.
-    @State private var showsViewport: Bool = true
-
-    /// Whether the inspector is shown, under the viewport.
-    @State private var showsInspector: Bool = true
 
     var body: some View {
         // The window, with a thin bar along its bottom. In a VStack, not
@@ -119,13 +104,12 @@ struct ContentView: View {
         // preferences, its sheets) but doesn't draw it or let it be
         // clicked, unlike leaving it out with `if`.
         .background {
-            if !showsInspector {
+            if !document.showsInspector {
                 inspector
                     .frame(width: 1, height: 1)
                     .hidden()
             }
         }
-        .paletteCommands(viewCommands)
         // The command palette (⌘K, M4f), over the top of the window while
         // open: what the views offer (the inspector's commands, then the
         // ones above), the menus' and the nodes.
@@ -150,36 +134,14 @@ struct ContentView: View {
 
     // MARK: Command palette (M4f)
 
-    /// The toolbar's and the panels' choices, as commands: the view mode,
-    /// the bottom panel's tabs, the sidebar's tabs, the right-hand panels.
-    private var viewCommands: [PaletteCommand] {
-        var commands: [PaletteCommand] = []
-        let modes: [(ViewMode, String)] = [(.graph, "Show Graph Only"), (.split, "Show Graph and Panel"),
-                                           (.text, "Show Panel Only")]
-        for (mode, title) in modes where mode != viewMode {
-            commands.append(PaletteCommand(title: title, group: "View") { viewMode = mode })
-        }
-        commands.append(PaletteCommand(title: "Show XML", group: "View") { showBottomTab(.xml) })
-        commands.append(PaletteCommand(title: "Show Issues", group: "View") { showBottomTab(.issues) })
-        commands.append(PaletteCommand(title: "Show Document Elements", group: "View") { sidebarTab = .document })
-        commands.append(PaletteCommand(title: "Show Library", group: "View") { sidebarTab = .library })
-        commands.append(PaletteCommand(title: showsViewport ? "Hide Viewport" : "Show Viewport", group: "View") {
-            showsViewport.toggle()
-        })
-        commands.append(PaletteCommand(title: showsInspector ? "Hide Inspector" : "Show Inspector", group: "View") {
-            showsInspector.toggle()
-        })
-        return commands
-    }
-
     /// The inspector for the selection. Clicking a connection, or
     /// renaming, shows that node on the canvas, selected.
     private var inspector: some View {
         InspectorPanel(document: document, selectedPath: document.selectedPath, soloPath: $soloPath,
                        onShow: { path in focus = path }, levelPath: graphPath,
                        onOpen: { path in
-                           if viewMode == .text {
-                               viewMode = .split
+                           if document.viewMode == .text {
+                               document.viewMode = .split
                            }
                            graphPath = path
                        })
@@ -215,18 +177,10 @@ struct ContentView: View {
 
     /// Adds a node in the middle of the canvas, showing the canvas first.
     private func add(_ node: NodeDefinitionDrag) {
-        if viewMode == .text {
-            viewMode = .split
+        if document.viewMode == .text {
+            document.viewMode = .split
         }
         nodeToAdd = node
-    }
-
-    /// Shows a tab of the bottom panel, and the panel.
-    private func showBottomTab(_ tab: BottomTab) {
-        if viewMode == .graph {
-            viewMode = .split
-        }
-        bottomTab = tab
     }
 
     /// The menus' commands, the app menu's (About, Hide, Quit) last
@@ -257,17 +211,19 @@ struct ContentView: View {
             // it. Writing the property name without `$` reads the value; with
             // `$`, you pass the storage itself.
             VStack(spacing: 0) {
-                Picker("Sidebar", selection: $sidebarTab) {
+                Picker("Sidebar", selection: Bindable(document).sidebarTab) {
                     ForEach(SidebarTab.allCases) { tab in
                         Text(tab.rawValue).tag(tab)
                     }
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .help("The document's elements (\(Shortcut.documentSidebar.symbols)), or the nodes to add "
+                      + "(\(Shortcut.librarySidebar.symbols))")
                 .padding(8)
                 // SWIFT: A `switch` in a view body, like `if`: each case
                 // is one possible view.
-                switch sidebarTab {
+                switch document.sidebarTab {
                 case .document:
                     List(document.elements, selection: $selection) { element in
                         ElementRow(element: element)
@@ -290,13 +246,13 @@ struct ContentView: View {
                 // SWIFT: `VSplitView` stacks its children with draggable
                 // dividers between them.
                 VSplitView {
-                    if viewMode != .text {
+                    if document.viewMode != .text {
                         GraphPanel(document: document, levelPath: $graphPath, focus: $focus,
                                    selectedPath: Bindable(document).selectedPath, nodeToAdd: $nodeToAdd, soloPath: $soloPath)
                             .frame(minHeight: 200, maxHeight: .infinity)
                     }
-                    if viewMode != .graph {
-                        BottomPanel(document: document, tab: $bottomTab, xmlDraft: xmlDraft, selectedPath: document.selectedPath,
+                    if document.viewMode != .graph {
+                        BottomPanel(document: document, tab: Bindable(document).bottomTab, xmlDraft: xmlDraft, selectedPath: document.selectedPath,
                                     onSelectIssue: show, onSelectElement: follow)
                             .frame(minHeight: 120, idealHeight: 260, maxHeight: .infinity)
                     }
@@ -304,9 +260,9 @@ struct ContentView: View {
                 .frame(minWidth: 300, maxWidth: .infinity)
                 // The right-hand column (PLAN.md §4.1): the viewport above
                 // the inspector, either of them hidden from the toolbar.
-                if showsViewport || showsInspector {
+                if document.showsViewport || document.showsInspector {
                     VSplitView {
-                        if showsViewport {
+                        if document.showsViewport {
                             // SWIFT: `Bindable(document)` makes bindings to an
                             // @Observable object's properties, as `$` does
                             // for @State: the picker changes the document's.
@@ -314,7 +270,7 @@ struct ContentView: View {
                                           soloPath: $soloPath)
                                 .frame(minHeight: 160, idealHeight: 320, maxHeight: .infinity)
                         }
-                        if showsInspector {
+                        if document.showsInspector {
                             inspector
                                 .frame(minHeight: 200, idealHeight: 420, maxHeight: .infinity)
                         }
@@ -327,21 +283,22 @@ struct ContentView: View {
             ToolbarItem(placement: .principal) {
                 // SWIFT: A segmented Picker bound to `viewMode`; each row's
                 // `.tag` is the value it writes.
-                Picker("View", selection: $viewMode) {
+                Picker("View", selection: Bindable(document).viewMode) {
                     ForEach(ViewMode.allCases) { mode in
                         Text(mode.rawValue).tag(mode)
                     }
                 }
                 .pickerStyle(.segmented)
-                .help("The graph, the graph with the XML and Issues panel, or the panel alone")
+                .help("The graph (\(Shortcut.graphView.symbols)), the graph with the panel under it "
+                      + "(\(Shortcut.splitView.symbols)), or the panel alone (\(Shortcut.textView.symbols))")
             }
             ToolbarItem(placement: .status) {
                 // Clicking the badge opens the Issues tab.
                 Button {
-                    if viewMode == .graph {
-                        viewMode = .split
+                    if document.viewMode == .graph {
+                        document.viewMode = .split
                     }
-                    bottomTab = .issues
+                    document.bottomTab = .issues
                 } label: {
                     IssuesBadge(issues: document.issues, libraryLoaded: document.libraryLoaded)
                 }
@@ -350,18 +307,18 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 // SWIFT: `Toggle` bound to a Bool; `.toggleStyle(.button)`
                 // draws it as a toolbar button that stays pressed when on.
-                Toggle(isOn: $showsViewport) {
+                Toggle(isOn: Bindable(document).showsViewport) {
                     Label("Viewport", systemImage: "cube.transparent")
                 }
                 .toggleStyle(.button)
-                .help("Show or hide the 3D preview")
+                .help("Show or hide the 3D preview (\(Shortcut.viewport.symbols))")
             }
             ToolbarItem(placement: .primaryAction) {
-                Toggle(isOn: $showsInspector) {
+                Toggle(isOn: Bindable(document).showsInspector) {
                     Label("Inspector", systemImage: "sidebar.right")
                 }
                 .toggleStyle(.button)
-                .help("Show or hide the inspector")
+                .help("Show or hide the inspector (\(Shortcut.inspector.symbols))")
             }
         }
         // A script's `margolaria.select()` (M6b): the element's graph, and
@@ -376,8 +333,8 @@ struct ContentView: View {
                 return
             }
             document.selectionRequest = nil
-            if viewMode == .text {
-                viewMode = .split
+            if document.viewMode == .text {
+                document.viewMode = .split
             }
             graphPath = path.split(separator: "/").dropLast().joined(separator: "/")
             focus = path
@@ -389,8 +346,8 @@ struct ContentView: View {
                   let element = document.elements.first(where: { $0.path == path }) else {
                 return
             }
-            if viewMode == .text {
-                viewMode = .split
+            if document.viewMode == .text {
+                document.viewMode = .split
             }
             if element.type == "material" {
                 // Materials also go to the preview.
@@ -428,11 +385,11 @@ struct ContentView: View {
         // something, or failed, or a startup script did (M6d): the Console
         // shows it. Also when that came before the window was open.
         .onChange(of: document.consoleRequests) {
-            showBottomTab(.console)
+            document.showPanel(.console)
         }
         .onAppear {
             if document.consoleRequests > 0 {
-                showBottomTab(.console)
+                document.showPanel(.console)
             }
         }
     }
@@ -443,7 +400,7 @@ struct ContentView: View {
     /// in a nodedef leaves the canvas where it is.
     private func follow(_ path: String) {
         let location = document.content.canvasLocation(of: path)
-        guard viewMode != .text, let node = location.nodePath, node != document.selectedPath,
+        guard document.viewMode != .text, let node = location.nodePath, node != document.selectedPath,
               let level = try? document.content.graph(at: location.graphPath) else {
             return
         }
@@ -460,8 +417,8 @@ struct ContentView: View {
     /// Shows an issue's element: opens its graph level and selects its node.
     private func show(_ issue: MXIssue) {
         let location = document.content.canvasLocation(of: issue.elementPath)
-        if viewMode == .text {
-            viewMode = .split
+        if document.viewMode == .text {
+            document.viewMode = .split
         }
         graphPath = location.graphPath
         focus = location.nodePath

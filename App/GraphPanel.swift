@@ -170,7 +170,7 @@ struct GraphPanel: View {
     @State private var pendingSelection: [String] = []
 
     /// Whether nodes show swatches (the bar's toggle), kept between launches.
-    @AppStorage("showsNodePreviews") private var showsPreviews: Bool = true
+    @AppStorage(AppDelegate.showsNodePreviewsKey) private var showsPreviews: Bool = true
 
     /// True after Arranging: the rebuilt level is framed, rather than
     /// keeping the camera, because its nodes have all moved.
@@ -371,18 +371,24 @@ struct GraphPanel: View {
         // by the level) holds the closure, so the closure must not hold the
         // level strongly.
         newLevel.controller.onOpenNode = { [weak newLevel] id in
+            guard let newLevel, let target = openTarget(of: id, in: newLevel) else {
+                return
+            }
+            levelPath = target
+        }
+        // Graph > Open Nodegraph (Return) only for nodes that open (M7g).
+        newLevel.controller.canOpenNode = { [weak newLevel] id in
+            guard let newLevel else {
+                return false
+            }
+            return openTarget(of: id, in: newLevel) != nil
+        }
+        // Graph > Arrange (L), as the bar's button (M7g).
+        newLevel.controller.onArrange = { [weak newLevel] in
             guard let newLevel else {
                 return
             }
-            let path: String = newLevel.graph.elementPaths[id]
-            if newLevel.graph.model.nodes[id].category == .nodeGraph {
-                levelPath = path
-            } else if let nodeDef = newLevel.source.nodes.first(where: { $0.path == path })?.nodeDefName,
-                      let implementation = document.content.implementation(of: nodeDef) {
-                // A node of a definition made here, or included, opens its
-                // implementation.
-                levelPath = implementation
-            }
+            arrange(newLevel)
         }
         // Only inside a nodegraph: none enables Graph > Go Up One Level
         // (M4f).
@@ -572,6 +578,20 @@ struct GraphPanel: View {
             }
             requestSwatches(for: level)
         }
+    }
+
+    /// The level a double-click on node `id` opens: a nodegraph's own, or
+    /// the implementation of a definition made here or included; nil for
+    /// nodes that don't open.
+    private func openTarget(of id: Int, in level: GraphLevel) -> String? {
+        let path: String = level.graph.elementPaths[id]
+        if level.graph.model.nodes[id].category == .nodeGraph {
+            return path
+        }
+        guard let nodeDef = level.source.nodes.first(where: { $0.path == path })?.nodeDefName else {
+            return nil
+        }
+        return document.content.implementation(of: nodeDef)
     }
 
     /// Lays the whole level out again (GraphAutoLayout) and saves every
@@ -953,7 +973,7 @@ private struct BreadcrumbBar: View {
                 crumb(definitions[target] ?? parts[i], target: target)
             }
             Spacer()
-            Text("Tab adds a node · ⌘G groups in a backdrop · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S, solos a node · Double-click a nodegraph, or a node of a definition, to open it · U goes up · A frames all · F frames the selection · Pan: middle-drag or Space-drag · Wheel zooms")
+            Text("Tab adds a node · ⌘G groups in a backdrop · Drag between pins to connect · ⌥-drag cuts wires (in a nodegraph, ⌥-drag an input left to promote it) · ⌥-click a swatch, or S or P, solos a node · Double-click a nodegraph, or a node of a definition, or press Return, to open it · U goes up · A frames all · F frames the selection · L arranges · Pan: middle-drag or Space-drag · Wheel zooms")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .lineLimit(1)
@@ -964,7 +984,8 @@ private struct BreadcrumbBar: View {
             }
             .buttonStyle(.borderless)
             .disabled(onArrange == nil)
-            .help("Arrange: lay out this level's nodes again, in columns, and save their positions")
+            .help("Arrange: lay out this level's nodes again, in columns, and save their positions "
+                  + "(\(Shortcut.arrange.symbols) on the canvas)")
             // SWIFT: A `Toggle` styled as a button shows as a small button
             // that stays pressed while on, like a toolbar toggle.
             Toggle(isOn: $showsPreviews) {
@@ -973,7 +994,8 @@ private struct BreadcrumbBar: View {
             .toggleStyle(.button)
             .buttonStyle(.borderless)
             .disabled(!canPreview)
-            .help(canPreview ? "Show a preview swatch on each node" : "Swatches need a Metal GPU and MaterialX's libraries")
+            .help(canPreview ? "Show a preview swatch on each node (Graph › Show Node Previews)"
+                  : "Swatches need a Metal GPU and MaterialX's libraries")
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
