@@ -16,9 +16,9 @@
 // notarized release (docs/PLAN.md §7.1).
 PRODUCT_BUNDLE_IDENTIFIER = eu.emerald-isle.margolaria
 
-// User-visible version ("0.1.0") and build number. CFBundleShortVersionString
+// User-visible version ("1.0") and build number. CFBundleShortVersionString
 // and CFBundleVersion in the generated Info.plist read these.
-MARKETING_VERSION = 0.1.0
+MARKETING_VERSION = 1.0
 CURRENT_PROJECT_VERSION = 1
 
 // --- Platform and language ------------------------------------------------

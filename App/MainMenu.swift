@@ -86,7 +86,7 @@ enum MainMenu {
         // becomes the selector `hide:`.
         let servicesMenu = NSMenu(title: "Services")
         let appMenu: NSMenu = menu(appName,
-                                   Item("About \(appName)", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+                                   Item("About \(appName)", #selector(AppDelegate.showAbout(_:))),
                                    .separator,
                                    Item("Settings…", #selector(AppDelegate.showSettings(_:)), .settings),
                                    .separator)
@@ -244,7 +244,8 @@ enum MainMenu {
         bar.addItem(submenu: windowMenu)
 
         // Help. Registering it adds the system's search field to it.
-        let helpMenu = NSMenu(title: "Help")
+        let helpMenu: NSMenu = menu("Help",
+                                    Item("Acknowledgements", #selector(AppDelegate.showAcknowledgements(_:))))
         NSApp.helpMenu = helpMenu
         bar.addItem(submenu: helpMenu)
 

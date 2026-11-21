@@ -42,6 +42,14 @@ targets:
     platform: macOS
     sources:
       - path: App
+        excludes:
+          - Licenses
+      # The third-party licence texts (scripts/fetch-licenses.sh), copied
+      # into the app's resources as one Licenses folder, not loose files:
+      # Help > Acknowledgements lists what is in it.
+      - path: App/Licenses
+        type: folder
+        buildPhase: resources
     # All build settings for this target, including signing (Config/Base.xcconfig).
     configFiles:
       Debug: Config/Margolaria.xcconfig

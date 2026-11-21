@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<!--
+  Credits.html: the third-party software inside Margolaria.app, shown in the
+  About panel (AppDelegate.showAbout, MargolariaApp.swift). Keep it to what
+  the app ships: build tools (OSL's oslc, swift-syntax) aren't in it.
+
+  The panel draws this as attributed text, not as a web page: only simple
+  HTML and inline CSS come through. Text colours are left out, as the app
+  sets them to suit light or dark mode.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: -apple-system; font-size: 11px; text-align: center; }
+  h3 { font-size: 11px; font-weight: bold; margin: 10px 0 2px 0; }
+  p { margin: 0 0 6px 0; }
+  .small { font-size: 10px; }
+</style>
+</head>
+<body>
+
+<p>Margolaria is built on open-source software and would not have been possible without the people who work on the following projects:</p>
+
+<h3>OpenUSD 26.08</h3>
+<p>Pixar. Tomorrow Open Source Technology License 1.0.<br>
+<a href="https://openusd.org">openusd.org</a></p>
+
+<h3>SwiftUsd 8.1.0</h3>
+<p>Apple Inc. and the SwiftUsd project authors. Apache License 2.0.<br>
+<a href="https://github.com/apple/SwiftUsd">github.com/apple/SwiftUsd</a></p>
+
+<h3>MaterialX 1.39.5</h3>
+<p>Contributors to the MaterialX Project. Apache License 2.0.<br>
+<a href="https://materialx.org">materialx.org</a></p>
+
+<h3>OpenColorIO 2.5.2</h3>
+<p>Contributors to the OpenColorIO Project. BSD 3-Clause License.<br>
+<a href="https://opencolorio.org">opencolorio.org</a></p>
+<p class="small">With expat 2.7.2 (MIT), yaml-cpp 0.8.0 (MIT), pystring 1.1.4 (BSD), minizip-ng 4.0.10 (zlib) and zlib 1.3.1 (zlib).</p>
+
+<h3>Python 3.13</h3>
+<p>Python Software Foundation. PSF License Agreement.<br>
+<a href="https://www.python.org">python.org</a></p>
+<p class="small">Packaged by BeeWare's Python-Apple-support (BSD), with OpenSSL 3 (Apache 2.0), SQLite (public domain), XZ Utils (BSD Zero Clause), mpdecimal 4.0.1 (BSD) and ncurses (MIT). MaterialX's Python bindings use pybind11 (BSD).</p>
+
+<h3>Libraries that come with OpenUSD</h3>
+<p class="small">
+Imath 3.1 and OpenEXR 3.1 (BSD 3-Clause), Contributors to the OpenEXR Project.<br>
+OpenSubdiv 3.6.1 (Modified Apache 2.0 License), Pixar.<br>
+Threading Building Blocks 2020.3 (Apache 2.0), Intel Corporation.<br>
+OpenVDB 10.1 (Mozilla Public License 2.0), Contributors to the OpenVDB Project; source at <a href="https://github.com/AcademySoftwareFoundation/openvdb">github.com/AcademySoftwareFoundation/openvdb</a>.<br>
+Alembic (BSD 3-Clause), Lucasfilm and Sony Pictures Imageworks.<br>
+Embree 4.3.3 (Apache 2.0), Intel Corporation.<br>
+Blosc 1.21.6 (BSD 3-Clause), The Blosc Development Team.<br>
+Boost (Boost Software License 1.0).<br>
+And the third-party code inside OpenUSD itself, among it RapidJSON, LZ4, PEGTL, pugixml, stb, Draco and libavif, under the licences OpenUSD lists for it.
+</p>
+
+<h3>App icon</h3>
+<p>The paintbrush in Margolaria's icon is "Paint Brush" by Christoffer Skogsmo, from The Noun Project. CC0 1.0 Universal.<br>
+<a href="https://commons.wikimedia.org/wiki/File:Paint_Brush_-_The_Noun_Project.svg">commons.wikimedia.org</a></p>
+
+<p>The full licence texts are in Help › Acknowledgements.</p>
+
+<p class="small">OpenUSD, MaterialX, OpenColorIO, OpenEXR and OpenVDB are projects of the Academy Software Foundation.</p>
+
+</body>
+</html>

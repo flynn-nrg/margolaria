@@ -13,7 +13,9 @@
 // is in docs/PLAN.md §3.
 //
 // The app delegate also runs the user's startup scripts at launch (M6d),
-// and handles the Scripts menu's own items, and Settings… (M7f).
+// and handles the Scripts menu's own items, Settings… (M7f) and About
+// Margolaria, whose credits list the third-party software (Credits.html),
+// and Help > Acknowledgements, their licences.
 //
 // The same executable is the `margolaria` command line (M6e): started with
 // a subcommand (`margolaria run ...`, `margolaria export ...`), it runs it
@@ -23,7 +25,7 @@
 // Introduces (SWIFT): `@main` on a type with `static func main()`,
 // `@MainActor` on a function, `withExtendedLifetime`, `NSObject` subclasses
 // conforming to Objective-C protocols, selector-based notification observers;
-// `exit` (M6e).
+// `exit` (M6e); `NSAttributedString` read from HTML (the About panel).
 
 import AppKit
 import ScriptKit
@@ -154,6 +156,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let defaults = UserDefaults.standard
         let shows: Bool = defaults.object(forKey: Self.showsNodePreviewsKey) as? Bool ?? true
         defaults.set(!shows, forKey: Self.showsNodePreviewsKey)
+    }
+
+    // MARK: About
+
+    /// Margolaria > About Margolaria: the standard About panel (name, icon,
+    /// version, copyright, all from the Info.plist), with the third-party
+    /// software the app ships as its credits (Credits.html).
+    ///
+    /// The panel would find Credits.html in the app's resources by itself,
+    /// but would draw it in the black the HTML import gives text, which is
+    /// unreadable in dark mode. So it's read here and its text recoloured
+    /// with `labelColor`, which follows the appearance.
+    @objc func showAbout(_ sender: Any?) {
+        // The icon as macOS has it now. The app's own `applicationIconImage`
+        // is read at launch, and just after a build macOS may not yet have
+        // made the icon from App/Margolaria.icon: it then holds the generic
+        // placeholder, and the panel would show that.
+        // It comes 32 points wide; the panel draws it at that size, and its
+        // usual icon is 64. The image holds every size, so this only says
+        // which to draw.
+        let icon: NSImage = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        icon.size = NSSize(width: 64, height: 64)
+        var options: [NSApplication.AboutPanelOptionKey: Any] = [.applicationIcon: icon]
+        if let credits = Self.credits() {
+            options[.credits] = credits
+        }
+        NSApp.orderFrontStandardAboutPanel(options: options)
+    }
+
+    /// Credits.html as text for the About panel, or nil if it's missing.
+    private static func credits() -> NSAttributedString? {
+        // SWIFT: `try?` turns a thrown error into nil, so a broken file
+        // only leaves the credits out.
+        guard let url = Bundle.main.url(forResource: "Credits", withExtension: "html"),
+              let html = try? NSMutableAttributedString(url: url, options: [.documentType: NSAttributedString.DocumentType.html],
+                                                        documentAttributes: nil) else {
+            return nil
+        }
+        // SWIFT: Foundation ranges are `NSRange` (location and length in
+        // UTF-16 units, as Objective-C counts), not Swift ranges; `length`
+        // is in the same units, so this range is the whole text.
+        let whole = NSRange(location: 0, length: html.length)
+        html.addAttribute(.foregroundColor, value: NSColor.labelColor, range: whole)
+        return html
+    }
+
+    /// Help > Acknowledgements: the third-party licence texts
+    /// (AcknowledgementsWindow.swift).
+    @objc func showAcknowledgements(_ sender: Any?) {
+        AcknowledgementsWindowController.show()
     }
 
     // MARK: Settings (M7f)

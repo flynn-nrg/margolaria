@@ -35,7 +35,7 @@
 	<key>LSApplicationCategoryType</key>
 	<string>public.app-category.graphics-design</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>Copyright © 2026 Miguel Mendez. MIT License.</string>
+	<string>Copyright © 2026 Miguel Méndez Pagola. MIT License.</string>
 
 	<!--
 	  Document types this app can open. "Editor" means we can open and save

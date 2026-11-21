@@ -22,3 +22,9 @@ LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/../Frameworks
 
 // Combine @1x and @2x images into one multi-resolution file.
 COMBINE_HIDPI_IMAGES = YES
+
+// The app's icon: App/Margolaria.icon, made with Icon Composer. Xcode
+// compiles it into Assets.car (with the older .icns for earlier macOS) and
+// adds CFBundleIconName to the Info.plist; the name is the bundle's, without
+// ".icon".
+ASSETCATALOG_COMPILER_APPICON_NAME = Margolaria
