@@ -199,6 +199,7 @@ Goal: from M0 on, every runnable build is signed with the author's Apple Develop
 3. `xcrun notarytool submit --wait --keychain-profile <profile>`. The credentials are stored once with `notarytool store-credentials`, so they never appear in the repo or the script.
 4. `xcrun stapler staple` on the `.app` (or the `.dmg`).
 5. Checks: `codesign --verify --deep --strict --verbose=2`, then `spctl --assess --type execute -vv`.
+6. *Since 1.0:* a `.dmg` of the stapled app beside a link to /Applications (`hdiutil create -format UDZO`), signed with the app's Developer ID, notarized and stapled itself, and checked with `spctl --assess --type open --context context:primary-signature`. The `.zip` is still made.
 
 ## 8. Roadmap
 
