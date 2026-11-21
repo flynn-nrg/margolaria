@@ -76,6 +76,7 @@ The single keys follow MaterialX's Graph Editor where it has one: Tab, F, U, and
 | Window › Minimize | ⌘M | Anywhere |
 | Window › Zoom | — | |
 | Window › Bring All to Front | — | |
+| Help › Acknowledgements | — | |
 | XML tab › Apply | ⌘↩ | XML tab |
 | XML tab › Revert | ⎋ | XML tab |
 

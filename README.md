@@ -1,7 +1,39 @@
-# margolaria
+# Margolaria
 
-A MaterialX authoring tool
-See [docs/PLAN.md](docs/PLAN.md) for the project plan and [the interface mockup](docs/mockup/margolaria-mockup.png).
+Margolaria is a [MaterialX](https://materialx.org/index.html) authoring tool for macOS, built with technical artists in mind. It is also an experiment in AI-driven software development and an excuse to learn [Swift](https://www.swift.org).
+
+The application runs on Apple silicon only due to SwiftUsd's macOS frameworks having no Intel code.
+
+## Features
+
+* Full MaterialX authoring workflow.
+* Keyboard shortcuts for all common operations.
+* Material visualisation using [Storm](https://openusd.org/release/api/_page__material_x__in__hydra__u_s_d.html#MaterialX_In_Storm).
+* Material definition validation.
+* Can export USD as well as different shader formats: Metal, GLSL, and OSL.
+* User defined materials and material libraries.
+* Embedded python scripting.
+
+## Interface
+
+* The left pane contains the Document and Library elements. 
+* The canvas allows the usesr to interact with the material node graph.
+* The viewport shows a Storm rendering of the material with different options for lighting, geometry, and tone mapping.
+* The bottom left pane contains the XML editor, the issues report, the generated shader code, and the interactive Python console.
+* The bottom right pane shows the node parameters, if a node is selected.
+
+![Margolaria interface (dark)](./images/margolaria_dark.png)
+![Margolaria interface (light)](./images/margolaria_light.png)
+
+## Development process
+
+Margolaria was born out of my curiosity and willingness to learn more about Swift and MaterialX. The work that lead to 1.0 was spread over the course of 2 months, mainly when I had free time.
+
+After defining the scope for the first version I created a plan with Claude and broke into milestones, each of which was implemented in small steps. The reason for this is that I manually reviewed every line of code that Claude generated to learn more about how Swift applications are made and also to ensure that I had, at all times, a full understanding of the internals. 
+
+Every PR was reviewed as I would do for any production code and only merged when I had a good understanding of the code and the tests and UX checks were green.
+
+The code is overcommented on purpose so that any person who is not familiar with the language or the macOS frameworks and libraries used can gain an understanding of why and how those specific options where chosen.
 
 ## Building
 
@@ -28,27 +60,6 @@ xcodebuild -scheme Margolaria -skipMacroValidation -derivedDataPath build/Derive
 xcodebuild -scheme Margolaria -skipMacroValidation -derivedDataPath build/DerivedData test
 ```
 
-### Build times
-
-All our code that uses OpenUSD and MaterialX is in one Swift package, `Packages/MargolariaKit`. Each package and each build folder compiles its dependencies separately, so:
-
-- **Add new modules as targets in MargolariaKit**, not as new packages.
-- **Prefer `xcodebuild test -scheme Margolaria`** with the same `-derivedDataPath` as your app builds: the tests then reuse the app's build. `swift test` in `Packages/MargolariaKit` works too, but keeps its own build in `Packages/MargolariaKit/.build`.
-- SwiftUsd comes from `Vendor/SwiftUsd`, patched (`Vendor/swiftusd-openusdcxx-product.patch`) to add a product without SwiftUsd's Swift overlay. We don't use the overlay, and compiling it took about 12 of the 13 minutes of a clean build. To upgrade SwiftUsd, change `SWIFTUSD_TAG` in `scripts/fetch-swiftusd.sh` and run it again.
-- OpenColorIO isn't in SwiftUsd, so `scripts/build-ocio.sh` builds it from source, with its own dependencies linked in statically. To upgrade it, change `OCIO_TAG` in the script and run it again.
-- Nor are MaterialX's OSL generators: `scripts/build-materialx-genosl.sh` compiles them from MaterialX's sources (the same release as SwiftUsd's, `MATERIALX_TAG`) against SwiftUsd's MaterialX, and compiles MaterialX's library to `.oso` files for OSL networks with the `oslc` that `scripts/build-osl.sh` builds. OSL's tools are for development and tests only; they link Homebrew's libraries and aren't part of the app.
-- Python (M6) is BeeWare's Python-Apple-support build of python.org's Python 3.13, fetched by `scripts/fetch-python.sh` (pinned by build and checksum, thinned to arm64). MaterialX's Python bindings are compiled by `scripts/build-pymaterialx.sh` from MaterialX's sources against SwiftUsd's MaterialX, as the OSL generators are. The app's last build phase, `scripts/embed-python.sh`, copies the bindings in and signs every compiled Python module with the app's identity, which Xcode doesn't do by itself. Writing scripts: `docs/SCRIPTING.md`.
-- **Your editor's indexer builds too.** SourceKit-LSP, the language server behind Swift support in editors other than Xcode, keeps its own full build in `Packages/MargolariaKit/.build/index-build`. While it runs, a clean build can take several times longer (6 minutes instead of 1.5 here).
-
-Measured on 2026-10-18:
-
-| Clean build | Before | Now |
-|---|---|---|
-| `swift build` + tests, in `Packages/MargolariaKit` | 13 min per package (MXKit, ViewportKit) | 73 s (with the indexer running alongside) |
-| `xcodebuild build-for-testing -scheme Margolaria` (app + test bundles) | — | 96 s (indexer idle) |
-
 ### Releases
 
-`scripts/release.sh` archives Margolaria, exports it signed with Developer ID, has Apple notarize it, staples the ticket and checks it with Gatekeeper. The result is `build/release/Margolaria-<version>.zip`. It needs a Developer ID certificate in your keychain and, once, a notarization profile; the comments at the top of the script explain both. `scripts/release.sh --no-notarize` stops after signing. Details and gotchas: [docs/spikes/M0e-signing-notarization.md](docs/spikes/M0e-signing-notarization.md).
-
-The app runs on Apple silicon only: SwiftUsd's macOS frameworks have no Intel code.
+`scripts/release.sh` archives Margolaria, exports it signed with Developer ID, has Apple notarize it, staples the ticket and checks it with Gatekeeper. The result is `build/release/Margolaria-<version>.zip`. It needs a Developer ID certificate in your keychain and, once, a notarization profile. `scripts/release.sh --no-notarize` stops after signing.
