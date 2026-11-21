@@ -1,7 +1,7 @@
 #!/bin/sh
 #
-# release.sh: builds a signed, notarized and stapled Margolaria.app
-# (docs/PLAN.md §7.2).
+# release.sh: builds a signed, notarized and stapled Margolaria.app, and
+# packs it as a .zip and as a .dmg (docs/PLAN.md §7.2).
 #
 # Steps:
 #   1. xcodebuild archive, Release configuration (Developer ID, Hardened Runtime).
@@ -11,6 +11,10 @@
 #   4. Staple the notarization ticket to the app, so Gatekeeper can check it
 #      offline, and zip the stapled app for distribution.
 #   5. Verify: codesign --verify --deep --strict, then spctl --assess.
+#   6. Make a disk image of the stapled app beside a link to /Applications
+#      (opened, it shows the two, to drag one onto the other); sign it,
+#      notarize it and staple its own ticket, as for the app, and ask
+#      Gatekeeper about it.
 #
 # One-time setup (stores the credentials in your login keychain; the script
 # and repository never see them). Use an app-specific password from
@@ -28,7 +32,8 @@
 #
 # Output, in build/release/:
 #   Margolaria.xcarchive, Margolaria.app (stapled), Margolaria-<version>.zip,
-#   notary-log.json (Apple's report on the submission).
+#   Margolaria-<version>.dmg (stapled), notary-log.json and
+#   notary-log-dmg.json (Apple's reports on the two submissions).
 
 set -eu
 
@@ -118,28 +123,35 @@ if [ "$NOTARIZE" = no ]; then
     exit 0
 fi
 
-echo "==> Notarizing (usually a few minutes)"
+# Sends a file to Apple's notary service and waits for the verdict; stops
+# the script unless it is accepted. Usage: notarize FILE LOG; LOG is where
+# Apple's report on the submission goes, in build/release.
+notarize() {
+    # `|| true`: a rejected submission must not stop the script before the
+    # log (which says why) is downloaded below.
+    xcrun notarytool submit "$1" --keychain-profile "$PROFILE" \
+        --wait --output-format plist > "$OUT/notary-submit.plist" || true
+    SUBMISSION=$(/usr/libexec/PlistBuddy -c "Print :id" "$OUT/notary-submit.plist" 2>/dev/null || true)
+    STATUS=$(/usr/libexec/PlistBuddy -c "Print :status" "$OUT/notary-submit.plist" 2>/dev/null || true)
+    if [ -z "$SUBMISSION" ]; then
+        echo "error: the submission failed; see build/release/notary-submit.plist." >&2
+        echo "       Is the keychain profile '$PROFILE' set up? (see the top of this script)" >&2
+        exit 1
+    fi
+    xcrun notarytool log "$SUBMISSION" --keychain-profile "$PROFILE" "$OUT/$2" > /dev/null
+    echo "    submission $SUBMISSION: $STATUS (details in build/release/$2)"
+    if [ "$STATUS" != "Accepted" ]; then
+        exit 1
+    fi
+}
+
+echo "==> Notarizing the app (usually a few minutes)"
 # notarytool takes a zip, dmg or pkg. `ditto -c -k --keepParent` makes a zip
 # that keeps the symlinks and extended attributes inside the frameworks;
 # plain `zip` would break the signatures.
 ditto -c -k --keepParent "$APP" "$OUT/upload.zip"
-# `|| true`: a rejected submission must not stop the script before the log
-# (which says why) is downloaded below.
-xcrun notarytool submit "$OUT/upload.zip" --keychain-profile "$PROFILE" \
-    --wait --output-format plist > "$OUT/notary-submit.plist" || true
+notarize "$OUT/upload.zip" notary-log.json
 rm "$OUT/upload.zip"
-SUBMISSION=$(/usr/libexec/PlistBuddy -c "Print :id" "$OUT/notary-submit.plist" 2>/dev/null || true)
-STATUS=$(/usr/libexec/PlistBuddy -c "Print :status" "$OUT/notary-submit.plist" 2>/dev/null || true)
-if [ -z "$SUBMISSION" ]; then
-    echo "error: the submission failed; see build/release/notary-submit.plist." >&2
-    echo "       Is the keychain profile '$PROFILE' set up? (see the top of this script)" >&2
-    exit 1
-fi
-xcrun notarytool log "$SUBMISSION" --keychain-profile "$PROFILE" "$OUT/notary-log.json" > /dev/null
-echo "    submission $SUBMISSION: $STATUS (details in build/release/notary-log.json)"
-if [ "$STATUS" != "Accepted" ]; then
-    exit 1
-fi
 
 echo "==> Stapling"
 xcrun stapler staple -q "$APP"
@@ -149,4 +161,30 @@ ditto -c -k --keepParent "$APP" "$OUT/Margolaria-$VERSION.zip"
 echo "==> Asking Gatekeeper"
 spctl --assess --type execute -vv "$APP"
 
-echo "==> Done: $OUT/Margolaria-$VERSION.zip"
+echo "==> Making the disk image"
+# What the image holds: the stapled app (copied with ditto, which keeps the
+# frameworks' symlinks and so the signature) and a link to /Applications.
+# UDZO: compressed and read-only, which every macOS version opens.
+DMG="$OUT/Margolaria-$VERSION.dmg"
+mkdir "$OUT/dmg"
+ditto "$APP" "$OUT/dmg/Margolaria.app"
+ln -s /Applications "$OUT/dmg/Applications"
+hdiutil create -quiet -volname Margolaria -srcfolder "$OUT/dmg" -format UDZO "$DMG"
+rm -rf "$OUT/dmg"
+# Signed with the certificate that signed the app: its full name, as
+# codesign shows it ("Developer ID Application: Name (TEAM)"), so a keychain
+# holding certificates of other teams can't make the choice ambiguous.
+IDENTITY=$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=\(Developer ID Application: .*\)$/\1/p')
+codesign --sign "$IDENTITY" --timestamp "$DMG"
+
+echo "==> Notarizing the disk image"
+notarize "$DMG" notary-log-dmg.json
+xcrun stapler staple -q "$DMG"
+xcrun stapler validate -q "$DMG"
+
+echo "==> Asking Gatekeeper about the disk image"
+# --type open with the primary-signature context: how Gatekeeper judges a
+# downloaded disk image when it is opened.
+spctl --assess --type open --context context:primary-signature -vv "$DMG"
+
+echo "==> Done: $OUT/Margolaria-$VERSION.zip and $DMG"

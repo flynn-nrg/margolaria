@@ -31,7 +31,7 @@ Margolaria was born out of my curiosity and willingness to learn more about Swif
 
 After defining the scope for the first version I created a plan with Claude and broke into milestones, each of which was implemented in small steps. The reason for this is that I manually reviewed every line of code that Claude generated to learn more about how Swift applications are made and also to ensure that I had, at all times, a full understanding of the internals. 
 
-Every PR was reviewed as I would do for any production code and only merged when I had a good understanding of the code and the tests and UX checks were green.
+Every PR was reviewed as I would do for any production code and only merged when I had a no questions about the implementation and the tests and UX checks were green.
 
 The code is overcommented on purpose so that any person who is not familiar with the language or the macOS frameworks and libraries used can gain an understanding of why and how those specific options where chosen.
 
@@ -62,4 +62,4 @@ xcodebuild -scheme Margolaria -skipMacroValidation -derivedDataPath build/Derive
 
 ### Releases
 
-`scripts/release.sh` archives Margolaria, exports it signed with Developer ID, has Apple notarize it, staples the ticket and checks it with Gatekeeper. The result is `build/release/Margolaria-<version>.zip`. It needs a Developer ID certificate in your keychain and, once, a notarization profile. `scripts/release.sh --no-notarize` stops after signing.
+`scripts/release.sh` archives Margolaria, exports it signed with Developer ID, has Apple notarize it, staples the ticket and checks it with Gatekeeper. The release script creates two artefacts: `build/release/Margolaria-<version>.zip` and `build/release/Margolaria-<version>.dmg`. It needs a Developer ID certificate in your keychain and, once, a notarization profile. `scripts/release.sh --no-notarize` stops after signing.
